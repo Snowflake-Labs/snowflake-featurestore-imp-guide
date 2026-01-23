@@ -1,0 +1,283 @@
+---
+title: "Feature Views"
+subtitle: "Dynamic Tables vs Views, versioning, and lifecycle management"
+---
+
+## Overview
+
+A FeatureView is a collection of related features computed from source data. It defines how features are transformed, stored, and served. This chapter covers FeatureView types, versioning strategies, and lifecycle management.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Choose between Dynamic Table and View-based FeatureViews
+- Implement versioning strategies for safe updates
+- Manage FeatureView lifecycle (create, update, deprecate)
+- Configure refresh strategies for optimal freshness vs. cost
+
+---
+
+## FeatureView Types
+
+Snowflake Feature Store supports two FeatureView types based on the underlying storage:
+
+| Type | Created When | Storage | Compute Model |
+|------|--------------|---------|---------------|
+| **Dynamic Table** | `refresh_freq` is specified | Materialized | Pre-computed, auto-refresh |
+| **View** | `refresh_freq` is omitted | Virtual | Computed on query |
+
+### Dynamic Table FeatureView
+
+> 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py)
+
+```python
+from snowflake.ml.feature_store import FeatureView, Entity
+
+# Dynamic Table-backed FeatureView (refresh_freq specified)
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",  # Creates Dynamic Table
+    desc="User purchase behavior - auto-refreshed hourly"
+)
+```
+
+**Characteristics**:
+
+- Features are pre-computed and stored
+- Automatic incremental refresh (when possible)
+- Fast query performance
+- Continuous compute costs
+
+### View-Based FeatureView
+
+```python
+# View-based FeatureView (no refresh_freq)
+product_attributes_fv = FeatureView(
+    name="PRODUCT_ATTRIBUTES",
+    entities=[product_entity],
+    feature_df=product_df,
+    timestamp_col="UPDATED_TS",
+    # No refresh_freq → View-based
+    desc="Product attributes - computed on query"
+)
+```
+
+**Characteristics**:
+
+- Computed on each query
+- Always fresh (no lag)
+- No storage costs
+- Query-time compute costs
+
+### Choosing Between Types
+
+| Factor | Dynamic Table | View |
+|--------|---------------|------|
+| **Query Frequency** | High | Low |
+| **Source Update Rate** | Frequent | Rare |
+| **Latency Requirements** | Strict | Flexible |
+| **Cost Priority** | Optimize query cost | Optimize storage cost |
+| **External Orchestration** | No | Yes (DBT, Airflow) |
+
+---
+
+## Versioning Strategies {#sec-versioning}
+
+FeatureView versions enable safe updates and rollbacks.
+
+::: {.callout-important}
+## Key Insight
+Versioning happens at the **FeatureView level**, not per individual feature. A FV version is an immutable bundle of features.
+:::
+
+### Recommended Version Naming
+
+> 📁 **Full code:** [`_code/versioning.py`](_code/versioning.py)
+
+```python
+# Zero-padded sequential versions (recommended)
+fs.register_feature_view(fv, version="V01")
+fs.register_feature_view(fv, version="V02")
+fs.register_feature_view(fv, version="V10")  # Sorts correctly
+
+# Environment-prefixed versions
+fs.register_feature_view(fv, version="DEV_V01")
+fs.register_feature_view(fv, version="PROD_V03")
+
+# Semantic versioning
+fs.register_feature_view(fv, version="1.0.0")
+fs.register_feature_view(fv, version="1.1.0")
+```
+
+### Version Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    FEATUREVIEW VERSION LIFECYCLE                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  V01 (Initial)     V02 (Update)      V03 (Current)                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
+│  │ TOTAL_SPEND  │  │ TOTAL_SPEND  │  │ TOTAL_SPEND  │                   │
+│  │ ORDER_CNT    │  │ ORDER_CNT    │  │ ORDER_CNT    │                   │
+│  │              │  │ AVG_ORDER    │  │ AVG_ORDER    │                   │
+│  │              │  │              │  │ SPEND_7D     │                   │
+│  └──────────────┘  └──────────────┘  └──────────────┘                   │
+│                                                                         │
+│  Status: DEPRECATED    Status: ACTIVE      Status: ACTIVE               │
+│  Models: legacy_v1     Models: prod_v2     Models: new_models           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Managing Versions
+
+```python
+# List all versions
+versions = fs.list_feature_views(feature_view_name="USER_PURCHASE_FEATURES")
+
+# Get specific version
+v2_fv = fs.get_feature_view(name="USER_PURCHASE_FEATURES", version="V02")
+
+# Delete old version (if no longer needed)
+fs.delete_feature_view(name="USER_PURCHASE_FEATURES", version="V01")
+```
+
+---
+
+## Refresh Configuration {#sec-refresh}
+
+### Refresh Frequency Options
+
+| Frequency | Use Case | Cost Impact |
+|-----------|----------|-------------|
+| `1 minute` | Real-time fraud detection | Very High |
+| `15 minutes` | Operational dashboards | High |
+| `1 hour` | Standard ML features | Medium |
+| `1 day` | Batch analytics | Low |
+
+### Best Practices for Refresh
+
+```python
+# Match refresh to source update frequency
+# Source updates every 4 hours → refresh every 4 hours
+fv = FeatureView(
+    refresh_freq="4 hours",
+    # ...
+)
+
+# For Online Feature Tables, consider sync frequency
+# OFT refresh should be <= FeatureView refresh
+```
+
+---
+
+## FeatureView Ownership & SLAs
+
+Define clear ownership for production FeatureViews:
+
+```yaml
+# feature_manifest.yaml
+feature_views:
+  - name: USER_PURCHASE_FEATURES
+    version: V03
+    owner: ml-platform@company.com
+    team: ML Platform
+    sla:
+      refresh_frequency: "1 hour"
+      max_latency_minutes: 90
+      availability: "99.9%"
+    consumers:
+      - churn-model-v2
+      - ltv-model-v1
+```
+
+---
+
+## Best Practices
+
+### 1. Use Consistent Naming
+
+```python
+# Pattern: <ENTITY>_<DOMAIN>_FV
+"USER_PURCHASE_FV"
+"PRODUCT_INVENTORY_FV"
+"SESSION_ENGAGEMENT_FV"
+```
+
+### 2. Document Feature Definitions
+
+```python
+fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    desc="""
+    User purchase behavior features for propensity models.
+    
+    Features:
+    - TOTAL_SPEND: Sum of all order amounts
+    - ORDER_CNT: Count of distinct orders
+    - AVG_ORDER_AMT: Average order value
+    
+    SLA: Refreshed hourly, max 90 min lag
+    Owner: ml-platform@company.com
+    """,
+    # ...
+)
+```
+
+### 3. Version on Schema Changes
+
+```python
+# V01: Original features
+# V02: Added new feature
+# V03: Changed calculation logic (breaking change)
+
+# Always increment version for:
+# - Adding new features
+# - Removing features
+# - Changing feature calculations
+# - Changing entity keys
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: No Versioning
+
+**Problem**: Modifying FeatureView in place breaks dependent models.
+
+**Solution**: Always create new versions for changes.
+
+### ❌ Pitfall 2: Over-Refreshing
+
+**Problem**: Refreshing faster than source updates.
+
+**Solution**: Match refresh to source update frequency.
+
+### ❌ Pitfall 3: No Documentation
+
+**Problem**: Team doesn't understand feature definitions.
+
+**Solution**: Use `desc` parameter and maintain feature catalog.
+
+---
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| **Dynamic Table FV** | Pre-computed, auto-refreshed features |
+| **View FV** | Query-time computed features |
+| **Version** | Immutable snapshot of feature definitions |
+| **refresh_freq** | How often to recompute features |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 05: Feature Pipelines](../05_feature_pipelines/index.qmd) to learn about pipeline architectures and orchestration patterns.

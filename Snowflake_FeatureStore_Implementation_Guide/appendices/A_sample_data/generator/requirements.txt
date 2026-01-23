@@ -1,0 +1,11 @@
+# Clickstream Data Generator Dependencies
+
+# Core data generation
+faker>=18.0.0
+pandas>=2.0.0
+
+# Snowflake connectivity (optional - for direct load)
+snowflake-snowpark-python>=1.10.0
+
+# Progress and utilities
+tqdm>=4.65.0  # Optional: for enhanced progress bars

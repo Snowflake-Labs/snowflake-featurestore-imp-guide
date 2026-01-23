@@ -1,0 +1,240 @@
+---
+title: "Online Features"
+subtitle: "Online Feature Tables for real-time serving"
+---
+
+## Overview
+
+Online Feature Tables (OFTs) enable low-latency feature serving for real-time ML inference. They sync the latest feature values from FeatureViews to Hybrid Tables optimized for point lookups.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Create and configure Online Feature Tables
+- Serve features for real-time inference
+- Optimize OFT performance and costs
+- Integrate with external inference services
+
+---
+
+## What is an Online Feature Table?
+
+An Online Feature Table is a **Hybrid Table** that stores the **current (latest) values** for each entity, optimized for low-latency retrieval.
+
+::: {.callout-important}
+## Key Concept
+OFTs store only the **latest feature values** - they do not retain historical values. For point-in-time historical retrieval, use standard FeatureViews.
+:::
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    ONLINE FEATURE TABLE ARCHITECTURE                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  FeatureView (Dynamic Table)          Online Feature Table              │
+│  ┌─────────────────────────┐          ┌─────────────────────────┐       │
+│  │ Historical Data         │          │ Current Values Only     │       │
+│  │ ───────────────────     │   SYNC   │ ────────────────────    │       │
+│  │ USER_ID │ TS      │ ... │ ───────▶ │ USER_ID │ LATEST_VALUE  │       │
+│  │ u001    │ Jan 10  │ 100 │          │ u001    │ 300           │       │
+│  │ u001    │ Jan 15  │ 200 │          │ u002    │ 150           │       │
+│  │ u001    │ Jan 20  │ 300 │          │ ...     │ ...           │       │
+│  │ u002    │ Jan 12  │ 50  │          └─────────────────────────┘       │
+│  │ u002    │ Jan 18  │ 150 │                                            │
+│  └─────────────────────────┘          Low-latency reads (Hybrid Table)  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Creating Online Feature Tables
+
+### Enable Online Serving for a FeatureView
+
+> 📁 **Full code:** [`_code/online_feature_tables.py`](_code/online_feature_tables.py)
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView
+
+# Register FeatureView with online serving enabled
+fv = fs.register_feature_view(
+    feature_view=user_purchase_fv,
+    version="V1",
+)
+
+# Create Online Feature Table from FeatureView
+fs.create_online_feature_table(
+    feature_view=fv,
+    warehouse="OFT_REFRESH_WH",
+)
+```
+
+### Configure Refresh Frequency
+
+```python
+# Configure how often OFT syncs from FeatureView
+fs.create_online_feature_table(
+    feature_view=fv,
+    warehouse="OFT_REFRESH_WH",
+    refresh_freq="5 minutes",  # Sync every 5 minutes
+)
+```
+
+---
+
+## Retrieving Online Features
+
+### Single Entity Lookup
+
+```python
+# Get features for a single entity
+features = fs.get_online_features(
+    feature_view=fv,
+    entity_rows=[{"USER_ID": "usr_001"}],
+)
+
+# Returns DataFrame with latest feature values
+print(features.to_pandas())
+```
+
+### Batch Online Lookup
+
+```python
+# Get features for multiple entities
+entity_rows = [
+    {"USER_ID": "usr_001"},
+    {"USER_ID": "usr_002"},
+    {"USER_ID": "usr_003"},
+]
+
+features = fs.get_online_features(
+    feature_view=fv,
+    entity_rows=entity_rows,
+)
+```
+
+---
+
+## Performance Tuning
+
+### Optimize `get_online_features`
+
+```python
+# Use batch lookups instead of individual calls
+# ❌ BAD: Multiple individual calls
+for user_id in user_ids:
+    fs.get_online_features(fv, [{"USER_ID": user_id}])
+
+# ✅ GOOD: Single batch call
+fs.get_online_features(fv, [{"USER_ID": uid} for uid in user_ids])
+```
+
+### `refresh_freq` Considerations
+
+| refresh_freq | Latency | Cost | Use Case |
+|--------------|---------|------|----------|
+| `1 minute` | Very low | High | Real-time fraud |
+| `5 minutes` | Low | Medium | Recommendations |
+| `15 minutes` | Moderate | Low | Personalization |
+| `1 hour` | Higher | Minimal | Batch-like serving |
+
+---
+
+## Integration with External Services
+
+### FastAPI Example
+
+> 📁 **Full code:** [`_code/fastapi_serving.py`](_code/fastapi_serving.py)
+
+```python
+from fastapi import FastAPI
+from snowflake.ml.feature_store import FeatureStore
+
+app = FastAPI()
+
+@app.post("/features")
+async def get_features(user_id: str):
+    """Get features for a user."""
+    features = fs.get_online_features(
+        feature_view=user_fv,
+        entity_rows=[{"USER_ID": user_id}],
+    )
+    return features.to_pandas().to_dict(orient="records")[0]
+```
+
+---
+
+## Best Practices
+
+### 1. Right-Size Refresh Frequency
+
+Match OFT refresh to business requirements:
+
+```python
+# Fraud detection: needs freshest data
+fraud_oft_refresh = "1 minute"
+
+# Recommendations: can tolerate some lag
+reco_oft_refresh = "15 minutes"
+```
+
+### 2. Monitor OFT Health
+
+```sql
+-- Check OFT sync status
+SELECT *
+FROM TABLE(INFORMATION_SCHEMA.ONLINE_FEATURE_STORE_HISTORY())
+ORDER BY SYNC_START_TIME DESC
+LIMIT 10;
+```
+
+### 3. Use Dedicated Warehouse
+
+```python
+# Dedicated warehouse for OFT refresh
+fs.create_online_feature_table(
+    feature_view=fv,
+    warehouse="OFT_REFRESH_WH",  # Separate from query workloads
+)
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Expecting Historical Data
+
+**Problem**: OFTs only store current values, not history.
+
+**Solution**: Use standard FeatureView for historical/PIT retrieval.
+
+### ❌ Pitfall 2: Over-Refreshing
+
+**Problem**: Very frequent refresh without business need.
+
+**Solution**: Balance freshness vs. cost based on requirements.
+
+### ❌ Pitfall 3: Individual Lookups
+
+**Problem**: Calling `get_online_features` once per entity.
+
+**Solution**: Batch multiple entities in single call.
+
+---
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| **Online Feature Table** | Hybrid Table with latest feature values |
+| **refresh_freq** | How often OFT syncs from FeatureView |
+| `get_online_features` | Low-latency feature retrieval |
+| **Current values only** | No historical data in OFT |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 09: Preprocessing](../09_preprocessing/index.qmd) to learn about model-dependent transformations and preprocessing patterns.

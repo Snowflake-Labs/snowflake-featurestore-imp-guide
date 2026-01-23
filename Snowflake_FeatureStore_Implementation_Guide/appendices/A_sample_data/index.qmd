@@ -1,0 +1,310 @@
+---
+title: "Appendix A: Sample Data"
+subtitle: "Clickstream dataset generator and public ML datasets"
+---
+
+## Overview
+
+This appendix documents the sample data used throughout the Feature Store Implementation Guide:
+
+1. **Clickstream Dataset** - A synthetic e-commerce dataset generated specifically for this guide
+2. **Public ML Datasets** - Standard datasets (Iris, Titanic, etc.) for simple examples
+
+## Clickstream Dataset
+
+### Quick Start
+
+You can manage sample data using either the **Streamlit UI** (interactive) or **CLI tools** (scriptable).
+
+::: {.panel-tabset}
+
+## Streamlit UI (Recommended)
+
+```bash
+cd data_manager/
+
+# Set Snowflake connection
+export SNOWFLAKE_CONNECTION_NAME=your_connection
+
+# Launch the UI
+streamlit run app.py
+```
+
+The UI provides:
+
+- 📊 **Overview** - View current data status
+- 📥 **Initial Load** - Generate and load synthetic data  
+- 🔄 **Incremental Generator** - Manage continuous data generation
+- 🌿 **Development Branch** - Create sampled dev environments
+- 📚 **Public Datasets** - Load standard ML datasets
+- 📈 **Monitoring** - Track task and DT executions
+
+## CLI Tools
+
+```bash
+cd generator/
+
+# Set Snowflake connection
+export SNOWFLAKE_CONNECTION_NAME=your_connection
+
+# Step 1: Initial load (scale 0.01 = ~1K users)
+python main.py --scale 0.01 --output snowflake
+
+# Step 2 (Optional): Deploy continuous generation
+cd snowflake_native
+python deploy.py --start
+```
+
+## Python API
+
+```python
+from data_manager.core import DataManager
+
+dm = DataManager()
+dm.connect()
+
+# Initial load
+result = dm.run_initial_load(scale=0.01)
+print(f"Loaded: {result.row_counts}")
+
+# Create dev branch
+result = dm.create_dev_branch("MY_DEV_DB", sample_pct=10)
+```
+
+:::
+
+### Required Privileges
+
+The data loading scripts require specific Snowflake privileges depending on your use case.
+
+#### Minimum Privileges (Using Existing Database)
+
+If you have an existing database and just need to create schemas and tables:
+
+| Privilege | Object | Purpose |
+|-----------|--------|---------|
+| `USAGE` | Warehouse | Execute queries |
+| `USAGE` | Database | Access the database |
+| `CREATE SCHEMA` | Database | Create CLICKSTREAM_RAW schema |
+| `CREATE TABLE` | Schema | Create data tables |
+| `CREATE STAGE` | Schema | Upload Parquet files (bulk load) |
+
+```sql
+-- Grant minimum privileges to a role
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE my_role;
+GRANT USAGE ON DATABASE my_database TO ROLE my_role;
+GRANT CREATE SCHEMA ON DATABASE my_database TO ROLE my_role;
+
+-- After schema creation, grant table privileges
+GRANT ALL ON SCHEMA my_database.clickstream_raw TO ROLE my_role;
+```
+
+#### Full Setup (Creating New Database)
+
+For the complete setup including database creation:
+
+| Privilege | Object | Purpose |
+|-----------|--------|---------|
+| `CREATE DATABASE` | Account | Create FEATURE_STORE_GUIDE database |
+| `USAGE` | Warehouse | Execute queries |
+
+```sql
+-- Grant full setup privileges
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE my_role;
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE my_role;
+```
+
+#### Incremental Generator (Additional)
+
+To deploy and run the Snowflake-native incremental generator:
+
+| Privilege | Object | Purpose |
+|-----------|--------|---------|
+| `CREATE PROCEDURE` | Schema | Create stored procedure |
+| `CREATE TASK` | Schema | Create scheduled task |
+| `EXECUTE TASK` | Account | Allow task execution |
+
+```sql
+-- Grant incremental generator privileges
+GRANT CREATE PROCEDURE ON SCHEMA clickstream_admin TO ROLE my_role;
+GRANT CREATE TASK ON SCHEMA clickstream_admin TO ROLE my_role;
+GRANT EXECUTE TASK ON ACCOUNT TO ROLE my_role;
+
+-- After task creation, grant operate privilege
+GRANT OPERATE ON TASK incremental_data_task TO ROLE my_role;
+```
+
+::: {.callout-tip}
+## Using a Custom Database
+
+If you don't have `CREATE DATABASE` privilege, use the `--database` flag to specify an existing database:
+
+```bash
+python main.py --scale 0.01 --database MY_EXISTING_DB --schema MY_SCHEMA --output snowflake
+```
+:::
+
+::: {.callout-note}
+## Recommended: Create a Dedicated Role
+
+For production use, create a dedicated role with only the required privileges:
+
+```sql
+-- Create dedicated role
+CREATE ROLE IF NOT EXISTS FEATURE_STORE_GUIDE_ROLE;
+
+-- Grant warehouse access
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE FEATURE_STORE_GUIDE_ROLE;
+
+-- Grant database privileges
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE FEATURE_STORE_GUIDE_ROLE;
+-- OR for existing database:
+-- GRANT USAGE, CREATE SCHEMA ON DATABASE my_db TO ROLE FEATURE_STORE_GUIDE_ROLE;
+
+-- Assign to user
+GRANT ROLE FEATURE_STORE_GUIDE_ROLE TO USER my_user;
+```
+:::
+
+### Schema Organization
+
+The generator creates two schemas:
+
+| Schema | Purpose |
+|--------|---------|
+| `CLICKSTREAM_RAW` | Data tables (11 tables) |
+| `CLICKSTREAM_ADMIN` | Generator config, state, task |
+
+### Data Tables
+
+| Table | Description | Key Columns |
+|-------|-------------|-------------|
+| CATEGORIES | Product categories | CATEGORY_ID, CATEGORY_NAME |
+| SUPPLIERS | Product suppliers | SUPPLIER_ID, SUPPLIER_NAME |
+| PRODUCTS | Product catalog | PRODUCT_ID, PRODUCT_NAME, CATEGORY_ID |
+| PRODUCT_SUPPLIER | Product-supplier mapping | PRODUCT_ID, SUPPLIER_ID (composite PK) |
+| HOUSEHOLDS | Customer households | HOUSEHOLD_ID, ADDRESS |
+| VISITORS | Anonymous visitors | VISITOR_ID, FIRST_SEEN_TS |
+| USERS | Registered users | USER_ID, VISITOR_ID, HOUSEHOLD_ID |
+| SESSIONS | User sessions | SESSION_ID, VISITOR_ID, USER_ID |
+| EVENTS | Clickstream events | EVENT_ID, SESSION_ID, EVENT_TYPE |
+| ORDERS | Purchase orders | ORDER_ID, USER_ID, ORDER_TS |
+| ORDER_ITEMS | Order line items | ORDER_ITEM_ID, ORDER_ID, PRODUCT_ID |
+
+### Scale Factors
+
+| Scale | Users | Sessions | Events | Orders |
+|-------|-------|----------|--------|--------|
+| 0.01  | 1K    | 5K       | 44K    | 250    |
+| 0.1   | 10K   | 50K      | 440K   | 2.5K   |
+| 1.0   | 100K  | 500K     | 4.4M   | 25K    |
+
+### Incremental Generation
+
+For Dynamic Table and Online Feature testing we need an incremental data generator to show the evolution of the feature store data through feature pipelines over time. This can be deployed using the following SQL commands:
+
+```sql
+-- Start continuous generation (every minute)
+ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK RESUME;
+
+-- Monitor
+SELECT * FROM FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.GENERATION_STATUS;
+
+-- Stop when done
+ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
+```
+
+Note: Leaving these executing will continue to generate data and update the feature store data over time, but will incur costs for the compute resources used to generate the data.  When you are done with the testing, you can suspend the task by running the following SQL command.  :
+
+```sql
+ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
+```
+
+You can resume the task at anytime when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated.  The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time.  This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.
+
+### Files
+
+| File/Folder | Purpose |
+|-------------|---------|
+| `generator/main.py` | Initial data generation |
+| `generator/snowflake_native/` | Snowflake-native incremental generation |
+| `generator/README.md` | Complete documentation |
+
+## Public ML Datasets
+
+For simple inline examples and testing, we provide standard ML datasets:
+
+| Dataset | Records | Sample | Use Case |
+|---------|---------|--------|----------|
+| `penguins` | 344 | All | Multi-class classification |
+| `titanic` | 891 | All | Binary classification |
+| `iris` | 150 | All | Classification basics |
+| `wine` | 1,599 | All | Regression / classification |
+| `california_housing` | 20,640 | All | Regression |
+| `nyc_taxi` | ~3M | 50K | Temporal features, fare prediction |
+| `credit_card_fraud` | 284K | 50K | Imbalanced classification, temporal |
+
+### Loading Public Datasets
+
+```bash
+cd public_datasets/
+
+# List available datasets
+python load_datasets.py --list
+
+# Load specific dataset
+python load_datasets.py penguins
+
+# Load all datasets
+python load_datasets.py all
+
+# Full dataset (no sampling) for large datasets
+python load_datasets.py nyc_taxi --full
+```
+
+Small datasets can also be loaded inline using `FROM VALUES` clauses for self-contained code snippets.
+
+## Development Database Subset Tool
+
+Create development database "branches" from production data with filtered subsets using Dynamic Tables.
+
+### Quick Start
+
+```bash
+cd database_subset/
+
+# Create development database (10% sample)
+python deploy.py create \
+    --prod-db FEATURE_STORE_GUIDE \
+    --dev-db FEATURE_STORE_GUIDE_DEV \
+    --sample-pct 10 \
+    --warehouse YOUR_WAREHOUSE
+
+# Check status
+python deploy.py status --dev-db FEATURE_STORE_GUIDE_DEV
+
+# Suspend Dynamic Tables (cost savings)
+python deploy.py suspend --dev-db FEATURE_STORE_GUIDE_DEV
+
+# Resume Dynamic Tables
+python deploy.py resume --dev-db FEATURE_STORE_GUIDE_DEV
+```
+
+### Key Features
+
+- **Same Object Names**: All schemas/tables have identical names below database level
+- **Environment Switching**: Change `USE DATABASE` to switch between DEV and PROD
+- **Real-time Sync**: Dynamic Tables automatically refresh from production
+- **Referential Integrity**: Cascading filters maintain FK relationships
+
+### Multi-Environment Setup
+
+```
+FEATURE_STORE_GUIDE (Production)        FEATURE_STORE_GUIDE_DEV (Development)
+└── CLICKSTREAM_RAW                     └── CLICKSTREAM_RAW
+    ├── USERS (100K)                        ├── USERS (10K - 10% sample)
+    ├── SESSIONS (500K)                     ├── SESSIONS (~50K)
+    └── EVENTS (4.4M)                       └── EVENTS (~440K)
+```
+
+See `database_subset/README.md` for complete documentation.

@@ -1,0 +1,563 @@
+---
+title: "Core Concepts"
+subtitle: "Entities, FeatureViews, Features, and the Spine"
+---
+
+## Overview
+
+This chapter introduces the core concepts and terminology of Snowflake Feature Store. Understanding these fundamentals is essential before diving into implementation patterns.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Define what a Feature Store is and articulate its value in ML systems
+- Identify and describe the key components: Entities, FeatureViews, Features, and Spines
+- Understand how Feature Store fits into the broader ML lifecycle
+- Apply the correct transformation taxonomy (MIT/MDT/ODT) to your use cases
+- Map Snowflake terminology to industry-standard terms
+
+---
+
+## What is a Feature Store?
+
+A **Feature Store** is a centralized repository for storing, managing, and serving features for machine learning. It acts as the data management layer between raw data sources and ML models.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ML DATA INFRASTRUCTURE                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐     ┌────────────────────┐     ┌──────────────────────┐  │
+│   │ Data Sources │     │   Feature Store    │     │    ML Consumers      │  │
+│   │              │     │                    │     │                      │  │
+│   │ • Tables     │────▶│ • Feature Pipelines│────▶│ • Model Training     │  │
+│   │ • Streams    │     │ • Feature Storage  │     │ • Batch Inference    │  │
+│   │ • External   │     │ • Feature Serving  │     │ • Real-time Serving  │  │
+│   │ • APIs       │     │ • Metadata & Gov   │     │ • Analytics          │  │
+│   └──────────────┘     └────────────────────┘     └──────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Features: The Building Blocks of ML
+
+A **feature** is a measurable property or characteristic used as input to an ML model. Features can be:
+
+| Feature Type | Description | Example |
+|--------------|-------------|---------|
+| **Raw** | Direct attributes from source data | `user_age`, `product_price` |
+| **Derived** | Calculated from raw features | `price_per_unit`, `age_bucket` |
+| **Aggregated** | Computed over time windows | `total_orders_30d`, `avg_session_duration_7d` |
+| **Encoded** | Transformed for model consumption | `category_one_hot`, `amount_scaled` |
+
+---
+
+## Why Use a Feature Store?
+
+Feature Stores solve critical challenges in production ML systems:
+
+### 1. Feature Reusability
+
+Without a Feature Store, teams often recreate the same features independently, leading to:
+
+- Duplicated effort across data scientists
+- Inconsistent feature definitions
+- Wasted compute resources
+
+**With Feature Store**: Features are defined once, stored centrally, and reused across models and teams.
+
+### 2. Training-Serving Skew
+
+One of the most common causes of ML model degradation is when features computed during training differ from those used during inference.
+
+**With Feature Store**: The same feature definitions serve both training and inference, eliminating skew.
+
+### 3. Point-in-Time Correctness
+
+Using future data to train models (data leakage) produces artificially good training metrics but poor production performance.
+
+**With Feature Store**: Built-in temporal joins ensure features are computed using only data available at the prediction time, preventing data leakage.
+
+### 4. Feature Discovery
+
+As organizations scale ML, finding existing features becomes challenging.
+
+**With Feature Store**: Searchable catalog of features with metadata, lineage, and documentation.
+
+### 5. Governance & Compliance
+
+Tracking where features come from and how they're used is essential for regulatory compliance.
+
+**With Feature Store**: Full lineage from source data through feature transformations to model predictions.
+
+---
+
+## Key Components
+
+Snowflake Feature Store consists of four primary components:
+
+### Entity {#sec-entity}
+
+An **Entity** represents a business object that features describe. It defines the join keys used to retrieve features.
+
+> 📁 **Full code:** [`_code/entity_examples.py`](_code/entity_examples.py)
+
+```python
+from snowflake.ml.feature_store import Entity
+
+# Simple entity with single key
+user_entity = Entity(
+    name="USER",
+    join_keys=["USER_ID"],
+    desc="Registered user in the system"
+)
+
+# Compound entity with multiple keys
+order_item_entity = Entity(
+    name="ORDER_ITEM",
+    join_keys=["ORDER_ID", "LINE_NUMBER"],
+    desc="Individual line item within an order"
+)
+```
+
+**Key Concepts**:
+
+| Concept | Description |
+|---------|-------------|
+| `name` | Unique identifier for the entity within the Feature Store |
+| `join_keys` | Column(s) that uniquely identify an instance of the entity |
+| **Simple Key** | Single column identifier (e.g., `USER_ID`) |
+| **Compound Key** | Multiple columns together form the identifier (e.g., `ORDER_ID` + `LINE_NUMBER`) |
+
+Entities enable features from different FeatureViews to be joined together when generating training data or serving predictions.
+
+::: {.callout-note}
+## 📖 Deep Dive
+See [Chapter 03: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) for entity design patterns, hierarchies, and compound key strategies.
+:::
+
+---
+
+### FeatureView {#sec-featureview}
+
+A **FeatureView** is a collection of related features computed from a source dataframe. It defines:
+
+- Which entity the features belong to
+- How features are computed (the transformation logic)
+- How features are materialized (Dynamic Table vs View)
+
+> 📁 **Full code:** [`_code/featureview_examples.py`](_code/featureview_examples.py)
+
+```python
+from snowflake.ml.feature_store import FeatureView
+
+# Create a FeatureView from a Snowpark DataFrame
+user_features_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_purchase_df,  # Snowpark DataFrame with feature logic
+    timestamp_col="UPDATED_TS",   # For point-in-time correctness
+    refresh_freq="1 hour",        # Dynamic Table refresh (omit for View)
+    desc="User purchase behavior features"
+)
+
+# Register in Feature Store
+user_features_fv = fs.register_feature_view(
+    feature_view=user_features_fv,
+    version="V1",
+    block=True  # Wait for initial materialization
+)
+```
+
+**Materialization Options**:
+
+| Type | Created When | Use Case | Compute Model |
+|------|--------------|----------|---------------|
+| **Dynamic Table** | `refresh_freq` is specified | Pre-computed features, automatic refresh | Snowflake manages refresh |
+| **View** | `refresh_freq` is omitted | Query-time computation, always fresh | Compute on each query |
+
+**Key Concepts**:
+
+| Concept | Description |
+|---------|-------------|
+| `name` | Unique identifier for the FeatureView |
+| `entities` | List of entities this FeatureView provides features for |
+| `feature_df` | Snowpark DataFrame defining the feature transformations |
+| `timestamp_col` | Column used for point-in-time feature retrieval |
+| `refresh_freq` | How often to refresh (e.g., `"1 hour"`, `"1 day"`) |
+| `version` | Version string for managing FeatureView evolution |
+
+::: {.callout-note}
+## 📖 Deep Dive
+See [Chapter 04: Feature Views](../04_feature_views/index.qmd) for detailed coverage of FeatureView types, versioning, and lifecycle management.
+:::
+
+---
+
+### Feature {#sec-feature}
+
+A **Feature** is an individual column within a FeatureView. Features are defined through the `feature_df` parameter—a Snowpark DataFrame that specifies the transformation logic.
+
+#### Method 1: DataFrame API (Most Common)
+
+Use Snowpark DataFrame operations to define features declaratively:
+
+> 📁 **Full code:** [`_code/feature_dataframe_api.py`](_code/feature_dataframe_api.py)
+
+```python
+from snowflake.snowpark import functions as F
+
+# Define features using Snowpark DataFrame transformations
+user_purchase_df = (
+    session.table("ORDERS")
+    .group_by("USER_ID")
+    .agg(
+        F.sum("AMOUNT").alias("TOTAL_SPEND"),
+        F.count("ORDER_ID").alias("ORDER_CNT"),
+        F.avg("AMOUNT").alias("AVG_ORDER_AMT"),
+        F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+    )
+)
+
+# Create FeatureView with DataFrame-defined features
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_purchase_df,  # DataFrame defines the features
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+)
+```
+
+#### Method 2: Pure SQL via session.sql()
+
+For complex queries or when you prefer SQL, use `session.sql()` to define features:
+
+> 📁 **Full code:** [`_code/feature_sql_api.py`](_code/feature_sql_api.py)
+
+```python
+# Define features using pure SQL
+user_features_df = session.sql("""
+    SELECT 
+        USER_ID,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(AMOUNT) AS TOTAL_SPEND,
+        AVG(AMOUNT) AS AVG_ORDER_AMT,
+        MAX(ORDER_TS) AS LAST_ORDER_TS,
+        DATEDIFF('day', MIN(ORDER_TS), MAX(ORDER_TS)) AS CUSTOMER_TENURE_DAYS
+    FROM ORDERS
+    GROUP BY USER_ID
+""")
+
+# Create FeatureView from SQL-defined DataFrame
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_features_df,  # SQL query defines the features
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+)
+```
+
+::: {.callout-tip}
+## When to Use SQL
+The `session.sql()` approach is useful when migrating existing SQL-based feature pipelines or when complex window functions are easier to express in SQL.
+:::
+
+#### Method 3: Feature Aggregation Class (Time-Windowed) {#sec-aggregations-api}
+
+For time-windowed aggregations, the `Feature` class provides a declarative API:
+
+> 📁 **Full code:** [`_code/feature_aggregation_api.py`](_code/feature_aggregation_api.py)
+
+```python
+from snowflake.ml.feature_store import Feature
+
+# Define time-windowed aggregated features
+features = [
+    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
+    Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
+    Feature.avg("AMOUNT", "24h").alias("AVG_ORDER_24H"),
+    Feature.last_n("PRODUCT_ID", "7d", n=5).alias("RECENT_PRODUCTS"),
+]
+
+# Use in a tiled FeatureView for efficient computation
+tiled_fv = FeatureView(
+    name="USER_PURCHASE_AGGREGATES",
+    entities=[user_entity],
+    feature_df=session.table("ORDERS"),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    feature_granularity="1 hour",  # Tile size for incremental computation
+    features=features,             # Aggregated features
+)
+```
+
+::: {.callout-note}
+## 🆕 New in snowflake-ml 1.21+
+The `Feature` aggregation class provides declarative syntax for time-windowed aggregations with automatic tiling for efficient incremental computation.
+See [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for the complete API reference.
+:::
+
+#### Choosing the Right Method
+
+| Method | Best For | Complexity |
+|--------|----------|------------|
+| **DataFrame API** | Simple aggregations, joins, filtering | Low |
+| **SQL via session.sql()** | Complex queries, window functions, existing SQL | Medium |
+| **Feature class** | Time-windowed aggregations, sliding windows | Advanced |
+
+---
+
+### Feature Slice
+
+A **Feature Slice** identifies specific feature columns within a FeatureView that you want to retrieve. This allows selective feature retrieval rather than fetching all columns.
+
+```python
+# Get specific features from a FeatureView
+user_slice = user_features_fv.slice(["TOTAL_SPEND_7D", "ORDER_CNT_30D"])
+
+# Use the slice in dataset generation
+dataset = fs.generate_dataset(
+    spine_df=training_spine,
+    features=[user_slice],  # Only retrieves sliced features
+)
+```
+
+---
+
+## The Spine: Connecting Features to ML {#sec-spine}
+
+The **Spine** is the foundation dataframe that defines which entities need features and when. Its structure differs slightly between training and inference:
+
+| Use Case | Required Columns | Optional Columns |
+|----------|------------------|------------------|
+| **Training** | Entity keys, Timestamp | Label (target variable) |
+| **Batch Inference** | Entity keys, Timestamp | — |
+| **Online Inference** | Entity keys only | — |
+
+#### Training Spine
+
+For training, the spine defines the historical points where you want to retrieve features, along with the target variable (label) you're predicting:
+
+> 📁 **Full code:** [`_code/spine_examples.py`](_code/spine_examples.py)
+
+```python
+# Training spine: includes label for supervised learning
+training_spine = session.sql("""
+    SELECT 
+        USER_ID,                           -- Entity key
+        SUBSCRIPTION_END_TS AS EVENT_TS,   -- Point-in-time timestamp  
+        CASE WHEN CHURNED THEN 1 ELSE 0 END AS LABEL  -- Target variable
+    FROM SUBSCRIPTION_EVENTS
+    WHERE EVENT_TYPE = 'renewal_decision'
+""")
+
+# Generate training dataset with features joined to spine
+training_set = fs.generate_dataset(
+    spine_df=training_spine,
+    features=[user_features_fv, session_features_fv],
+    spine_timestamp_col="EVENT_TS",
+)
+```
+
+#### Batch Inference Spine
+
+For batch inference, you only need entity keys and timestamps—there's no label because that's what the model will predict:
+
+```python
+# Inference spine: no label column
+inference_spine = session.sql("""
+    SELECT 
+        USER_ID,                           -- Entity key
+        CURRENT_TIMESTAMP() AS EVENT_TS    -- Features as of now
+    FROM ACTIVE_USERS
+""")
+
+# Retrieve features for prediction
+inference_data = fs.generate_dataset(
+    spine_df=inference_spine,
+    features=[user_features_fv, session_features_fv],
+    spine_timestamp_col="EVENT_TS",
+)
+```
+
+#### Online Inference
+
+For real-time serving, features are retrieved from Online Feature Tables using entity keys only—no timestamp is needed since OFTs store only the current (latest) feature values:
+
+```python
+# Online serving: entity keys only, retrieves current feature values
+features = fs.retrieve_feature_values(
+    spine_df=session.create_dataframe([{"USER_ID": "usr_001"}]),
+    features=[user_features_fv],
+)
+```
+
+### How Spine Works
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      SPINE-BASED FEATURE RETRIEVAL                       │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  SPINE DataFrame                      FeatureViews                       │
+│  ┌───────────────────────┐            ┌───────────────────────┐          │
+│  │ USER_ID  │ EVENT_TS   │            │ USER_PURCHASE_FV      │          │
+│  │──────────┼────────────│    JOIN    │  • TOTAL_SPEND_7D     │          │
+│  │ usr_001  │ 2025-01-15 │───────────▶│  • ORDER_CNT_30D      │          │
+│  │ usr_002  │ 2025-01-16 │            │  • AVG_ORDER_24H      │          │
+│  │ usr_003  │ 2025-01-14 │            └───────────────────────┘          │
+│  └───────────────────────┘                                               │
+│            │                          ┌───────────────────────┐          │
+│            │                          │ USER_SESSION_FV       │          │
+│            └─────────────────────────▶│  • SESSION_CNT_7D     │          │
+│                                       │  • AVG_SESSION_DUR    │          │
+│                                       └───────────────────────┘          │
+│                                                                          │
+│  Result: Features computed as-of EVENT_TS for each USER_ID               │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+The Feature Store joins each spine row to the appropriate FeatureViews, ensuring features are computed using only data available at the `EVENT_TS` timestamp.
+
+::: {.callout-note}
+## 📖 Deep Dive
+See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for spine design patterns and best practices.
+:::
+
+---
+
+## Feature Store Architecture {#sec-architecture}
+
+Snowflake Feature Store leverages native Snowflake capabilities:
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    SNOWFLAKE FEATURE STORE ARCHITECTURE                   │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌────────────────┐      ┌────────────────────────────────────────────┐   │
+│  │  Source Data   │      │           Feature Store Schema             │   │
+│  │                │      │                                            │   │
+│  │  • Tables      │      │  ┌──────────────────────────────────────┐  │   │
+│  │  • Views       │─────▶│  │           FeatureViews               │  │   │
+│  │  • Ext Tables  │      │  │  ┌───────────────┐ ┌──────────────┐  │  │   │
+│  │  • Streams     │      │  │  │ Dynamic Table │ │    View      │  │  │   │
+│  │                │      │  │  │ (materialized)│ │ (query-time) │  │  │   │
+│  └────────────────┘      │  │  └───────────────┘ └──────────────┘  │  │   │
+│                          │  └──────────────────────────────────────┘  │   │
+│                          │                                            │   │
+│                          │  ┌──────────────────────────────────────┐  │   │
+│                          │  │         Metadata (Tags)              │  │   │
+│                          │  │  • Entity definitions                │  │   │
+│                          │  │  • Feature descriptions              │  │   │
+│                          │  │  • Lineage information               │  │   │
+│                          │  └──────────────────────────────────────┘  │   │
+│                          └────────────────────────────────────────────┘   │
+│                                            │                              │
+│                          ┌─────────────────┼─────────────────┐            │
+│                          │                 │                 │            │
+│                          ▼                 ▼                 ▼            │
+│                   ┌────────────┐   ┌────────────┐   ┌────────────┐        │
+│                   │  Training  │   │   Batch    │   │   Online   │        │
+│                   │  Datasets  │   │ Inference  │   │  Serving   │        │
+│                   │            │   │            │   │   (OFT)    │        │
+│                   └────────────┘   └────────────┘   └────────────┘        │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Physical Implementation
+
+| Logical Concept | Snowflake Object | Purpose |
+|-----------------|------------------|---------|
+| Feature Store | Schema + Tags | Container for all Feature Store objects |
+| Entity | Tag | Metadata defining join keys |
+| FeatureView (materialized) | Dynamic Table | Pre-computed features with full history |
+| FeatureView (query-time) | View | On-demand computed features |
+| Online Feature Table (OFT) | Hybrid Table | Low-latency serving, **current values only** |
+| Dataset | Table or View | Materialized training/inference data |
+
+::: {.callout-important}
+## Online Feature Tables Store Current Values Only
+Online Feature Tables store only the **latest (current) value** for each feature per entity—they do not retain historical feature values. For point-in-time historical retrieval (training, batch inference), use the standard FeatureView backed by Dynamic Table or View.
+:::
+
+---
+
+## Transformation Taxonomy {#sec-taxonomy}
+
+Understanding where transformations should occur is critical for maintainable ML systems. We categorize transformations into three types:
+
+| Type | Full Name | Location | Stored In |
+|------|-----------|----------|-----------|
+| **MIT** | Model-Independent Transformations | Feature Pipeline | FeatureView |
+| **MDT** | Model-Dependent Transformations | Training + Inference Pipeline | Model Registry |
+| **ODT** | On-Demand Transformations | Inference Time | Not stored |
+
+### Quick Decision Guide
+
+```
+Is it reusable across multiple models?
+├── YES → MIT (store in FeatureView)
+└── NO  → Does it depend on training data statistics?
+          ├── YES → MDT (store with model)
+          └── NO  → Does it depend on request context?
+                    ├── YES → ODT (compute at inference)
+                    └── NO  → Probably MIT
+```
+
+::: {.callout-note}
+## 📖 Deep Dive
+See [Transformation Taxonomy: MIT vs MDT vs ODT](./transformation_taxonomy.md) for detailed examples, anti-patterns, and implementation guidance.
+:::
+
+---
+
+## Terminology Mapping
+
+Snowflake Feature Store terminology aligns with industry standards. Here's how terms map across platforms:
+
+| Snowflake | Dowling/Hopsworks | Tecton | Description |
+|-----------|-------------------|--------|-------------|
+| **Feature Store** | Feature Store | Feature Store | Central feature repository |
+| **Entity** | Entity | Entity | Business object with join keys |
+| **FeatureView** | Feature Group | Feature View | Collection of related features |
+| **Dynamic Table FV** | Offline Store | Batch Feature View | Pre-computed, stored features |
+| **View FV** | - | On-Demand Feature View | Query-time computed features |
+| **Online Feature Table** | Online Store | Online Store | Low-latency serving |
+| **Spine** | Spine DataFrame | Spine | Request keys + timestamps |
+| **Feature Slice** | Feature | Feature | Individual feature column |
+| `timestamp_col` | Event Time | Timestamp Column | Point-in-time reference |
+| `refresh_freq` | Materialization Schedule | TTL | Update frequency |
+| `generate_dataset()` | Get Training Data | Get Dataset | Training data generation |
+| `retrieve_feature_values()` | Get Feature Values | Get Online Features | Feature serving |
+
+### Key Terminology Notes
+
+1. **FeatureView vs Feature Group**: Snowflake uses "FeatureView" while Hopsworks uses "Feature Group." Both represent a collection of features computed together.
+
+2. **Dynamic Table vs Offline Store**: Both refer to pre-materialized features for batch training and inference.
+
+3. **Online Feature Table**: Snowflake's implementation uses Hybrid Tables for low-latency serving, equivalent to an "Online Store" in other platforms.
+
+---
+
+## Summary
+
+| Concept | Definition | Key Attributes |
+|---------|------------|----------------|
+| **Feature Store** | Centralized feature management layer | Schema + Tags in Snowflake |
+| **Entity** | Business object with join keys | `name`, `join_keys`, `desc` |
+| **FeatureView** | Feature collection with transformations | `entities`, `feature_df`, `refresh_freq` |
+| **Feature** | Individual computed value | Defined in DataFrame or `Feature` class |
+| **Spine** | Request DataFrame | Entity keys + timestamp + labels |
+| **MIT/MDT/ODT** | Transformation taxonomy | Where transformations belong |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 02: Design & Organization](../02_design_organization/index.qmd) to learn how to structure your Feature Store for scale and maintainability.

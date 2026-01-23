@@ -1,0 +1,467 @@
+---
+title: "Feature Pipelines"
+subtitle: "External orchestration, Dynamic Tables, and Temporal Aggregation API"
+---
+
+## Overview
+
+Feature pipelines are the workflows that transform raw data into features ready for ML consumption. They are the "plumbing" that connects your source data to your Feature Store. Snowflake supports multiple pipeline architectures, each with distinct trade-offs for freshness, cost, complexity, and flexibility.
+
+This chapter covers three primary approaches:
+
+1. **External Orchestration** - DBT, Airflow, or other tools managing transformations
+2. **Internal Management** - Dynamic Table-based pipelines fully managed by Snowflake
+3. **Temporal Aggregation API** - The new Feature class for time-windowed features with tiling
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Choose the right pipeline architecture for your requirements
+- Implement DBT-managed feature pipelines with View-based FeatureViews
+- Build internally-managed pipelines using Dynamic Tables
+- Configure refresh strategies for optimal freshness vs. cost
+- Understand when to use the Temporal Aggregation API
+
+---
+
+## Pipeline Architecture Patterns
+
+### The Feature Pipeline Landscape
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     FEATURE PIPELINE ARCHITECTURES                         │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    EXTERNAL ORCHESTRATION                           │   │
+│  │                                                                     │   │
+│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐   │   │
+│  │  │  Source  │───▶│   DBT    │───▶│  Tables/ │───▶│ View-based   │   │   │
+│  │  │  Tables  │    │  Models  │    │  Views   │    │ FeatureView  │   │   │
+│  │  └──────────┘    └──────────┘    └──────────┘    └──────────────┘   │   │
+│  │                                                                     │   │
+│  │  Orchestrated by: DBT Cloud, Airflow, Dagster, Prefect              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    INTERNAL MANAGEMENT                              │   │
+│  │                                                                     │   │
+│  │  ┌──────────┐              ┌──────────────────────────────────────┐ │   │
+│  │  │  Source  │─────────────▶│    Dynamic Table-based FeatureView   │ │   │
+│  │  │  Tables  │              │    (transformation + storage)        │ │   │
+│  │  └──────────┘              └──────────────────────────────────────┘ │   │
+│  │                                                                     │   │
+│  │  Managed by: Snowflake (automatic refresh, incremental compute)     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    TEMPORAL AGGREGATION API                         │   │
+│  │                                                                     │   │
+│  │  ┌──────────┐    ┌──────────────────────────────────────────────┐   │   │
+│  │  │  Source  │───▶│  Tiled FeatureView with Feature aggregations │   │   │
+│  │  │  Tables  │    │  (automatic window computation + tiling)     │   │   │
+│  │  └──────────┘    └──────────────────────────────────────────────┘   │   │
+│  │                                                                     │   │
+│  │  Managed by: Snowflake (optimized temporal aggregation engine)      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Architecture Comparison
+
+| Aspect | External (DBT/Airflow) | Internal (Dynamic Tables) | Temporal API |
+|--------|------------------------|---------------------------|--------------|
+| **Orchestration** | External tool | Snowflake managed | Snowflake managed |
+| **FeatureView Type** | View-based | DT-based | DT-based (tiled) |
+| **Refresh Trigger** | Scheduled jobs | `refresh_freq` | `refresh_freq` |
+| **Typical Freshness** | Minutes to hours | Seconds to minutes | Configurable |
+| **Operational Complexity** | Higher | Lower | Lowest |
+| **Cost Model** | Job-based compute | Continuous compute | Continuous compute |
+| **Best For** | Existing DBT shops | New implementations | Time-windowed features |
+
+---
+
+## External Orchestration (DBT/Airflow) {#sec-dbt}
+
+### When to Use External Orchestration
+
+External orchestration is ideal when you:
+
+- Have an existing DBT or Airflow investment
+- Need complex multi-step transformations
+- Want full control over scheduling and dependencies
+- Require transformations beyond SQL (Python, Spark)
+
+### DBT Implementation Pattern
+
+> 📁 **Full code:** [`_code/dbt_pattern.py`](_code/dbt_pattern.py)
+
+#### Step 1: Create DBT Feature Models
+
+```sql
+-- models/features/user_purchase_features.sql
+{{ config(
+    materialized='table',
+    schema='features',
+    tags=['feature_store', 'user_features']
+) }}
+
+WITH order_stats AS (
+    SELECT 
+        USER_ID,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(AMOUNT) AS TOTAL_SPEND,
+        AVG(AMOUNT) AS AVG_ORDER_AMT,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM {{ ref('stg_orders') }}
+    GROUP BY USER_ID
+)
+
+SELECT *,
+    CURRENT_TIMESTAMP() AS _DBT_UPDATED_TS
+FROM order_stats
+```
+
+#### Step 2: Register as View-Based FeatureView
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+
+# Reference the DBT-created table as a View-based FeatureView
+user_features_df = session.table("ANALYTICS.FEATURES.USER_PURCHASE_FEATURES")
+
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_features_df,
+    timestamp_col="_DBT_UPDATED_TS",
+    # No refresh_freq → View-based (DBT handles refresh)
+    desc="User purchase features - managed by DBT"
+)
+
+fs.register_feature_view(feature_view=user_purchase_fv, version="V1")
+```
+
+::: {.callout-tip}
+## Field Tip
+You can use Feature Store to assemble datasets, then export to external environments. The `snowflake-ml-python` package can be installed externally to simplify data retrieval.
+:::
+
+---
+
+## Internal Management (Dynamic Tables) {#sec-dynamic-tables}
+
+### When to Use Dynamic Tables
+
+Dynamic Tables are ideal when you:
+
+- Want Snowflake to manage the entire pipeline
+- Need low-latency feature freshness (seconds to minutes)
+- Prefer declarative over imperative pipeline definition
+- Are building new feature pipelines from scratch
+
+### Dynamic Table Implementation
+
+> 📁 **Full code:** [`_code/dynamic_table_pattern.py`](_code/dynamic_table_pattern.py)
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+
+# Define transformation logic as Snowpark DataFrame
+user_purchase_df = session.sql("""
+    SELECT 
+        USER_ID,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(AMOUNT) AS TOTAL_SPEND,
+        AVG(AMOUNT) AS AVG_ORDER_AMT,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM ORDERS
+    GROUP BY USER_ID
+""")
+
+# Create Dynamic Table-backed FeatureView
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_STATS",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="15 minutes",  # Creates Dynamic Table
+    desc="User purchase statistics - auto-refreshed"
+)
+
+# Register and wait for initial materialization
+registered_fv = fs.register_feature_view(
+    feature_view=user_purchase_fv,
+    version="V1",
+    block=True,
+)
+```
+
+### Refresh Configuration Options
+
+| Refresh Freq | Use Case | Cost Impact |
+|--------------|----------|-------------|
+| `1 minute` | Near real-time, critical features | High |
+| `15 minutes` | Standard operational | Medium |
+| `1 hour` | Balanced freshness/cost | Low |
+| `1 day` | Slowly-changing features | Minimal |
+
+### Monitoring Dynamic Table Refresh
+
+> 📁 **Full code:** [`_code/monitoring.sql`](_code/monitoring.sql)
+
+```sql
+-- Check refresh history
+SELECT 
+    NAME,
+    STATE,
+    REFRESH_START_TIME,
+    REFRESH_END_TIME,
+    STATISTICS:numInsertedRows::INT AS ROWS_INSERTED
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'ML_FEATURES.FEATURE_STORE.USER_PURCHASE_STATS$V1'
+))
+ORDER BY REFRESH_START_TIME DESC
+LIMIT 10;
+```
+
+---
+
+## Temporal Aggregation Pipelines {#sec-temporal-api}
+
+### When to Use Temporal Aggregation API
+
+The Temporal Aggregation API (Feature class) is ideal when you:
+
+- Need time-windowed aggregations (7-day sum, 30-day count, etc.)
+- Want optimal performance through feature tiling
+- Have high-cardinality entities with frequent updates
+- Need multiple window sizes for the same base metric
+
+### Understanding Feature Tiling
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FEATURE TILING CONCEPT                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Traditional Approach (recomputes entire window each refresh):              │
+│                                                                             │
+│  Day 1    Day 2    Day 3    Day 4    Day 5    Day 6    Day 7                │
+│  ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤           │
+│  │████████████████████████████████████████████████████████████│ 7-day SUM   │
+│  │        Recompute ALL 7 days on each refresh                │             │
+│  └────────────────────────────────────────────────────────────┘             │
+│                                                                             │
+│  Tiled Approach (pre-computes tiles, combines at query time):               │
+│                                                                             │
+│  Day 1    Day 2    Day 3    Day 4    Day 5    Day 6    Day 7                │
+│  ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤           │
+│  │ Tile 1 │ Tile 2 │ Tile 3 │ Tile 4 │ Tile 5 │ Tile 6 │ Tile 7 │           │
+│  │  $100  │  $50   │  $75   │  $200  │  $0    │  $150  │  $80   │           │
+│  └────────┴────────┴────────┴────────┴────────┴────────┴────────┘           │
+│                                                                             │
+│  7-day SUM = Tile1 + Tile2 + ... + Tile7 = $655                             │
+│  Only refresh the latest tile(s), combine existing tiles                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Feature Class API
+
+> 📁 **Full code:** [`_code/temporal_api.py`](_code/temporal_api.py)
+
+```python
+from snowflake.ml.feature_store import Feature, FeatureView
+
+# Define time-windowed aggregations declaratively
+features = [
+    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
+    Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+    Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
+    Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
+    Feature.approx_count_distinct("PRODUCT_ID", "7d").alias("UNIQUE_PRODUCTS_7D"),
+    Feature.last_n("PRODUCT_ID", "7d", n=5).alias("RECENT_PRODUCTS"),
+]
+
+# Create tiled FeatureView
+user_temporal_fv = FeatureView(
+    name="USER_TEMPORAL_AGGREGATES",
+    entities=[user_entity],
+    feature_df=session.table("ORDERS"),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    feature_granularity="1 hour",  # Tile size
+    features=features,
+    desc="User purchase aggregations with multiple time windows"
+)
+```
+
+::: {.callout-note}
+## 🆕 New in snowflake-ml 1.21+
+The Feature class and tiled aggregation are new capabilities. See [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for the complete reference.
+:::
+
+### Available Aggregation Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `Feature.sum(col, window)` | Sum over window | `Feature.sum("AMOUNT", "7d")` |
+| `Feature.count(col, window)` | Count over window | `Feature.count("ORDER_ID", "30d")` |
+| `Feature.approx_count_distinct(col, window)` | Approximate distinct count | `Feature.approx_count_distinct("PRODUCT_ID", "7d")` |
+| `Feature.avg(col, window)` | Average over window | `Feature.avg("AMOUNT", "7d")` |
+| `Feature.min(col, window)` | Minimum over window | `Feature.min("AMOUNT", "30d")` |
+| `Feature.max(col, window)` | Maximum over window | `Feature.max("AMOUNT", "30d")` |
+| `Feature.last_n(col, window, n)` | Last N values | `Feature.last_n("PRODUCT_ID", "7d", n=5)` |
+
+---
+
+## Pipeline Selection Framework {#sec-selection}
+
+### Decision Tree
+
+```
+What is your primary requirement?
+│
+├── Already have DBT/Airflow infrastructure?
+│   ├── YES → Do you need sub-hour freshness?
+│   │         ├── YES → Consider migrating critical features to DT
+│   │         └── NO  → External Orchestration (keep DBT)
+│   │
+│   └── NO  → Are features time-windowed aggregations?
+│             ├── YES → Temporal Aggregation API
+│             └── NO  → Internal Management (Dynamic Tables)
+│
+└── Need real-time features (<1 min latency)?
+    ├── YES → Dynamic Tables + Online Feature Tables
+    └── NO  → Any approach works, optimize for cost
+```
+
+### Selection Matrix
+
+| Requirement | Recommended Approach |
+|-------------|---------------------|
+| Existing DBT investment | External Orchestration |
+| Minimal operational overhead | Internal (Dynamic Tables) |
+| Time-windowed aggregations | Temporal Aggregation API |
+| Sub-minute freshness | Dynamic Tables (short refresh) |
+| Complex multi-step transforms | External Orchestration |
+| New Feature Store implementation | Internal (Dynamic Tables) |
+
+---
+
+## Best Practices
+
+### 1. Match Refresh to Source Update Frequency
+
+```python
+# GOOD: Source updates hourly, refresh hourly
+hourly_source_fv = FeatureView(
+    name="HOURLY_FEATURES",
+    refresh_freq="1 hour",
+    # ...
+)
+
+# WASTEFUL: Source updates daily, refreshing every 5 minutes
+wasteful_fv = FeatureView(
+    name="DAILY_FEATURES",
+    refresh_freq="5 minutes",  # Unnecessary compute!
+    # ...
+)
+```
+
+### 2. Use Appropriate Tile Sizes
+
+```python
+# High-frequency events: smaller tiles
+clickstream_fv = FeatureView(
+    feature_granularity="1 hour",  # Fine-grained
+    # ...
+)
+
+# Daily batch data: larger tiles
+daily_batch_fv = FeatureView(
+    feature_granularity="1 day",  # Coarse-grained
+    # ...
+)
+```
+
+### 3. Pipeline Ownership & SLAs
+
+Define clear ownership for each pipeline:
+
+```yaml
+# feature_manifest.yaml
+feature_views:
+  - name: USER_TEMPORAL_AGGREGATES
+    pattern: "Temporal API"
+    refresh: "1 hour"
+    owner: ml-platform@company.com
+    sla:
+      max_latency_minutes: 90
+```
+
+### 4. Pipeline Health Monitoring
+
+```sql
+-- Create alerting for stale features
+CREATE ALERT feature_staleness_alert
+  WAREHOUSE = ML_WH
+  SCHEDULE = 'USING CRON 0 * * * * UTC'
+  IF (EXISTS (
+    SELECT * 
+    FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+    WHERE SCHEMA_NAME = 'FEATURE_STORE'
+      AND TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) > 60
+  ))
+  THEN
+    CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Over-Engineering Simple Features
+
+**Problem**: Using complex pipeline for simple lookups.
+
+**Solution**: Use View-based FeatureView directly on source for static data.
+
+### ❌ Pitfall 2: Ignoring Incremental Refresh Compatibility
+
+**Problem**: Using SQL patterns that prevent incremental refresh (e.g., `RANDOM()`, self-referential queries).
+
+**Solution**: Use deterministic SQL compatible with DT incremental refresh.
+
+### ❌ Pitfall 3: Mismatched Freshness Expectations
+
+**Problem**: Pipeline refresh doesn't match business SLA.
+
+**Solution**: Align refresh frequency with business requirements.
+
+### ❌ Pitfall 4: No Monitoring or Alerting
+
+**Problem**: Stale features go undetected.
+
+**Solution**: Implement monitoring and alerting for pipeline health.
+
+---
+
+## Summary
+
+| Pipeline Pattern | Orchestration | Freshness | Best For |
+|------------------|---------------|-----------|----------|
+| **External (DBT)** | External tool | Minutes-hours | Existing DBT shops |
+| **Internal (DT)** | Snowflake | Seconds-minutes | New implementations |
+| **Temporal API** | Snowflake | Configurable | Time-windowed aggs |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) to learn about point-in-time correctness, ASOF joins, and preventing data leakage.

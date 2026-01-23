@@ -1,0 +1,2145 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+%
+\documentclass[
+  letterpaper,
+  DIV=11,
+  numbers=noendperiod]{scrreprt}
+
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else  
+    % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\setcounter{secnumdepth}{5}
+% Make \paragraph and \subparagraph free-standing
+\ifx\paragraph\undefined\else
+  \let\oldparagraph\paragraph
+  \renewcommand{\paragraph}[1]{\oldparagraph{#1}\mbox{}}
+\fi
+\ifx\subparagraph\undefined\else
+  \let\oldsubparagraph\subparagraph
+  \renewcommand{\subparagraph}[1]{\oldsubparagraph{#1}\mbox{}}
+\fi
+
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\usepackage{framed}
+\definecolor{shadecolor}{RGB}{241,243,245}
+\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.40,0.45,0.13}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\ExtensionTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.28,0.35,0.67}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.46,0.62}{#1}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\NormalTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.07,0.07,0.07}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+
+\KOMAoption{captions}{tableheading}
+\makeatletter
+\@ifpackageloaded{tcolorbox}{}{\usepackage[skins,breakable]{tcolorbox}}
+\@ifpackageloaded{fontawesome5}{}{\usepackage{fontawesome5}}
+\definecolor{quarto-callout-color}{HTML}{909090}
+\definecolor{quarto-callout-note-color}{HTML}{0758E5}
+\definecolor{quarto-callout-important-color}{HTML}{CC1914}
+\definecolor{quarto-callout-warning-color}{HTML}{EB9113}
+\definecolor{quarto-callout-tip-color}{HTML}{00A047}
+\definecolor{quarto-callout-caution-color}{HTML}{FC5300}
+\definecolor{quarto-callout-color-frame}{HTML}{acacac}
+\definecolor{quarto-callout-note-color-frame}{HTML}{4582ec}
+\definecolor{quarto-callout-important-color-frame}{HTML}{d9534f}
+\definecolor{quarto-callout-warning-color-frame}{HTML}{f0ad4e}
+\definecolor{quarto-callout-tip-color-frame}{HTML}{02b875}
+\definecolor{quarto-callout-caution-color-frame}{HTML}{fd7e14}
+\makeatother
+\makeatletter
+\makeatother
+\makeatletter
+\@ifpackageloaded{bookmark}{}{\usepackage{bookmark}}
+\makeatother
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\AtBeginDocument{%
+\ifdefined\contentsname
+  \renewcommand*\contentsname{Table of contents}
+\else
+  \newcommand\contentsname{Table of contents}
+\fi
+\ifdefined\listfigurename
+  \renewcommand*\listfigurename{List of Figures}
+\else
+  \newcommand\listfigurename{List of Figures}
+\fi
+\ifdefined\listtablename
+  \renewcommand*\listtablename{List of Tables}
+\else
+  \newcommand\listtablename{List of Tables}
+\fi
+\ifdefined\figurename
+  \renewcommand*\figurename{Figure}
+\else
+  \newcommand\figurename{Figure}
+\fi
+\ifdefined\tablename
+  \renewcommand*\tablename{Table}
+\else
+  \newcommand\tablename{Table}
+\fi
+}
+\@ifpackageloaded{float}{}{\usepackage{float}}
+\floatstyle{ruled}
+\@ifundefined{c@chapter}{\newfloat{codelisting}{h}{lop}}{\newfloat{codelisting}{h}{lop}[chapter]}
+\floatname{codelisting}{Listing}
+\newcommand*\listoflistings{\listof{codelisting}{List of Listings}}
+\makeatother
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\@ifpackageloaded{subcaption}{}{\usepackage{subcaption}}
+\makeatother
+\makeatletter
+\@ifpackageloaded{tcolorbox}{}{\usepackage[skins,breakable]{tcolorbox}}
+\makeatother
+\makeatletter
+\@ifundefined{shadecolor}{\definecolor{shadecolor}{rgb}{.97, .97, .97}}
+\makeatother
+\makeatletter
+\makeatother
+\makeatletter
+\makeatother
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same} % disable monospaced font for URLs
+\hypersetup{
+  pdftitle={Snowflake Feature Store Implementation Guide},
+  pdfauthor={Simon Field},
+  pdfkeywords={snowflake, feature store, ml, machine learning, mlops},
+  colorlinks=true,
+  linkcolor={blue},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Snowflake Feature Store Implementation Guide}
+\usepackage{etoolbox}
+\makeatletter
+\providecommand{\subtitle}[1]{% add subtitle to \maketitle
+  \apptocmd{\@title}{\par {\large #1 \par}}{}{}
+}
+\makeatother
+\subtitle{Best Practices for Building Production ML Feature Platforms}
+\author{Simon Field}
+\date{2026-01-21}
+
+\begin{document}
+\maketitle
+\ifdefined\Shaded\renewenvironment{Shaded}{\begin{tcolorbox}[boxrule=0pt, breakable, enhanced, frame hidden, sharp corners, interior hidden, borderline west={3pt}{0pt}{shadecolor}]}{\end{tcolorbox}}\fi
+
+\renewcommand*\contentsname{Table of contents}
+{
+\hypersetup{linkcolor=}
+\setcounter{tocdepth}{2}
+\tableofcontents
+}
+\bookmarksetup{startatroot}
+
+\hypertarget{snowflake-feature-store-implementation-guide}{%
+\chapter{Snowflake Feature Store Implementation
+Guide}\label{snowflake-feature-store-implementation-guide}}
+
+Best Practices for Building Production ML Feature Platforms
+
+\hfill\break
+
+\hypertarget{welcome}{%
+\section*{Welcome}\label{welcome}}
+\addcontentsline{toc}{section}{Welcome}
+
+\markright{Welcome}
+
+This guide provides comprehensive, practical guidance for implementing a
+Feature Store using Snowflake's native Feature Store capabilities.
+Whether you're building your first ML feature platform or migrating from
+another solution, this guide will help you design, build, and operate a
+production-grade Feature Store.
+
+\hypertarget{what-youll-learn}{%
+\section*{What You'll Learn}\label{what-youll-learn}}
+\addcontentsline{toc}{section}{What You'll Learn}
+
+\markright{What You'll Learn}
+
+\begin{tcolorbox}[enhanced jigsaw, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, rightrule=.15mm, left=2mm, breakable, colback=white, arc=.35mm, bottomrule=.15mm, opacityback=0]
+\begin{minipage}[t]{5.5mm}
+\textcolor{quarto-callout-note-color}{\faInfo}
+\end{minipage}%
+\begin{minipage}[t]{\textwidth - 5.5mm}
+
+\textbf{Key Topics Covered}\vspace{2mm}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Core Concepts} - Entities, FeatureViews, and the Feature Store
+  architecture
+\item
+  \textbf{Design Patterns} - Organization, naming conventions, and
+  governance
+\item
+  \textbf{Feature Engineering} - Temporal features, aggregations, and
+  pipelines
+\item
+  \textbf{Production Operations} - Online serving, preprocessing, and
+  monitoring
+\item
+  \textbf{Advanced Patterns} - Streaming, CI/CD, and cross-domain ML
+\end{itemize}
+
+\end{minipage}%
+\end{tcolorbox}
+
+\hypertarget{prerequisites}{%
+\section*{Prerequisites}\label{prerequisites}}
+\addcontentsline{toc}{section}{Prerequisites}
+
+\markright{Prerequisites}
+
+Before starting, ensure you have:
+
+\begin{itemize}
+\tightlist
+\item
+  ✅ Snowflake account (Standard Edition or higher)
+\item
+  ✅ Python 3.8+ with \texttt{snowflake-ml-python} \textgreater= 1.7.0
+\item
+  ✅ Basic familiarity with SQL and Python
+\item
+  ✅ Understanding of ML concepts (training, inference, features)
+\end{itemize}
+
+\hypertarget{quick-start}{%
+\section*{Quick Start}\label{quick-start}}
+\addcontentsline{toc}{section}{Quick Start}
+
+\markright{Quick Start}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Install the required package}
+\CommentTok{\# pip install snowflake{-}ml{-}python}
+
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ Session}
+\ImportTok{from}\NormalTok{ snowflake.ml.feature\_store }\ImportTok{import}\NormalTok{ FeatureStore, Entity, FeatureView}
+
+\CommentTok{\# Connect to Snowflake}
+\NormalTok{session }\OperatorTok{=}\NormalTok{ Session.builder.configs(connection\_params).create()}
+
+\CommentTok{\# Initialize Feature Store}
+\NormalTok{fs }\OperatorTok{=}\NormalTok{ FeatureStore(}
+\NormalTok{    session}\OperatorTok{=}\NormalTok{session,}
+\NormalTok{    database}\OperatorTok{=}\StringTok{"ML\_DB"}\NormalTok{,}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"FEATURE\_STORE"}\NormalTok{,}
+\NormalTok{    default\_warehouse}\OperatorTok{=}\StringTok{"COMPUTE\_WH"}\NormalTok{,}
+\NormalTok{)}
+
+\CommentTok{\# You\textquotesingle{}re ready to start building features!}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{how-to-use-this-guide}{%
+\section*{How to Use This Guide}\label{how-to-use-this-guide}}
+\addcontentsline{toc}{section}{How to Use This Guide}
+
+\markright{How to Use This Guide}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.4783}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5217}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Your Goal
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Start Here
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+New to Feature Store & \protect\hyperlink{introduction}{Chapter 0:
+Introduction} \\
+Design a Feature Store &
+\protect\hyperlink{chapter-02-design-organization}{Chapter 2: Design \&
+Organization} \\
+Build temporal features &
+\protect\hyperlink{chapter-06-temporal-features}{Chapter 6: Temporal
+Features} \\
+Enable online serving &
+\protect\hyperlink{chapter-08-online-features}{Chapter 8: Online
+Features} \\
+Migrate from Tecton/Feast &
+\protect\hyperlink{chapter-13-migration-guide}{Chapter 13: Migration
+Guide} \\
+\end{longtable}
+
+\hypertarget{code-examples}{%
+\section*{Code Examples}\label{code-examples}}
+\addcontentsline{toc}{section}{Code Examples}
+
+\markright{Code Examples}
+
+All code examples in this guide are:
+
+\begin{itemize}
+\tightlist
+\item
+  ✅ \textbf{Tested} - Every example is verified to work
+\item
+  ✅ \textbf{Copy-ready} - Click the copy button on any code block
+\item
+  ✅ \textbf{Self-contained} - Each example includes necessary imports
+\item
+  ✅ \textbf{Available in repo} - Browse the \texttt{\_code/}
+  directories
+\end{itemize}
+
+\hypertarget{feedback-contributions}{%
+\section*{Feedback \& Contributions}\label{feedback-contributions}}
+\addcontentsline{toc}{section}{Feedback \& Contributions}
+
+\markright{Feedback \& Contributions}
+
+Found an issue or want to suggest an improvement?
+
+\begin{itemize}
+\tightlist
+\item
+  📝 Use the ``Edit this page'' link on any page
+\item
+  🐛
+  \href{https://github.com/snowcat-cloud/FeatureStore_BestPractice/issues}{Report
+  an issue}
+\item
+  💬 Questions? Reach out via GitHub Discussions
+\end{itemize}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\emph{Last updated: January 2026}
+
+\part{Getting Started}
+
+\hypertarget{introduction}{%
+\chapter{Introduction}\label{introduction}}
+
+Setup, prerequisites, and guide overview
+
+\hfill\break
+
+\hypertarget{overview}{%
+\section{Overview}\label{overview}}
+
+This guide provides comprehensive best practices for implementing
+Snowflake Feature Store in production ML systems. It covers the full
+lifecycle from initial design through deployment and ongoing operations.
+
+The Snowflake Feature Store is a managed data management layer that
+helps ML teams organize, store, and serve features at scale. It
+provides:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Centralized Feature Management}: A single source of truth for
+  feature definitions and metadata
+\item
+  \textbf{Automated Feature Engineering Pipelines}: Dynamic Table-based
+  materialization (pre-computed) or View-based (query-time computation)
+\item
+  \textbf{Point-in-Time Feature Retrieval}: Temporally correct feature
+  joins for ML training and batch inference, preventing data leakage
+\item
+  \textbf{Online Serving}: Low-latency feature retrieval via Online
+  Feature Tables for real-time inference
+\item
+  \textbf{Governance \& Lineage}: Full tracking from source data to
+  model predictions
+\end{itemize}
+
+\hypertarget{whats-covered-in-this-guide}{%
+\section{What's Covered in This
+Guide}\label{whats-covered-in-this-guide}}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3103}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2414}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.4483}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Chapter
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Topic
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{00} & Introduction & Setup, prerequisites, guide overview \\
+\protect\hyperlink{core-concepts}{\textbf{01}} & Concepts & Core
+objects, terminology, transformation taxonomy \\
+\protect\hyperlink{chapter-02-design-organization}{\textbf{02}} & Design
+\& Organization & Feature Store structure, multi-environment patterns \\
+\protect\hyperlink{chapter-03-entities-hierarchies}{\textbf{03}} &
+Entities \& Hierarchies & Entity keys (simple \& compound),
+relationships \\
+\protect\hyperlink{chapter-04-feature-views}{\textbf{04}} & Feature
+Views & DT vs View, versioning, lifecycle management \\
+\protect\hyperlink{chapter-05-feature-pipelines}{\textbf{05}} & Feature
+Pipelines & DBT, Dynamic Tables, Temporal API pipelines \\
+\protect\hyperlink{chapter-06-temporal-features}{\textbf{06}} & Temporal
+Features & Point-in-time correctness, tiling, aggregations \\
+\protect\hyperlink{chapter-07-aggregations-api}{\textbf{07}} &
+Aggregations API & \texttt{Feature} class, windows, rollups \\
+\protect\hyperlink{chapter-08-online-features}{\textbf{08}} & Online
+Features & Online Feature Tables, serving patterns \\
+\protect\hyperlink{chapter-09-preprocessing}{\textbf{09}} &
+Preprocessing & Encoding, scaling, model-dependent transforms \\
+\protect\hyperlink{chapter-10-training-inference}{\textbf{10}} &
+Training \& Inference & Spine design, dataset generation \\
+\protect\hyperlink{chapter-11-operations}{\textbf{11}} & Operations &
+Monitoring, DMFs, lineage, drift detection \\
+\protect\hyperlink{chapter-12-advanced-patterns}{\textbf{12}} & Advanced
+Patterns & Streaming FeatureViews, multi-FS operations \\
+\protect\hyperlink{chapter-13-migration-guide}{\textbf{13}} & Migration
+Guide & Tecton, SageMaker, Vertex AI migration paths \\
+\end{longtable}
+
+\hypertarget{prerequisites-1}{%
+\section{Prerequisites}\label{prerequisites-1}}
+
+\hypertarget{required-snowflake-access}{%
+\subsection{Required Snowflake Access}\label{required-snowflake-access}}
+
+\begin{itemize}
+\tightlist
+\item
+  Snowflake account (Standard Edition or higher)
+\item
+  Database privileges to create schemas, tables, dynamic tables, views,
+  and tags
+\item
+  Warehouse access for compute
+\item
+  \texttt{snowflake-ml-python} package installed (available via
+  pip/conda)
+\end{itemize}
+
+\hypertarget{required-privileges}{%
+\subsection{Required Privileges}\label{required-privileges}}
+
+Feature Store requires specific privileges. A role setup script is
+available in the
+\href{https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/rbac}{Snowflake
+documentation}.
+
+Minimum required privileges:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{{-}{-} Create a role for Feature Store users}
+\KeywordTok{CREATE} \KeywordTok{ROLE} \ControlFlowTok{IF} \KeywordTok{NOT} \KeywordTok{EXISTS}\NormalTok{ FEATURE\_STORE\_USER;}
+
+\CommentTok{{-}{-} Grant database and schema access}
+\KeywordTok{GRANT} \KeywordTok{USAGE} \KeywordTok{ON} \KeywordTok{DATABASE} \OperatorTok{\textless{}}\KeywordTok{database}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\KeywordTok{GRANT} \KeywordTok{CREATE} \KeywordTok{SCHEMA} \KeywordTok{ON} \KeywordTok{DATABASE} \OperatorTok{\textless{}}\KeywordTok{database}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\KeywordTok{GRANT} \KeywordTok{USAGE} \KeywordTok{ON}\NormalTok{ WAREHOUSE }\OperatorTok{\textless{}}\NormalTok{warehouse}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+
+\CommentTok{{-}{-} For Feature Store schema operations}
+\KeywordTok{GRANT} \KeywordTok{CREATE} \KeywordTok{TABLE} \KeywordTok{ON} \KeywordTok{SCHEMA} \OperatorTok{\textless{}}\KeywordTok{schema}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\KeywordTok{GRANT} \KeywordTok{CREATE} \KeywordTok{DYNAMIC} \KeywordTok{TABLE} \KeywordTok{ON} \KeywordTok{SCHEMA} \OperatorTok{\textless{}}\KeywordTok{schema}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\KeywordTok{GRANT} \KeywordTok{CREATE} \KeywordTok{VIEW} \KeywordTok{ON} \KeywordTok{SCHEMA} \OperatorTok{\textless{}}\KeywordTok{schema}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\KeywordTok{GRANT} \KeywordTok{CREATE}\NormalTok{ TAG }\KeywordTok{ON} \KeywordTok{SCHEMA} \OperatorTok{\textless{}}\KeywordTok{schema}\OperatorTok{\textgreater{}} \KeywordTok{TO} \KeywordTok{ROLE}\NormalTok{ FEATURE\_STORE\_USER;}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{software-requirements}{%
+\subsection{Software Requirements}\label{software-requirements}}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Minimum package versions for this guide}
+\NormalTok{snowflake}\OperatorTok{{-}}\NormalTok{ml}\OperatorTok{{-}}\NormalTok{python }\OperatorTok{\textgreater{}=} \FloatTok{1.8.0}      \CommentTok{\# Core Feature Store functionality}
+\NormalTok{snowflake}\OperatorTok{{-}}\NormalTok{snowpark}\OperatorTok{{-}}\NormalTok{python }\OperatorTok{\textgreater{}=} \FloatTok{1.25.0}  \CommentTok{\# DataFrame operations}
+
+\CommentTok{\# Additional packages used in examples}
+\NormalTok{pandas }\OperatorTok{\textgreater{}=} \FloatTok{2.0.0}
+\NormalTok{numpy }\OperatorTok{\textgreater{}=} \FloatTok{1.23.5}
+\NormalTok{scikit}\OperatorTok{{-}}\NormalTok{learn }\OperatorTok{\textgreater{}=} \FloatTok{1.5.0}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{🆕 New Features in snowflake-ml 1.21+}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+The \texttt{Feature} aggregation class
+(Section~\ref{sec-aggregations-api}) and Temporal Aggregated
+FeatureViews require version 1.21.0 or later. Earlier versions can use
+the approaches shown in \textbf{?@sec-feature-pipelines} for temporal
+features.
+
+\end{tcolorbox}
+
+\hypertarget{environment-setup}{%
+\section{Environment Setup}\label{environment-setup}}
+
+\hypertarget{session-configuration}{%
+\subsection{Session Configuration}\label{session-configuration}}
+
+The following code establishes a Snowpark session and verifies the
+environment.
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/setup_session.py}{\texttt{\_code/setup\_session.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ==============================================================================}
+\CommentTok{\# CONFIGURATION}
+\CommentTok{\# ==============================================================================}
+
+\CommentTok{\# Default configuration {-} override as needed}
+\NormalTok{SOURCE\_DATABASE }\OperatorTok{=} \StringTok{\textquotesingle{}FEATURE\_STORE\_GUIDE\textquotesingle{}}
+\NormalTok{SOURCE\_SCHEMA }\OperatorTok{=} \StringTok{\textquotesingle{}CLICKSTREAM\_RAW\textquotesingle{}}
+\NormalTok{FS\_NAME }\OperatorTok{=} \StringTok{\textquotesingle{}GUIDE\_FEATURE\_STORE\textquotesingle{}}
+\NormalTok{WAREHOUSE }\OperatorTok{=} \StringTok{\textquotesingle{}COMPUTE\_WH\textquotesingle{}}
+
+\CommentTok{\# ==============================================================================}
+\CommentTok{\# IMPORTS}
+\CommentTok{\# ==============================================================================}
+
+\CommentTok{\# Python standard library}
+\ImportTok{import}\NormalTok{ json}
+\ImportTok{from}\NormalTok{ datetime }\ImportTok{import}\NormalTok{ datetime, timedelta}
+\ImportTok{from}\NormalTok{ decimal }\ImportTok{import}\NormalTok{ Decimal}
+
+\CommentTok{\# Data processing}
+\ImportTok{import}\NormalTok{ pandas }\ImportTok{as}\NormalTok{ pd}
+\ImportTok{import}\NormalTok{ numpy }\ImportTok{as}\NormalTok{ np}
+
+\CommentTok{\# Snowpark}
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ Session}
+\ImportTok{from}\NormalTok{ snowflake.snowpark.version }\ImportTok{import}\NormalTok{ VERSION}
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ functions }\ImportTok{as}\NormalTok{ F}
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ types }\ImportTok{as}\NormalTok{ T}
+\ImportTok{from}\NormalTok{ snowflake.snowpark.context }\ImportTok{import}\NormalTok{ get\_active\_session}
+
+\CommentTok{\# Feature Store}
+\ImportTok{from}\NormalTok{ snowflake.ml.feature\_store }\ImportTok{import}\NormalTok{ (}
+\NormalTok{    FeatureStore, }
+\NormalTok{    FeatureView, }
+\NormalTok{    Entity,}
+\NormalTok{    CreationMode}
+\NormalTok{)}
+
+\CommentTok{\# ==============================================================================}
+\CommentTok{\# SESSION CREATION}
+\CommentTok{\# ==============================================================================}
+
+\CommentTok{\# Option 1: Running in Snowflake Notebook (preferred)}
+\ControlFlowTok{try}\NormalTok{:}
+\NormalTok{    session }\OperatorTok{=}\NormalTok{ get\_active\_session()}
+\ControlFlowTok{except}\NormalTok{:}
+    \CommentTok{\# Option 2: Running locally with connection config}
+    \ImportTok{from}\NormalTok{ snowflake.ml.utils }\ImportTok{import}\NormalTok{ connection\_params}
+\NormalTok{    session }\OperatorTok{=}\NormalTok{ Session.builder.configs(connection\_params.SnowflakeLoginOptions()).create()}
+
+\CommentTok{\# Enable SQL simplifier for cleaner generated SQL}
+\NormalTok{session.sql\_simplifier\_enabled }\OperatorTok{=} \VariableTok{True}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{verify-environment}{%
+\subsection{Verify Environment}\label{verify-environment}}
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/verify_environment.py}{\texttt{\_code/verify\_environment.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Capture environment details}
+\NormalTok{snowflake\_environment }\OperatorTok{=}\NormalTok{ session.sql(}\StringTok{\textquotesingle{}SELECT current\_user(), current\_version()\textquotesingle{}}\NormalTok{).collect()}
+\NormalTok{snowpark\_version }\OperatorTok{=}\NormalTok{ VERSION}
+\NormalTok{session\_role }\OperatorTok{=}\NormalTok{ session.get\_current\_role().replace(}\StringTok{\textquotesingle{}"\textquotesingle{}}\NormalTok{, }\StringTok{""}\NormalTok{)}
+\NormalTok{session\_database }\OperatorTok{=}\NormalTok{ session.get\_current\_database().replace(}\StringTok{\textquotesingle{}"\textquotesingle{}}\NormalTok{, }\StringTok{""}\NormalTok{)}
+\NormalTok{session\_schema }\OperatorTok{=}\NormalTok{ session.get\_current\_schema().replace(}\StringTok{\textquotesingle{}"\textquotesingle{}}\NormalTok{, }\StringTok{""}\NormalTok{)}
+\NormalTok{session\_warehouse }\OperatorTok{=}\NormalTok{ session.get\_current\_warehouse().replace(}\StringTok{\textquotesingle{}"\textquotesingle{}}\NormalTok{, }\StringTok{""}\NormalTok{)}
+
+\CommentTok{\# Check warehouse status}
+\NormalTok{wh\_status }\OperatorTok{=}\NormalTok{ session.sql(}\SpecialStringTok{f"SHOW WAREHOUSES LIKE \textquotesingle{}}\SpecialCharTok{\{}\NormalTok{session\_warehouse}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}"}\NormalTok{).collect()[}\DecValTok{0}\NormalTok{]}
+
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}=\textquotesingle{}} \OperatorTok{*} \DecValTok{70}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}CONNECTION ESTABLISHED\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}=\textquotesingle{}} \OperatorTok{*} \DecValTok{70}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Account                : }\SpecialCharTok{\{}\NormalTok{session}\SpecialCharTok{.}\NormalTok{sql(}\StringTok{"SELECT current\_account()"}\NormalTok{)}\SpecialCharTok{.}\NormalTok{collect()[}\DecValTok{0}\NormalTok{][}\DecValTok{0}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}User                   : }\SpecialCharTok{\{}\NormalTok{snowflake\_environment[}\DecValTok{0}\NormalTok{][}\DecValTok{0}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Role                   : }\SpecialCharTok{\{}\NormalTok{session\_role}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Database               : }\SpecialCharTok{\{}\NormalTok{session\_database}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Schema                 : }\SpecialCharTok{\{}\NormalTok{session\_schema}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Warehouse              : }\SpecialCharTok{\{}\NormalTok{session\_warehouse}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Warehouse Size         : }\SpecialCharTok{\{}\NormalTok{wh\_status[}\StringTok{"size"}\NormalTok{]}\SpecialCharTok{.}\NormalTok{upper()}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Warehouse State        : }\SpecialCharTok{\{}\NormalTok{wh\_status[}\StringTok{"state"}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Snowflake Version      : }\SpecialCharTok{\{}\NormalTok{snowflake\_environment[}\DecValTok{0}\NormalTok{][}\DecValTok{1}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Snowpark Version       : }\SpecialCharTok{\{}\NormalTok{snowpark\_version[}\DecValTok{0}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{.}\SpecialCharTok{\{}\NormalTok{snowpark\_version[}\DecValTok{1}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{.}\SpecialCharTok{\{}\NormalTok{snowpark\_version[}\DecValTok{2}\NormalTok{]}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}=\textquotesingle{}} \OperatorTok{*} \DecValTok{70}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+Expected output:
+
+\begin{verbatim}
+======================================================================
+CONNECTION ESTABLISHED
+======================================================================
+Account                : YOUR_ACCOUNT
+User                   : YOUR_USER
+Role                   : SYSADMIN
+Database               : FEATURE_STORE_GUIDE
+Schema                 : CLICKSTREAM_RAW
+Warehouse              : COMPUTE_WH
+Warehouse Size         : X-SMALL
+Warehouse State        : STARTED
+Snowflake Version      : 8.x.x
+Snowpark Version       : 1.25.0
+======================================================================
+\end{verbatim}
+
+\hypertarget{create-feature-store}{%
+\subsection{Create Feature Store}\label{create-feature-store}}
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/create_feature_store.py}{\texttt{\_code/create\_feature\_store.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Create working schema for sample data}
+\NormalTok{session.sql(}\SpecialStringTok{f\textquotesingle{}CREATE SCHEMA IF NOT EXISTS }\SpecialCharTok{\{}\NormalTok{SOURCE\_DATABASE}\SpecialCharTok{\}}\SpecialStringTok{.}\SpecialCharTok{\{}\NormalTok{SOURCE\_SCHEMA}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{).collect()}
+
+\CommentTok{\# Initialize Feature Store}
+\CommentTok{\# This creates a schema with Feature Store metadata tags}
+\NormalTok{fs }\OperatorTok{=}\NormalTok{ FeatureStore(}
+\NormalTok{    session}\OperatorTok{=}\NormalTok{session,}
+\NormalTok{    database}\OperatorTok{=}\NormalTok{SOURCE\_DATABASE,}
+\NormalTok{    name}\OperatorTok{=}\NormalTok{FS\_NAME,}
+\NormalTok{    default\_warehouse}\OperatorTok{=}\NormalTok{WAREHOUSE,}
+\NormalTok{    creation\_mode}\OperatorTok{=}\NormalTok{CreationMode.CREATE\_IF\_NOT\_EXIST,}
+\NormalTok{)}
+
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Feature Store initialized: }\SpecialCharTok{\{}\NormalTok{SOURCE\_DATABASE}\SpecialCharTok{\}}\SpecialStringTok{.}\SpecialCharTok{\{}\NormalTok{FS\_NAME}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{sample-data}{%
+\section{Sample Data}\label{sample-data}}
+
+This guide uses a synthetic clickstream dataset designed to demonstrate
+all Feature Store capabilities, including:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Temporal patterns}: Event timestamps with realistic
+  distributions
+\item
+  \textbf{Entity hierarchies}: Visitor → User → Household relationships
+\item
+  \textbf{Composite keys}: Product-Supplier junction table (M:N)
+\item
+  \textbf{Semi-structured data}: VARIANT, ARRAY, OBJECT columns
+\end{itemize}
+
+See \protect\hyperlink{appendix-a-sample-data}{Appendix A: Clickstream
+Data Model} for the full data model specification.
+
+\hypertarget{quick-data-overview}{%
+\subsection{Quick Data Overview}\label{quick-data-overview}}
+
+The clickstream dataset includes these core tables:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2653}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2449}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3469}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Table
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Entity Key
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Temporal Column
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{VISITORS} & Anonymous visitors & \texttt{VISITOR\_ID} &
+\texttt{FIRST\_SEEN\_TS}, \texttt{LAST\_SEEN\_TS} \\
+\texttt{USERS} & Identified users & \texttt{USER\_ID} &
+\texttt{CREATED\_TS}, \texttt{UPDATED\_TS} \\
+\texttt{SESSIONS} & User sessions & \texttt{SESSION\_ID} &
+\texttt{SESSION\_START\_TS}, \texttt{SESSION\_END\_TS} \\
+\texttt{EVENTS} & Clickstream events & \texttt{EVENT\_ID} &
+\texttt{EVENT\_TS} \\
+\texttt{ORDERS} & Purchase orders & \texttt{ORDER\_ID} &
+\texttt{ORDER\_TS} \\
+\texttt{PRODUCTS} & Product catalog & \texttt{PRODUCT\_ID} &
+\texttt{CREATED\_TS} \\
+\texttt{PRODUCT\_SUPPLIER} & Supplier relationships &
+\texttt{(PRODUCT\_ID,\ SUPPLIER\_ID)} & \texttt{VALID\_FROM\_TS},
+\texttt{VALID\_TO\_TS} \\
+\end{longtable}
+
+\hypertarget{inline-snippet-pattern}{%
+\subsection{Inline Snippet Pattern}\label{inline-snippet-pattern}}
+
+For simple examples, we use self-contained data that you can copy-paste
+directly:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Example: Create sample events for quick testing}
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ Session, Row}
+
+\CommentTok{\# Assumes session is already created}
+\NormalTok{sample\_events }\OperatorTok{=}\NormalTok{ session.create\_dataframe([}
+\NormalTok{    Row(USER\_ID}\OperatorTok{=}\StringTok{\textquotesingle{}usr\_001\textquotesingle{}}\NormalTok{, EVENT\_TS}\OperatorTok{=}\StringTok{\textquotesingle{}2025{-}01{-}01 10:00:00\textquotesingle{}}\NormalTok{, EVENT\_TYPE}\OperatorTok{=}\StringTok{\textquotesingle{}page\_view\textquotesingle{}}\NormalTok{, VALUE}\OperatorTok{=}\FloatTok{1.0}\NormalTok{),}
+\NormalTok{    Row(USER\_ID}\OperatorTok{=}\StringTok{\textquotesingle{}usr\_001\textquotesingle{}}\NormalTok{, EVENT\_TS}\OperatorTok{=}\StringTok{\textquotesingle{}2025{-}01{-}01 10:05:00\textquotesingle{}}\NormalTok{, EVENT\_TYPE}\OperatorTok{=}\StringTok{\textquotesingle{}click\textquotesingle{}}\NormalTok{, VALUE}\OperatorTok{=}\FloatTok{1.0}\NormalTok{),}
+\NormalTok{    Row(USER\_ID}\OperatorTok{=}\StringTok{\textquotesingle{}usr\_001\textquotesingle{}}\NormalTok{, EVENT\_TS}\OperatorTok{=}\StringTok{\textquotesingle{}2025{-}01{-}01 10:10:00\textquotesingle{}}\NormalTok{, EVENT\_TYPE}\OperatorTok{=}\StringTok{\textquotesingle{}purchase\textquotesingle{}}\NormalTok{, VALUE}\OperatorTok{=}\FloatTok{99.0}\NormalTok{),}
+\NormalTok{    Row(USER\_ID}\OperatorTok{=}\StringTok{\textquotesingle{}usr\_002\textquotesingle{}}\NormalTok{, EVENT\_TS}\OperatorTok{=}\StringTok{\textquotesingle{}2025{-}01{-}01 11:00:00\textquotesingle{}}\NormalTok{, EVENT\_TYPE}\OperatorTok{=}\StringTok{\textquotesingle{}page\_view\textquotesingle{}}\NormalTok{, VALUE}\OperatorTok{=}\FloatTok{1.0}\NormalTok{),}
+\NormalTok{    Row(USER\_ID}\OperatorTok{=}\StringTok{\textquotesingle{}usr\_002\textquotesingle{}}\NormalTok{, EVENT\_TS}\OperatorTok{=}\StringTok{\textquotesingle{}2025{-}01{-}01 11:02:00\textquotesingle{}}\NormalTok{, EVENT\_TYPE}\OperatorTok{=}\StringTok{\textquotesingle{}page\_view\textquotesingle{}}\NormalTok{, VALUE}\OperatorTok{=}\FloatTok{1.0}\NormalTok{),}
+\NormalTok{])}
+
+\NormalTok{sample\_events.write.save\_as\_table(}\StringTok{"SAMPLE\_EVENTS"}\NormalTok{, mode}\OperatorTok{=}\StringTok{"overwrite"}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-tip-color}{\faLightbulb}\hspace{0.5em}{Full Code Available}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-tip-color!10!white, toprule=.15mm, colframe=quarto-callout-tip-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+All code examples in this guide are available in the \texttt{\_code/}
+directories. You can also click the ``View source'' icon on any code
+block to see the full file.
+
+\end{tcolorbox}
+
+\hypertarget{guide-conventions}{%
+\section{Guide Conventions}\label{guide-conventions}}
+
+\hypertarget{code-examples-1}{%
+\subsection{Code Examples}\label{code-examples-1}}
+
+All code examples follow these conventions:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{SQL}: UPPERCASE keywords, lowercase identifiers
+\item
+  \textbf{Python}: PEP 8 style, type hints where helpful
+\item
+  \textbf{Naming}: \texttt{SCREAMING\_SNAKE\_CASE} for Snowflake
+  objects, \texttt{snake\_case} for Python
+\end{itemize}
+
+\hypertarget{sec-naming-conventions}{%
+\subsection{Feature Naming Conventions}\label{sec-naming-conventions}}
+
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Suffix & Meaning & Example \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{\_TS} & Timestamp & \texttt{ORDER\_TS}, \texttt{CREATED\_TS} \\
+\texttt{\_DT} & Date & \texttt{ORDER\_DT} \\
+\texttt{\_CNT} & Count & \texttt{SESSION\_CNT}, \texttt{ORDER\_CNT} \\
+\texttt{\_DCNT} & Distinct count & \texttt{PRODUCT\_VIEW\_DCNT} \\
+\texttt{\_SUM} & Sum/total & \texttt{REVENUE\_SUM},
+\texttt{QUANTITY\_SUM} \\
+\texttt{\_AVG} & Average & \texttt{ORDER\_VALUE\_AVG} \\
+\texttt{\_AMT} & Amount (currency) & \texttt{TOTAL\_AMT},
+\texttt{DISCOUNT\_AMT} \\
+\texttt{IS\_} & Boolean flag & \texttt{IS\_CONVERTED},
+\texttt{IS\_CURRENT} \\
+\end{longtable}
+
+\hypertarget{version-callouts}{%
+\subsection{Version Callouts}\label{version-callouts}}
+
+New features are highlighted with version callouts:
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{🆕 New in snowflake-ml X.X.X}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+Description of the new feature and how it improves on previous
+approaches.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{next-steps}{%
+\section{Next Steps}\label{next-steps}}
+
+Continue to \protect\hyperlink{core-concepts}{Chapter 01: Concepts} to
+learn about the core Feature Store objects and terminology.
+
+\hypertarget{core-concepts}{%
+\chapter{Core Concepts}\label{core-concepts}}
+
+Entities, FeatureViews, Features, and the Spine
+
+\hfill\break
+
+\hypertarget{overview-1}{%
+\section{Overview}\label{overview-1}}
+
+This chapter introduces the core concepts and terminology of Snowflake
+Feature Store. Understanding these fundamentals is essential before
+diving into implementation patterns.
+
+\hypertarget{learning-objectives}{%
+\section{Learning Objectives}\label{learning-objectives}}
+
+After completing this chapter, you will be able to:
+
+\begin{itemize}
+\tightlist
+\item
+  Define what a Feature Store is and articulate its value in ML systems
+\item
+  Identify and describe the key components: Entities, FeatureViews,
+  Features, and Spines
+\item
+  Understand how Feature Store fits into the broader ML lifecycle
+\item
+  Apply the correct transformation taxonomy (MIT/MDT/ODT) to your use
+  cases
+\item
+  Map Snowflake terminology to industry-standard terms
+\end{itemize}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{what-is-a-feature-store}{%
+\section{What is a Feature Store?}\label{what-is-a-feature-store}}
+
+A \textbf{Feature Store} is a centralized repository for storing,
+managing, and serving features for machine learning. It acts as the data
+management layer between raw data sources and ML models.
+
+\begin{verbatim}
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ML DATA INFRASTRUCTURE                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐     ┌────────────────────┐     ┌──────────────────────┐  │
+│   │ Data Sources │     │   Feature Store    │     │    ML Consumers      │  │
+│   │              │     │                    │     │                      │  │
+│   │ • Tables     │────▶│ • Feature Pipelines│────▶│ • Model Training     │  │
+│   │ • Streams    │     │ • Feature Storage  │     │ • Batch Inference    │  │
+│   │ • External   │     │ • Feature Serving  │     │ • Real-time Serving  │  │
+│   │ • APIs       │     │ • Metadata & Gov   │     │ • Analytics          │  │
+│   └──────────────┘     └────────────────────┘     └──────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+\end{verbatim}
+
+\hypertarget{features-the-building-blocks-of-ml}{%
+\subsection{Features: The Building Blocks of
+ML}\label{features-the-building-blocks-of-ml}}
+
+A \textbf{feature} is a measurable property or characteristic used as
+input to an ML model. Features can be:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3889}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3611}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Feature Type
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Example
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Raw} & Direct attributes from source data & \texttt{user\_age},
+\texttt{product\_price} \\
+\textbf{Derived} & Calculated from raw features &
+\texttt{price\_per\_unit}, \texttt{age\_bucket} \\
+\textbf{Aggregated} & Computed over time windows &
+\texttt{total\_orders\_30d}, \texttt{avg\_session\_duration\_7d} \\
+\textbf{Encoded} & Transformed for model consumption &
+\texttt{category\_one\_hot}, \texttt{amount\_scaled} \\
+\end{longtable}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{why-use-a-feature-store}{%
+\section{Why Use a Feature Store?}\label{why-use-a-feature-store}}
+
+Feature Stores solve critical challenges in production ML systems:
+
+\hypertarget{feature-reusability}{%
+\subsection{1. Feature Reusability}\label{feature-reusability}}
+
+Without a Feature Store, teams often recreate the same features
+independently, leading to:
+
+\begin{itemize}
+\tightlist
+\item
+  Duplicated effort across data scientists
+\item
+  Inconsistent feature definitions
+\item
+  Wasted compute resources
+\end{itemize}
+
+\textbf{With Feature Store}: Features are defined once, stored
+centrally, and reused across models and teams.
+
+\hypertarget{training-serving-skew}{%
+\subsection{2. Training-Serving Skew}\label{training-serving-skew}}
+
+One of the most common causes of ML model degradation is when features
+computed during training differ from those used during inference.
+
+\textbf{With Feature Store}: The same feature definitions serve both
+training and inference, eliminating skew.
+
+\hypertarget{point-in-time-correctness}{%
+\subsection{3. Point-in-Time
+Correctness}\label{point-in-time-correctness}}
+
+Using future data to train models (data leakage) produces artificially
+good training metrics but poor production performance.
+
+\textbf{With Feature Store}: Built-in temporal joins ensure features are
+computed using only data available at the prediction time, preventing
+data leakage.
+
+\hypertarget{feature-discovery}{%
+\subsection{4. Feature Discovery}\label{feature-discovery}}
+
+As organizations scale ML, finding existing features becomes
+challenging.
+
+\textbf{With Feature Store}: Searchable catalog of features with
+metadata, lineage, and documentation.
+
+\hypertarget{governance-compliance}{%
+\subsection{5. Governance \& Compliance}\label{governance-compliance}}
+
+Tracking where features come from and how they're used is essential for
+regulatory compliance.
+
+\textbf{With Feature Store}: Full lineage from source data through
+feature transformations to model predictions.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{key-components}{%
+\section{Key Components}\label{key-components}}
+
+Snowflake Feature Store consists of four primary components:
+
+\hypertarget{sec-entity}{%
+\subsection{Entity}\label{sec-entity}}
+
+An \textbf{Entity} represents a business object that features describe.
+It defines the join keys used to retrieve features.
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/entity_examples.py}{\texttt{\_code/entity\_examples.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ImportTok{from}\NormalTok{ snowflake.ml.feature\_store }\ImportTok{import}\NormalTok{ Entity}
+
+\CommentTok{\# Simple entity with single key}
+\NormalTok{user\_entity }\OperatorTok{=}\NormalTok{ Entity(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"USER"}\NormalTok{,}
+\NormalTok{    join\_keys}\OperatorTok{=}\NormalTok{[}\StringTok{"USER\_ID"}\NormalTok{],}
+\NormalTok{    desc}\OperatorTok{=}\StringTok{"Registered user in the system"}
+\NormalTok{)}
+
+\CommentTok{\# Compound entity with multiple keys}
+\NormalTok{order\_item\_entity }\OperatorTok{=}\NormalTok{ Entity(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"ORDER\_ITEM"}\NormalTok{,}
+\NormalTok{    join\_keys}\OperatorTok{=}\NormalTok{[}\StringTok{"ORDER\_ID"}\NormalTok{, }\StringTok{"LINE\_NUMBER"}\NormalTok{],}
+\NormalTok{    desc}\OperatorTok{=}\StringTok{"Individual line item within an order"}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Key Concepts}:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.4091}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5909}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Concept
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{name} & Unique identifier for the entity within the Feature
+Store \\
+\texttt{join\_keys} & Column(s) that uniquely identify an instance of
+the entity \\
+\textbf{Simple Key} & Single column identifier (e.g.,
+\texttt{USER\_ID}) \\
+\textbf{Compound Key} & Multiple columns together form the identifier
+(e.g., \texttt{ORDER\_ID} + \texttt{LINE\_NUMBER}) \\
+\end{longtable}
+
+Entities enable features from different FeatureViews to be joined
+together when generating training data or serving predictions.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{📖 Deep Dive}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+See \protect\hyperlink{chapter-03-entities-hierarchies}{Chapter 03:
+Entities \& Hierarchies} for entity design patterns, hierarchies, and
+compound key strategies.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{sec-featureview}{%
+\subsection{FeatureView}\label{sec-featureview}}
+
+A \textbf{FeatureView} is a collection of related features computed from
+a source dataframe. It defines:
+
+\begin{itemize}
+\tightlist
+\item
+  Which entity the features belong to
+\item
+  How features are computed (the transformation logic)
+\item
+  How features are materialized (Dynamic Table vs View)
+\end{itemize}
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/featureview_examples.py}{\texttt{\_code/featureview\_examples.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ImportTok{from}\NormalTok{ snowflake.ml.feature\_store }\ImportTok{import}\NormalTok{ FeatureView}
+
+\CommentTok{\# Create a FeatureView from a Snowpark DataFrame}
+\NormalTok{user\_features\_fv }\OperatorTok{=}\NormalTok{ FeatureView(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"USER\_PURCHASE\_FEATURES"}\NormalTok{,}
+\NormalTok{    entities}\OperatorTok{=}\NormalTok{[user\_entity],}
+\NormalTok{    feature\_df}\OperatorTok{=}\NormalTok{user\_purchase\_df,  }\CommentTok{\# Snowpark DataFrame with feature logic}
+\NormalTok{    timestamp\_col}\OperatorTok{=}\StringTok{"UPDATED\_TS"}\NormalTok{,   }\CommentTok{\# For point{-}in{-}time correctness}
+\NormalTok{    refresh\_freq}\OperatorTok{=}\StringTok{"1 hour"}\NormalTok{,        }\CommentTok{\# Dynamic Table refresh (omit for View)}
+\NormalTok{    desc}\OperatorTok{=}\StringTok{"User purchase behavior features"}
+\NormalTok{)}
+
+\CommentTok{\# Register in Feature Store}
+\NormalTok{user\_features\_fv }\OperatorTok{=}\NormalTok{ fs.register\_feature\_view(}
+\NormalTok{    feature\_view}\OperatorTok{=}\NormalTok{user\_features\_fv,}
+\NormalTok{    version}\OperatorTok{=}\StringTok{"V1"}\NormalTok{,}
+\NormalTok{    block}\OperatorTok{=}\VariableTok{True}  \CommentTok{\# Wait for initial materialization}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Materialization Options}:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3111}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2222}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Type
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Created When
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Use Case
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Compute Model
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Dynamic Table} & \texttt{refresh\_freq} is specified &
+Pre-computed features, automatic refresh & Snowflake manages refresh \\
+\textbf{View} & \texttt{refresh\_freq} is omitted & Query-time
+computation, always fresh & Compute on each query \\
+\end{longtable}
+
+\textbf{Key Concepts}:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.4091}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5909}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Concept
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{name} & Unique identifier for the FeatureView \\
+\texttt{entities} & List of entities this FeatureView provides features
+for \\
+\texttt{feature\_df} & Snowpark DataFrame defining the feature
+transformations \\
+\texttt{timestamp\_col} & Column used for point-in-time feature
+retrieval \\
+\texttt{refresh\_freq} & How often to refresh (e.g., \texttt{"1\ hour"},
+\texttt{"1\ day"}) \\
+\texttt{version} & Version string for managing FeatureView evolution \\
+\end{longtable}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{📖 Deep Dive}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+See \protect\hyperlink{chapter-04-feature-views}{Chapter 04: Feature
+Views} for detailed coverage of FeatureView types, versioning, and
+lifecycle management.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{sec-feature}{%
+\subsection{Feature}\label{sec-feature}}
+
+A \textbf{Feature} is an individual column within a FeatureView.
+Features are defined through the \texttt{feature\_df} parameter---a
+Snowpark DataFrame that specifies the transformation logic.
+
+\hypertarget{method-1-dataframe-api-most-common}{%
+\subsubsection{Method 1: DataFrame API (Most
+Common)}\label{method-1-dataframe-api-most-common}}
+
+Use Snowpark DataFrame operations to define features declaratively:
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/feature_dataframe_api.py}{\texttt{\_code/feature\_dataframe\_api.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ImportTok{from}\NormalTok{ snowflake.snowpark }\ImportTok{import}\NormalTok{ functions }\ImportTok{as}\NormalTok{ F}
+
+\CommentTok{\# Define features using Snowpark DataFrame transformations}
+\NormalTok{user\_purchase\_df }\OperatorTok{=}\NormalTok{ (}
+\NormalTok{    session.table(}\StringTok{"ORDERS"}\NormalTok{)}
+\NormalTok{    .group\_by(}\StringTok{"USER\_ID"}\NormalTok{)}
+\NormalTok{    .agg(}
+\NormalTok{        F.}\BuiltInTok{sum}\NormalTok{(}\StringTok{"AMOUNT"}\NormalTok{).alias(}\StringTok{"TOTAL\_SPEND"}\NormalTok{),}
+\NormalTok{        F.count(}\StringTok{"ORDER\_ID"}\NormalTok{).alias(}\StringTok{"ORDER\_CNT"}\NormalTok{),}
+\NormalTok{        F.avg(}\StringTok{"AMOUNT"}\NormalTok{).alias(}\StringTok{"AVG\_ORDER\_AMT"}\NormalTok{),}
+\NormalTok{        F.}\BuiltInTok{max}\NormalTok{(}\StringTok{"ORDER\_TS"}\NormalTok{).alias(}\StringTok{"LAST\_ORDER\_TS"}\NormalTok{),}
+\NormalTok{    )}
+\NormalTok{)}
+
+\CommentTok{\# Create FeatureView with DataFrame{-}defined features}
+\NormalTok{user\_purchase\_fv }\OperatorTok{=}\NormalTok{ FeatureView(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"USER\_PURCHASE\_FEATURES"}\NormalTok{,}
+\NormalTok{    entities}\OperatorTok{=}\NormalTok{[user\_entity],}
+\NormalTok{    feature\_df}\OperatorTok{=}\NormalTok{user\_purchase\_df,  }\CommentTok{\# DataFrame defines the features}
+\NormalTok{    timestamp\_col}\OperatorTok{=}\StringTok{"LAST\_ORDER\_TS"}\NormalTok{,}
+\NormalTok{    refresh\_freq}\OperatorTok{=}\StringTok{"1 hour"}\NormalTok{,}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{method-2-pure-sql-via-session.sql}{%
+\subsubsection{Method 2: Pure SQL via
+session.sql()}\label{method-2-pure-sql-via-session.sql}}
+
+For complex queries or when you prefer SQL, use \texttt{session.sql()}
+to define features:
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/feature_sql_api.py}{\texttt{\_code/feature\_sql\_api.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Define features using pure SQL}
+\NormalTok{user\_features\_df }\OperatorTok{=}\NormalTok{ session.sql(}\StringTok{"""}
+\StringTok{    SELECT }
+\StringTok{        USER\_ID,}
+\StringTok{        COUNT(DISTINCT ORDER\_ID) AS ORDER\_CNT,}
+\StringTok{        SUM(AMOUNT) AS TOTAL\_SPEND,}
+\StringTok{        AVG(AMOUNT) AS AVG\_ORDER\_AMT,}
+\StringTok{        MAX(ORDER\_TS) AS LAST\_ORDER\_TS,}
+\StringTok{        DATEDIFF(\textquotesingle{}day\textquotesingle{}, MIN(ORDER\_TS), MAX(ORDER\_TS)) AS CUSTOMER\_TENURE\_DAYS}
+\StringTok{    FROM ORDERS}
+\StringTok{    GROUP BY USER\_ID}
+\StringTok{"""}\NormalTok{)}
+
+\CommentTok{\# Create FeatureView from SQL{-}defined DataFrame}
+\NormalTok{user\_purchase\_fv }\OperatorTok{=}\NormalTok{ FeatureView(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"USER\_PURCHASE\_FEATURES"}\NormalTok{,}
+\NormalTok{    entities}\OperatorTok{=}\NormalTok{[user\_entity],}
+\NormalTok{    feature\_df}\OperatorTok{=}\NormalTok{user\_features\_df,  }\CommentTok{\# SQL query defines the features}
+\NormalTok{    timestamp\_col}\OperatorTok{=}\StringTok{"LAST\_ORDER\_TS"}\NormalTok{,}
+\NormalTok{    refresh\_freq}\OperatorTok{=}\StringTok{"1 hour"}\NormalTok{,}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-tip-color}{\faLightbulb}\hspace{0.5em}{When to Use SQL}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-tip-color!10!white, toprule=.15mm, colframe=quarto-callout-tip-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+The \texttt{session.sql()} approach is useful when migrating existing
+SQL-based feature pipelines or when complex window functions are easier
+to express in SQL.
+
+\end{tcolorbox}
+
+\hypertarget{sec-aggregations-api}{%
+\subsubsection{Method 3: Feature Aggregation Class
+(Time-Windowed)}\label{sec-aggregations-api}}
+
+For time-windowed aggregations, the \texttt{Feature} class provides a
+declarative API:
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/feature_aggregation_api.py}{\texttt{\_code/feature\_aggregation\_api.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ImportTok{from}\NormalTok{ snowflake.ml.feature\_store }\ImportTok{import}\NormalTok{ Feature}
+
+\CommentTok{\# Define time{-}windowed aggregated features}
+\NormalTok{features }\OperatorTok{=}\NormalTok{ [}
+\NormalTok{    Feature.}\BuiltInTok{sum}\NormalTok{(}\StringTok{"AMOUNT"}\NormalTok{, }\StringTok{"7d"}\NormalTok{).alias(}\StringTok{"TOTAL\_SPEND\_7D"}\NormalTok{),}
+\NormalTok{    Feature.count(}\StringTok{"ORDER\_ID"}\NormalTok{, }\StringTok{"30d"}\NormalTok{).alias(}\StringTok{"ORDER\_CNT\_30D"}\NormalTok{),}
+\NormalTok{    Feature.avg(}\StringTok{"AMOUNT"}\NormalTok{, }\StringTok{"24h"}\NormalTok{).alias(}\StringTok{"AVG\_ORDER\_24H"}\NormalTok{),}
+\NormalTok{    Feature.last\_n(}\StringTok{"PRODUCT\_ID"}\NormalTok{, }\StringTok{"7d"}\NormalTok{, n}\OperatorTok{=}\DecValTok{5}\NormalTok{).alias(}\StringTok{"RECENT\_PRODUCTS"}\NormalTok{),}
+\NormalTok{]}
+
+\CommentTok{\# Use in a tiled FeatureView for efficient computation}
+\NormalTok{tiled\_fv }\OperatorTok{=}\NormalTok{ FeatureView(}
+\NormalTok{    name}\OperatorTok{=}\StringTok{"USER\_PURCHASE\_AGGREGATES"}\NormalTok{,}
+\NormalTok{    entities}\OperatorTok{=}\NormalTok{[user\_entity],}
+\NormalTok{    feature\_df}\OperatorTok{=}\NormalTok{session.table(}\StringTok{"ORDERS"}\NormalTok{),}
+\NormalTok{    timestamp\_col}\OperatorTok{=}\StringTok{"ORDER\_TS"}\NormalTok{,}
+\NormalTok{    refresh\_freq}\OperatorTok{=}\StringTok{"1 hour"}\NormalTok{,}
+\NormalTok{    feature\_granularity}\OperatorTok{=}\StringTok{"1 hour"}\NormalTok{,  }\CommentTok{\# Tile size for incremental computation}
+\NormalTok{    features}\OperatorTok{=}\NormalTok{features,             }\CommentTok{\# Aggregated features}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{🆕 New in snowflake-ml 1.21+}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+The \texttt{Feature} aggregation class provides declarative syntax for
+time-windowed aggregations with automatic tiling for efficient
+incremental computation. See
+\protect\hyperlink{chapter-07-aggregations-api}{Chapter 07: Aggregations
+API} for the complete API reference.
+
+\end{tcolorbox}
+
+\hypertarget{choosing-the-right-method}{%
+\subsubsection{Choosing the Right
+Method}\label{choosing-the-right-method}}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2667}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.4000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Method
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Best For
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Complexity
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{DataFrame API} & Simple aggregations, joins, filtering & Low \\
+\textbf{SQL via session.sql()} & Complex queries, window functions,
+existing SQL & Medium \\
+\textbf{Feature class} & Time-windowed aggregations, sliding windows &
+Advanced \\
+\end{longtable}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{feature-slice}{%
+\subsection{Feature Slice}\label{feature-slice}}
+
+A \textbf{Feature Slice} identifies specific feature columns within a
+FeatureView that you want to retrieve. This allows selective feature
+retrieval rather than fetching all columns.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Get specific features from a FeatureView}
+\NormalTok{user\_slice }\OperatorTok{=}\NormalTok{ user\_features\_fv.}\BuiltInTok{slice}\NormalTok{([}\StringTok{"TOTAL\_SPEND\_7D"}\NormalTok{, }\StringTok{"ORDER\_CNT\_30D"}\NormalTok{])}
+
+\CommentTok{\# Use the slice in dataset generation}
+\NormalTok{dataset }\OperatorTok{=}\NormalTok{ fs.generate\_dataset(}
+\NormalTok{    spine\_df}\OperatorTok{=}\NormalTok{training\_spine,}
+\NormalTok{    features}\OperatorTok{=}\NormalTok{[user\_slice],  }\CommentTok{\# Only retrieves sliced features}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{sec-spine}{%
+\section{The Spine: Connecting Features to ML}\label{sec-spine}}
+
+The \textbf{Spine} is the foundation dataframe that defines which
+entities need features and when. Its structure differs slightly between
+training and inference:
+
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Use Case & Required Columns & Optional Columns \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Training} & Entity keys, Timestamp & Label (target variable) \\
+\textbf{Batch Inference} & Entity keys, Timestamp & --- \\
+\textbf{Online Inference} & Entity keys only & --- \\
+\end{longtable}
+
+\hypertarget{training-spine}{%
+\subsubsection{Training Spine}\label{training-spine}}
+
+For training, the spine defines the historical points where you want to
+retrieve features, along with the target variable (label) you're
+predicting:
+
+\begin{quote}
+📁 \textbf{Full code:}
+\href{_code/spine_examples.py}{\texttt{\_code/spine\_examples.py}}
+\end{quote}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Training spine: includes label for supervised learning}
+\NormalTok{training\_spine }\OperatorTok{=}\NormalTok{ session.sql(}\StringTok{"""}
+\StringTok{    SELECT }
+\StringTok{        USER\_ID,                           {-}{-} Entity key}
+\StringTok{        SUBSCRIPTION\_END\_TS AS EVENT\_TS,   {-}{-} Point{-}in{-}time timestamp  }
+\StringTok{        CASE WHEN CHURNED THEN 1 ELSE 0 END AS LABEL  {-}{-} Target variable}
+\StringTok{    FROM SUBSCRIPTION\_EVENTS}
+\StringTok{    WHERE EVENT\_TYPE = \textquotesingle{}renewal\_decision\textquotesingle{}}
+\StringTok{"""}\NormalTok{)}
+
+\CommentTok{\# Generate training dataset with features joined to spine}
+\NormalTok{training\_set }\OperatorTok{=}\NormalTok{ fs.generate\_dataset(}
+\NormalTok{    spine\_df}\OperatorTok{=}\NormalTok{training\_spine,}
+\NormalTok{    features}\OperatorTok{=}\NormalTok{[user\_features\_fv, session\_features\_fv],}
+\NormalTok{    spine\_timestamp\_col}\OperatorTok{=}\StringTok{"EVENT\_TS"}\NormalTok{,}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{batch-inference-spine}{%
+\subsubsection{Batch Inference Spine}\label{batch-inference-spine}}
+
+For batch inference, you only need entity keys and timestamps---there's
+no label because that's what the model will predict:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Inference spine: no label column}
+\NormalTok{inference\_spine }\OperatorTok{=}\NormalTok{ session.sql(}\StringTok{"""}
+\StringTok{    SELECT }
+\StringTok{        USER\_ID,                           {-}{-} Entity key}
+\StringTok{        CURRENT\_TIMESTAMP() AS EVENT\_TS    {-}{-} Features as of now}
+\StringTok{    FROM ACTIVE\_USERS}
+\StringTok{"""}\NormalTok{)}
+
+\CommentTok{\# Retrieve features for prediction}
+\NormalTok{inference\_data }\OperatorTok{=}\NormalTok{ fs.generate\_dataset(}
+\NormalTok{    spine\_df}\OperatorTok{=}\NormalTok{inference\_spine,}
+\NormalTok{    features}\OperatorTok{=}\NormalTok{[user\_features\_fv, session\_features\_fv],}
+\NormalTok{    spine\_timestamp\_col}\OperatorTok{=}\StringTok{"EVENT\_TS"}\NormalTok{,}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{online-inference}{%
+\subsubsection{Online Inference}\label{online-inference}}
+
+For real-time serving, features are retrieved from Online Feature Tables
+using entity keys only---no timestamp is needed since OFTs store only
+the current (latest) feature values:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Online serving: entity keys only, retrieves current feature values}
+\NormalTok{features }\OperatorTok{=}\NormalTok{ fs.retrieve\_feature\_values(}
+\NormalTok{    spine\_df}\OperatorTok{=}\NormalTok{session.create\_dataframe([\{}\StringTok{"USER\_ID"}\NormalTok{: }\StringTok{"usr\_001"}\NormalTok{\}]),}
+\NormalTok{    features}\OperatorTok{=}\NormalTok{[user\_features\_fv],}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{how-spine-works}{%
+\subsection{How Spine Works}\label{how-spine-works}}
+
+\begin{verbatim}
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      SPINE-BASED FEATURE RETRIEVAL                       │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  SPINE DataFrame                      FeatureViews                       │
+│  ┌───────────────────────┐            ┌───────────────────────┐          │
+│  │ USER_ID  │ EVENT_TS   │            │ USER_PURCHASE_FV      │          │
+│  │──────────┼────────────│    JOIN    │  • TOTAL_SPEND_7D     │          │
+│  │ usr_001  │ 2025-01-15 │───────────▶│  • ORDER_CNT_30D      │          │
+│  │ usr_002  │ 2025-01-16 │            │  • AVG_ORDER_24H      │          │
+│  │ usr_003  │ 2025-01-14 │            └───────────────────────┘          │
+│  └───────────────────────┘                                               │
+│            │                          ┌───────────────────────┐          │
+│            │                          │ USER_SESSION_FV       │          │
+│            └─────────────────────────▶│  • SESSION_CNT_7D     │          │
+│                                       │  • AVG_SESSION_DUR    │          │
+│                                       └───────────────────────┘          │
+│                                                                          │
+│  Result: Features computed as-of EVENT_TS for each USER_ID               │
+└──────────────────────────────────────────────────────────────────────────┘
+\end{verbatim}
+
+The Feature Store joins each spine row to the appropriate FeatureViews,
+ensuring features are computed using only data available at the
+\texttt{EVENT\_TS} timestamp.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{📖 Deep Dive}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+See \protect\hyperlink{chapter-10-training-inference}{Chapter 10:
+Training \& Inference} for spine design patterns and best practices.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{sec-architecture}{%
+\section{Feature Store Architecture}\label{sec-architecture}}
+
+Snowflake Feature Store leverages native Snowflake capabilities:
+
+\begin{verbatim}
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    SNOWFLAKE FEATURE STORE ARCHITECTURE                   │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌────────────────┐      ┌────────────────────────────────────────────┐   │
+│  │  Source Data   │      │           Feature Store Schema             │   │
+│  │                │      │                                            │   │
+│  │  • Tables      │      │  ┌──────────────────────────────────────┐  │   │
+│  │  • Views       │─────▶│  │           FeatureViews               │  │   │
+│  │  • Ext Tables  │      │  │  ┌───────────────┐ ┌──────────────┐  │  │   │
+│  │  • Streams     │      │  │  │ Dynamic Table │ │    View      │  │  │   │
+│  │                │      │  │  │ (materialized)│ │ (query-time) │  │  │   │
+│  └────────────────┘      │  │  └───────────────┘ └──────────────┘  │  │   │
+│                          │  └──────────────────────────────────────┘  │   │
+│                          │                                            │   │
+│                          │  ┌──────────────────────────────────────┐  │   │
+│                          │  │         Metadata (Tags)              │  │   │
+│                          │  │  • Entity definitions                │  │   │
+│                          │  │  • Feature descriptions              │  │   │
+│                          │  │  • Lineage information               │  │   │
+│                          │  └──────────────────────────────────────┘  │   │
+│                          └────────────────────────────────────────────┘   │
+│                                            │                              │
+│                          ┌─────────────────┼─────────────────┐            │
+│                          │                 │                 │            │
+│                          ▼                 ▼                 ▼            │
+│                   ┌────────────┐   ┌────────────┐   ┌────────────┐        │
+│                   │  Training  │   │   Batch    │   │   Online   │        │
+│                   │  Datasets  │   │ Inference  │   │  Serving   │        │
+│                   │            │   │            │   │   (OFT)    │        │
+│                   └────────────┘   └────────────┘   └────────────┘        │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+\end{verbatim}
+
+\hypertarget{physical-implementation}{%
+\subsection{Physical Implementation}\label{physical-implementation}}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3864}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.4091}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2045}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Logical Concept
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Snowflake Object
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Purpose
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Feature Store & Schema + Tags & Container for all Feature Store
+objects \\
+Entity & Tag & Metadata defining join keys \\
+FeatureView (materialized) & Dynamic Table & Pre-computed features with
+full history \\
+FeatureView (query-time) & View & On-demand computed features \\
+Online Feature Table (OFT) & Hybrid Table & Low-latency serving,
+\textbf{current values only} \\
+Dataset & Table or View & Materialized training/inference data \\
+\end{longtable}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-important-color}{\faExclamation}\hspace{0.5em}{Online Feature Tables Store Current Values Only}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-important-color!10!white, toprule=.15mm, colframe=quarto-callout-important-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+Online Feature Tables store only the \textbf{latest (current) value} for
+each feature per entity---they do not retain historical feature values.
+For point-in-time historical retrieval (training, batch inference), use
+the standard FeatureView backed by Dynamic Table or View.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{sec-taxonomy}{%
+\section{Transformation Taxonomy}\label{sec-taxonomy}}
+
+Understanding where transformations should occur is critical for
+maintainable ML systems. We categorize transformations into three types:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1579}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2895}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2632}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2895}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Type
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Full Name
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Location
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Stored In
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{MIT} & Model-Independent Transformations & Feature Pipeline &
+FeatureView \\
+\textbf{MDT} & Model-Dependent Transformations & Training + Inference
+Pipeline & Model Registry \\
+\textbf{ODT} & On-Demand Transformations & Inference Time & Not
+stored \\
+\end{longtable}
+
+\hypertarget{quick-decision-guide}{%
+\subsection{Quick Decision Guide}\label{quick-decision-guide}}
+
+\begin{verbatim}
+Is it reusable across multiple models?
+├── YES → MIT (store in FeatureView)
+└── NO  → Does it depend on training data statistics?
+          ├── YES → MDT (store with model)
+          └── NO  → Does it depend on request context?
+                    ├── YES → ODT (compute at inference)
+                    └── NO  → Probably MIT
+\end{verbatim}
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-note-color}{\faInfo}\hspace{0.5em}{📖 Deep Dive}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-note-color!10!white, toprule=.15mm, colframe=quarto-callout-note-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+See \href{./transformation_taxonomy.md}{Transformation Taxonomy: MIT vs
+MDT vs ODT} for detailed examples, anti-patterns, and implementation
+guidance.
+
+\end{tcolorbox}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{terminology-mapping}{%
+\section{Terminology Mapping}\label{terminology-mapping}}
+
+Snowflake Feature Store terminology aligns with industry standards.
+Here's how terms map across platforms:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2157}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3725}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1569}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2549}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Snowflake
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Dowling/Hopsworks
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tecton
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Feature Store} & Feature Store & Feature Store & Central feature
+repository \\
+\textbf{Entity} & Entity & Entity & Business object with join keys \\
+\textbf{FeatureView} & Feature Group & Feature View & Collection of
+related features \\
+\textbf{Dynamic Table FV} & Offline Store & Batch Feature View &
+Pre-computed, stored features \\
+\textbf{View FV} & - & On-Demand Feature View & Query-time computed
+features \\
+\textbf{Online Feature Table} & Online Store & Online Store &
+Low-latency serving \\
+\textbf{Spine} & Spine DataFrame & Spine & Request keys + timestamps \\
+\textbf{Feature Slice} & Feature & Feature & Individual feature
+column \\
+\texttt{timestamp\_col} & Event Time & Timestamp Column & Point-in-time
+reference \\
+\texttt{refresh\_freq} & Materialization Schedule & TTL & Update
+frequency \\
+\texttt{generate\_dataset()} & Get Training Data & Get Dataset &
+Training data generation \\
+\texttt{retrieve\_feature\_values()} & Get Feature Values & Get Online
+Features & Feature serving \\
+\end{longtable}
+
+\hypertarget{key-terminology-notes}{%
+\subsection{Key Terminology Notes}\label{key-terminology-notes}}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{FeatureView vs Feature Group}: Snowflake uses ``FeatureView''
+  while Hopsworks uses ``Feature Group.'' Both represent a collection of
+  features computed together.
+\item
+  \textbf{Dynamic Table vs Offline Store}: Both refer to
+  pre-materialized features for batch training and inference.
+\item
+  \textbf{Online Feature Table}: Snowflake's implementation uses Hybrid
+  Tables for low-latency serving, equivalent to an ``Online Store'' in
+  other platforms.
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{summary}{%
+\section{Summary}\label{summary}}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2432}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3243}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.4324}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Concept
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Definition
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Key Attributes
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Feature Store} & Centralized feature management layer & Schema +
+Tags in Snowflake \\
+\textbf{Entity} & Business object with join keys & \texttt{name},
+\texttt{join\_keys}, \texttt{desc} \\
+\textbf{FeatureView} & Feature collection with transformations &
+\texttt{entities}, \texttt{feature\_df}, \texttt{refresh\_freq} \\
+\textbf{Feature} & Individual computed value & Defined in DataFrame or
+\texttt{Feature} class \\
+\textbf{Spine} & Request DataFrame & Entity keys + timestamp + labels \\
+\textbf{MIT/MDT/ODT} & Transformation taxonomy & Where transformations
+belong \\
+\end{longtable}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\hypertarget{next-steps-1}{%
+\section{Next Steps}\label{next-steps-1}}
+
+Continue to \protect\hyperlink{chapter-02-design-organization}{Chapter
+02: Design \& Organization} to learn how to structure your Feature Store
+for scale and maintainability.
+
+\part{Design \& Architecture}
+
+\hypertarget{chapter-02-design-organization}{%
+\chapter{Chapter 02: Design
+Organization}\label{chapter-02-design-organization}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-2}{%
+\section{Overview}\label{overview-2}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder}{%
+\section{Placeholder}\label{placeholder}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-03-entities-hierarchies}{%
+\chapter{Chapter 03: Entities
+Hierarchies}\label{chapter-03-entities-hierarchies}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-3}{%
+\section{Overview}\label{overview-3}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-1}{%
+\section{Placeholder}\label{placeholder-1}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-04-feature-views}{%
+\chapter{Chapter 04: Feature Views}\label{chapter-04-feature-views}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-4}{%
+\section{Overview}\label{overview-4}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-2}{%
+\section{Placeholder}\label{placeholder-2}}
+
+See the original \url{index.md} for current content.
+
+\part{Feature Engineering}
+
+\hypertarget{chapter-05-feature-pipelines}{%
+\chapter{Chapter 05: Feature
+Pipelines}\label{chapter-05-feature-pipelines}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-5}{%
+\section{Overview}\label{overview-5}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-3}{%
+\section{Placeholder}\label{placeholder-3}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-06-temporal-features}{%
+\chapter{Chapter 06: Temporal
+Features}\label{chapter-06-temporal-features}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-6}{%
+\section{Overview}\label{overview-6}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-4}{%
+\section{Placeholder}\label{placeholder-4}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-07-aggregations-api}{%
+\chapter{Chapter 07: Aggregations
+Api}\label{chapter-07-aggregations-api}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-7}{%
+\section{Overview}\label{overview-7}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-5}{%
+\section{Placeholder}\label{placeholder-5}}
+
+See the original \url{index.md} for current content.
+
+\part{Production}
+
+\hypertarget{chapter-08-online-features}{%
+\chapter{Chapter 08: Online Features}\label{chapter-08-online-features}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-8}{%
+\section{Overview}\label{overview-8}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-6}{%
+\section{Placeholder}\label{placeholder-6}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-09-preprocessing}{%
+\chapter{Chapter 09: Preprocessing}\label{chapter-09-preprocessing}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-9}{%
+\section{Overview}\label{overview-9}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-7}{%
+\section{Placeholder}\label{placeholder-7}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-10-training-inference}{%
+\chapter{Chapter 10: Training
+Inference}\label{chapter-10-training-inference}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-10}{%
+\section{Overview}\label{overview-10}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-8}{%
+\section{Placeholder}\label{placeholder-8}}
+
+See the original \url{index.md} for current content.
+
+\part{Operations \& Advanced}
+
+\hypertarget{chapter-11-operations}{%
+\chapter{Chapter 11: Operations}\label{chapter-11-operations}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-11}{%
+\section{Overview}\label{overview-11}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-9}{%
+\section{Placeholder}\label{placeholder-9}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-12-advanced-patterns}{%
+\chapter{Chapter 12: Advanced
+Patterns}\label{chapter-12-advanced-patterns}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-12}{%
+\section{Overview}\label{overview-12}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-10}{%
+\section{Placeholder}\label{placeholder-10}}
+
+See the original \url{index.md} for current content.
+
+\hypertarget{chapter-13-migration-guide}{%
+\chapter{Chapter 13: Migration Guide}\label{chapter-13-migration-guide}}
+
+Coming soon
+
+\hfill\break
+
+\hypertarget{overview-13}{%
+\section{Overview}\label{overview-13}}
+
+This chapter is under development. Content will be migrated from the
+existing guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This chapter is being converted to Quarto format. Check back soon for
+updated content.
+
+\end{tcolorbox}
+
+\hypertarget{placeholder-11}{%
+\section{Placeholder}\label{placeholder-11}}
+
+See the original \url{index.md} for current content.
+
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{part}{Appendices}
+\appendix
+
+\hypertarget{appendix-a-sample-data}{%
+\chapter{Appendix A: Sample Data}\label{appendix-a-sample-data}}
+
+Clickstream dataset and public ML datasets
+
+\hfill\break
+
+\hypertarget{overview-14}{%
+\section{Overview}\label{overview-14}}
+
+This appendix documents the sample data used throughout the guide.
+
+\begin{tcolorbox}[enhanced jigsaw, title=\textcolor{quarto-callout-warning-color}{\faExclamationTriangle}\hspace{0.5em}{Work in Progress}, coltitle=black, left=2mm, colback=white, toptitle=1mm, opacityback=0, colbacktitle=quarto-callout-warning-color!10!white, toprule=.15mm, colframe=quarto-callout-warning-color-frame, leftrule=.75mm, opacitybacktitle=0.6, breakable, bottomtitle=1mm, arc=.35mm, bottomrule=.15mm, titlerule=0mm, rightrule=.15mm]
+
+This appendix is being converted to Quarto format.
+
+\end{tcolorbox}
+
+See the original \url{index.md} for current content.
+
+
+
+\end{document}

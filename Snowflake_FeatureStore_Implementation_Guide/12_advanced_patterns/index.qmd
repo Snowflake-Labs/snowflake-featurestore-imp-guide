@@ -1,0 +1,301 @@
+---
+title: "Advanced Patterns"
+subtitle: "Streaming, multi-Feature Store, CI/CD, and advanced architectures"
+---
+
+## Overview
+
+This chapter covers advanced Feature Store patterns for enterprise-scale deployments, including streaming features, multi-Feature Store architectures, CI/CD integration, and complex use cases.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Design streaming feature architectures
+- Implement multi-Feature Store patterns
+- Integrate Feature Store with CI/CD pipelines
+- Handle complex entity relationships
+- Optimize for large-scale deployments
+
+---
+
+## Streaming FeatureViews (Roadmap)
+
+### Current State
+
+Streaming FeatureViews are on the roadmap. Current workarounds:
+
+> 📁 **Full code:** [`_code/streaming_patterns.py`](_code/streaming_patterns.py)
+
+```python
+# Workaround: Short refresh interval with Dynamic Tables
+realtime_fv = FeatureView(
+    name="USER_REALTIME_FEATURES",
+    refresh_freq="1 minute",  # Near real-time
+    # ...
+)
+
+# Alternative: External streaming + View-based FV
+# Use Kafka/Snowpipe → staging table → View FV
+```
+
+### Future Pattern (Planned)
+
+```python
+# Streaming FeatureView (future)
+streaming_fv = FeatureView(
+    name="USER_STREAMING_FEATURES",
+    entities=[user_entity],
+    source_stream="USER_EVENTS_STREAM",  # Snowflake Stream
+    streaming=True,
+    # ...
+)
+```
+
+---
+
+## Multi-Feature Store Operations
+
+### Cross-Domain ML
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    MULTI-FEATURE STORE ARCHITECTURE                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐          │
+│  │ Marketing FS    │  │ Fraud FS        │  │ Shared FS       │          │
+│  │                 │  │                 │  │                 │          │
+│  │ CAMPAIGN_FV     │  │ TRANSACTION_FV  │  │ USER_BASE_FV    │          │
+│  │ SEGMENT_FV      │  │ DEVICE_FV       │  │ PRODUCT_FV      │          │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘          │
+│           │                    │                    │                   │
+│           └────────────────────┼────────────────────┘                   │
+│                                │                                        │
+│                                ▼                                        │
+│                    ┌─────────────────────┐                              │
+│                    │   Cross-Domain ML   │                              │
+│                    │   (Fraud + Marketing│                              │
+│                    │    + Base Features) │                              │
+│                    └─────────────────────┘                              │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### RBAC Considerations
+
+```python
+# Marketing team accesses their FS + shared
+marketing_fs = FeatureStore(session, database="ML", name="MARKETING")
+shared_fs = FeatureStore(session, database="ML", name="SHARED")
+
+# Fraud team accesses their FS + shared
+fraud_fs = FeatureStore(session, database="ML", name="FRAUD")
+# shared_fs also accessible with proper RBAC
+```
+
+---
+
+## External FeatureViews
+
+### DBT Integration
+
+```python
+# FeatureView backed by DBT-managed table
+dbt_fv = FeatureView(
+    name="USER_FEATURES_DBT",
+    entities=[user_entity],
+    feature_df=session.table("ANALYTICS.FEATURES.USER_STATS"),
+    timestamp_col="_DBT_UPDATED_TS",
+    # No refresh_freq → View-based
+    desc="Features managed by DBT pipeline"
+)
+```
+
+### Iceberg Integration
+
+```python
+# FeatureView from Iceberg source
+iceberg_fv = FeatureView(
+    name="USER_FEATURES_ICEBERG",
+    entities=[user_entity],
+    feature_df=session.sql("""
+        SELECT USER_ID, ... 
+        FROM iceberg_catalog.events
+    """),
+    # ...
+)
+```
+
+---
+
+## CI/CD for Feature Store
+
+### Feature Definition as Code
+
+> 📁 **Full code:** [`_code/cicd_patterns.py`](_code/cicd_patterns.py)
+
+```yaml
+# .github/workflows/feature-deploy.yml
+name: Deploy Features
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'features/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Deploy FeatureViews
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+        run: |
+          python scripts/deploy_features.py
+```
+
+### Deployment Script
+
+```python
+# scripts/deploy_features.py
+def deploy_feature_view(
+    fs: FeatureStore,
+    config: dict,
+    environment: str,
+) -> None:
+    """Deploy FeatureView from configuration."""
+    fv = FeatureView(
+        name=config["name"],
+        entities=config["entities"],
+        feature_df=session.sql(config["query"]),
+        timestamp_col=config["timestamp_col"],
+        refresh_freq=config["refresh_freq"],
+    )
+    
+    version = f"{environment}_{config['version']}"
+    fs.register_feature_view(fv, version=version)
+```
+
+---
+
+## Object-Wrapped Features
+
+### Embeddings and Arrays
+
+```python
+# FeatureView with embedding column
+embedding_fv = FeatureView(
+    name="USER_EMBEDDINGS",
+    entities=[user_entity],
+    feature_df=session.sql("""
+        SELECT 
+            USER_ID,
+            EMBEDDING_VECTOR,  -- ARRAY<FLOAT>
+            LAST_UPDATED_TS
+        FROM USER_EMBEDDINGS_TABLE
+    """),
+    # ...
+)
+```
+
+### JSON Features
+
+```python
+# FeatureView with VARIANT/OBJECT columns
+json_fv = FeatureView(
+    name="USER_PREFERENCES",
+    entities=[user_entity],
+    feature_df=session.sql("""
+        SELECT 
+            USER_ID,
+            PREFERENCES,  -- OBJECT with nested structure
+            UPDATED_TS
+        FROM USER_PROFILES
+    """),
+    # ...
+)
+```
+
+---
+
+## Best Practices
+
+### 1. Design for Scale
+
+```python
+# Partition features by update frequency
+fast_features_fv = FeatureView(refresh_freq="5 minutes", ...)
+slow_features_fv = FeatureView(refresh_freq="1 day", ...)
+```
+
+### 2. Manage Complexity
+
+```yaml
+# Document feature dependencies
+features:
+  USER_AGGREGATES:
+    depends_on:
+      - ORDERS
+      - SESSIONS
+    consumers:
+      - churn_model
+      - ltv_model
+```
+
+### 3. Test Feature Pipelines
+
+```python
+# Implement feature tests
+def test_feature_freshness():
+    lag = get_feature_lag("USER_PURCHASE_FV")
+    assert lag < timedelta(hours=2)
+
+def test_feature_quality():
+    null_rate = get_null_rate("USER_PURCHASE_FV", "TOTAL_SPEND")
+    assert null_rate < 0.01
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Over-Engineering
+
+**Problem**: Complex architecture for simple use case.
+
+**Solution**: Start simple, add complexity as needed.
+
+### ❌ Pitfall 2: Inconsistent Patterns
+
+**Problem**: Each team implements features differently.
+
+**Solution**: Establish organization-wide standards.
+
+### ❌ Pitfall 3: No Testing
+
+**Problem**: Feature issues discovered in production.
+
+**Solution**: Implement CI/CD with feature tests.
+
+---
+
+## Summary
+
+| Pattern | Use Case |
+|---------|----------|
+| **Streaming** | Near real-time features |
+| **Multi-FS** | Domain isolation |
+| **External FV** | DBT/Iceberg integration |
+| **CI/CD** | Automated deployments |
+| **Object Features** | Embeddings, JSON |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 13: Migration Guide](../13_migration_guide/index.qmd) for guidance on migrating from other Feature Store platforms.

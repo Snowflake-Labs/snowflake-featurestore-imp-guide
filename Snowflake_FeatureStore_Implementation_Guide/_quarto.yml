@@ -1,0 +1,76 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Snowflake Feature Store Implementation Guide"
+  author: "Simon Field"
+  date: "2026-01-21"
+  search: true
+  repo-url: https://github.com/snowcat-cloud/FeatureStore_BestPractice
+  repo-actions: [edit, issue]
+  
+  sidebar:
+    style: docked
+    search: true
+  
+  chapters:
+    - index.qmd
+    - part: "Getting Started"
+      chapters:
+        - 00_introduction/index.qmd
+        - 01_concepts/index.qmd
+    - part: "Design & Architecture"
+      chapters:
+        - 02_design_organization/index.qmd
+        - 03_entities_hierarchies/index.qmd
+        - 04_feature_views/index.qmd
+    - part: "Feature Engineering"
+      chapters:
+        - 05_feature_pipelines/index.qmd
+        - 06_temporal_features/index.qmd
+        - 07_aggregations_api/index.qmd
+    - part: "Production"
+      chapters:
+        - 08_online_features/index.qmd
+        - 09_preprocessing/index.qmd
+        - 10_training_inference/index.qmd
+    - part: "Operations & Advanced"
+      chapters:
+        - 11_operations/index.qmd
+        - 12_advanced_patterns/index.qmd
+        - 13_migration_guide/index.qmd
+  
+  appendices:
+    - appendices/A_sample_data/index.qmd
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    code-line-numbers: true
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    highlight-style: github
+    
+  pdf:
+    documentclass: scrreprt
+    toc: true
+    number-sections: true
+    colorlinks: true
+
+execute:
+  freeze: auto
+  error: false
+  warning: false
+  
+jupyter: python3
+
+# Shared metadata
+metadata:
+  keywords: [snowflake, feature store, ml, machine learning, mlops]

@@ -1,0 +1,355 @@
+---
+title: "Entities & Hierarchies"
+subtitle: "Entity design patterns, compound keys, and hierarchical relationships"
+---
+
+## Overview
+
+Entities are the foundational building blocks of a Feature Store. They define the business objects that features describe and determine how features can be joined together. This chapter covers entity design patterns, from simple single-key entities to complex compound keys and hierarchical relationships.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Design entities that accurately reflect your business domain
+- Choose between simple and compound entity keys
+- Model entity hierarchies for multi-level aggregations
+- Make informed decisions using the entity design framework
+
+---
+
+## Entity Fundamentals
+
+An **Entity** represents a business object that features describe. It defines:
+
+- **What** business concept the features relate to (User, Product, Transaction)
+- **How** features are retrieved via join keys
+- **Which** FeatureViews can be combined for a given request
+
+> 📁 **Full code:** [`_code/entity_definitions.py`](_code/entity_definitions.py)
+
+```python
+from snowflake.ml.feature_store import Entity
+
+# Define an entity
+user_entity = Entity(
+    name="USER",
+    join_keys=["USER_ID"],
+    desc="Registered user in the e-commerce platform"
+)
+```
+
+### Entity Components
+
+| Component | Description | Requirements |
+|-----------|-------------|--------------|
+| `name` | Unique identifier within the Feature Store | SCREAMING_SNAKE_CASE, descriptive |
+| `join_keys` | Column(s) that uniquely identify an instance | Must exist in spine and FeatureView |
+| `desc` | Human-readable description | Document the business meaning |
+
+---
+
+## Simple Entity Keys
+
+Simple entities use a single column as the join key. This is the most common pattern.
+
+### Examples
+
+```python
+# User entity - most common
+user_entity = Entity(
+    name="USER",
+    join_keys=["USER_ID"],
+    desc="Registered user with account"
+)
+
+# Product entity
+product_entity = Entity(
+    name="PRODUCT",
+    join_keys=["PRODUCT_ID"],
+    desc="Product in the catalog"
+)
+
+# Session entity
+session_entity = Entity(
+    name="SESSION",
+    join_keys=["SESSION_ID"],
+    desc="User browsing session"
+)
+```
+
+### When to Use Simple Entities
+
+| Scenario | Example |
+|----------|---------|
+| Single business object | Users, Products, Stores |
+| Natural unique identifier exists | Customer ID, SKU, Transaction ID |
+| Features are always at this granularity | User-level churn prediction |
+
+---
+
+## Compound Entity Keys {#sec-compound-keys}
+
+Compound entities use multiple columns together as the join key. Essential for many-to-many relationships.
+
+### Why Compound Keys?
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PRODUCT-SUPPLIER RELATIONSHIP                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   PRODUCT_ID: P001              PRODUCT_SUPPLIER Table                  │
+│   ┌───────────────┐             ┌────────────────────────────────────┐  │
+│   │ Widget Pro    │────────────▶│ P001, S001: $10.00, 5 day lead     │  │
+│   │               │             │ P001, S002: $9.50,  7 day lead     │  │
+│   └───────────────┘             │ P001, S003: $11.00, 3 day lead     │  │
+│                                 └────────────────────────────────────┘  │
+│                                                                         │
+│   To get specific supplier pricing, you need BOTH keys:                 │
+│   (PRODUCT_ID, SUPPLIER_ID) → unique row                                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Defining Compound Entities
+
+> 📁 **Full code:** [`_code/compound_entities.py`](_code/compound_entities.py)
+
+```python
+# Compound entity for product-supplier combination
+product_supplier_entity = Entity(
+    name="PRODUCT_SUPPLIER",
+    join_keys=["PRODUCT_ID", "SUPPLIER_ID"],
+    desc="Product and supplier combination for sourcing features"
+)
+
+# Compound entity for user-product interaction
+user_product_entity = Entity(
+    name="USER_PRODUCT",
+    join_keys=["USER_ID", "PRODUCT_ID"],
+    desc="User-product affinity features"
+)
+
+# Order item entity (order + line number)
+order_item_entity = Entity(
+    name="ORDER_ITEM",
+    join_keys=["ORDER_ID", "LINE_NUMBER"],
+    desc="Individual line item within an order"
+)
+```
+
+### When to Use Compound Entities
+
+| Scenario | Join Keys | Example Use Case |
+|----------|-----------|------------------|
+| Many-to-many relationships | `[A_ID, B_ID]` | User-product affinity |
+| Intersection tables | `[PARENT_ID, CHILD_ID]` | Product-supplier pricing |
+| Sub-entity granularity | `[PARENT_ID, SEQ]` | Order line items |
+| Time-partitioned entities | `[ENTITY_ID, DATE]` | Daily snapshots |
+
+---
+
+## Entity Hierarchies {#sec-hierarchies}
+
+Entities can form hierarchies where one entity "rolls up" to another. This enables multi-level aggregations.
+
+### Common Hierarchy Patterns
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ENTITY HIERARCHY PATTERNS                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  USER HIERARCHY           LOCATION HIERARCHY        PRODUCT HIERARCHY   │
+│                                                                         │
+│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
+│  │  HOUSEHOLD  │         │   COUNTRY   │           │  CATEGORY   │      │
+│  └──────┬──────┘         └──────┬──────┘           └──────┬──────┘      │
+│         │                       │                         │             │
+│         ▼                       ▼                         ▼             │
+│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
+│  │    USER     │         │   REGION    │           │SUBCATEGORY  │      │
+│  └──────┬──────┘         └──────┬──────┘           └──────┬──────┘      │
+│         │                       │                         │             │
+│         ▼                       ▼                         ▼             │
+│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
+│  │   SESSION   │         │    STORE    │           │   PRODUCT   │      │
+│  └─────────────┘         └─────────────┘           └─────────────┘      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Implementing Hierarchies
+
+> 📁 **Full code:** [`_code/entity_hierarchies.py`](_code/entity_hierarchies.py)
+
+```python
+# Define entities at each level
+household_entity = Entity(name="HOUSEHOLD", join_keys=["HOUSEHOLD_ID"])
+user_entity = Entity(name="USER", join_keys=["USER_ID"])
+session_entity = Entity(name="SESSION", join_keys=["SESSION_ID"])
+
+# FeatureViews at different granularities
+household_fv = FeatureView(
+    name="HOUSEHOLD_FEATURES",
+    entities=[household_entity],
+    feature_df=household_agg_df,  # Aggregated at household level
+    # ...
+)
+
+user_fv = FeatureView(
+    name="USER_FEATURES",
+    entities=[user_entity],
+    feature_df=user_agg_df,  # Aggregated at user level
+    # ...
+)
+
+session_fv = FeatureView(
+    name="SESSION_FEATURES",
+    entities=[session_entity],
+    feature_df=session_df,  # Session-level features
+    # ...
+)
+```
+
+### Combining Hierarchical Features
+
+To use features from multiple hierarchy levels, your spine must include all join keys:
+
+```python
+# Spine with multi-level keys
+spine = session.sql("""
+    SELECT 
+        s.SESSION_ID,
+        s.USER_ID,
+        u.HOUSEHOLD_ID,
+        s.SESSION_START_TS AS EVENT_TS
+    FROM SESSIONS s
+    JOIN USERS u ON s.USER_ID = u.USER_ID
+""")
+
+# Generate dataset with features from all levels
+dataset = fs.generate_dataset(
+    spine_df=spine,
+    features=[session_fv, user_fv, household_fv],
+)
+```
+
+---
+
+## Entity Design Patterns
+
+### Pattern 1: Domain-Aligned Entities
+
+Align entities with business domain concepts:
+
+```python
+# E-commerce domain
+CUSTOMER = Entity(name="CUSTOMER", join_keys=["CUSTOMER_ID"])
+PRODUCT = Entity(name="PRODUCT", join_keys=["SKU"])
+ORDER = Entity(name="ORDER", join_keys=["ORDER_NUMBER"])
+
+# Financial domain
+ACCOUNT = Entity(name="ACCOUNT", join_keys=["ACCOUNT_ID"])
+TRANSACTION = Entity(name="TRANSACTION", join_keys=["TXN_ID"])
+MERCHANT = Entity(name="MERCHANT", join_keys=["MERCHANT_ID"])
+```
+
+### Pattern 2: Interaction Entities
+
+Model relationships between domain entities:
+
+```python
+# User-Product interaction
+USER_PRODUCT = Entity(
+    name="USER_PRODUCT_INTERACTION",
+    join_keys=["USER_ID", "PRODUCT_ID"],
+    desc="User-product affinity and behavior"
+)
+
+# User-Merchant interaction
+USER_MERCHANT = Entity(
+    name="USER_MERCHANT",
+    join_keys=["USER_ID", "MERCHANT_ID"],
+    desc="User spending patterns per merchant"
+)
+```
+
+---
+
+## Best Practices
+
+### 1. Use Descriptive Names
+
+```python
+# ✅ GOOD: Clear business meaning
+Entity(name="REGISTERED_USER", join_keys=["USER_ID"])
+Entity(name="PRODUCT_SUPPLIER", join_keys=["PRODUCT_ID", "SUPPLIER_ID"])
+
+# ❌ BAD: Vague or technical names
+Entity(name="ENTITY1", join_keys=["ID"])
+Entity(name="TBL_KEY", join_keys=["K1", "K2"])
+```
+
+### 2. Document Business Context
+
+```python
+Entity(
+    name="HOUSEHOLD",
+    join_keys=["HOUSEHOLD_ID"],
+    desc="Group of users sharing the same billing address. Used for household-level targeting and fraud detection."
+)
+```
+
+### 3. Consistent Key Naming
+
+Use the same column names across tables:
+
+```python
+# ✅ GOOD: Consistent USER_ID everywhere
+Entity(name="USER", join_keys=["USER_ID"])
+# FeatureView source: SELECT USER_ID, ... FROM ...
+# Spine: SELECT USER_ID, ...
+
+# ❌ BAD: Inconsistent naming
+# Table A: CUSTOMER_ID, Table B: USER_KEY, Table C: USR_ID
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Key Column Mismatch
+
+**Problem**: Join key column missing from FeatureView or spine.
+
+**Solution**: Ensure join key columns exist in all relevant DataFrames.
+
+### ❌ Pitfall 2: Wrong Granularity
+
+**Problem**: Entity doesn't match feature computation granularity.
+
+**Solution**: Ensure FeatureView aggregates to entity grain.
+
+### ❌ Pitfall 3: Missing Hierarchy Links
+
+**Problem**: Can't combine features from different hierarchy levels.
+
+**Solution**: Include all necessary foreign keys in spine.
+
+---
+
+## Summary
+
+| Pattern | Join Keys | Use Case |
+|---------|-----------|----------|
+| **Simple** | Single column | Standard domain entities |
+| **Compound** | Multiple columns | Many-to-many, intersections |
+| **Hierarchical** | Cascading relationships | Multi-level aggregations |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 04: Feature Views](../04_feature_views/index.qmd) to learn about FeatureView types, versioning, and lifecycle management.

@@ -1,0 +1,269 @@
+---
+title: "Migration Guide"
+subtitle: "Migrating to Snowflake Feature Store from other platforms"
+---
+
+## Overview
+
+This chapter provides guidance for teams migrating to Snowflake Feature Store from other platforms. It covers terminology mapping, migration strategies, and common patterns.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Map terminology from other Feature Stores to Snowflake
+- Plan a phased migration approach
+- Migrate feature definitions and pipelines
+- Validate migrated features
+
+---
+
+## Why Migrate to Snowflake Feature Store?
+
+### Key Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **Unified Platform** | Features, training, inference all in Snowflake |
+| **Native Integration** | Uses Snowflake objects (DTs, Views, Hybrid Tables) |
+| **Zero Infrastructure** | No separate serving infrastructure needed |
+| **Enterprise Security** | Inherits Snowflake RBAC and governance |
+| **Cost Efficiency** | No data movement, unified compute |
+
+---
+
+## Terminology Mapping {#sec-terminology}
+
+### Tecton/Feast → Snowflake
+
+> 📁 **Full code:** [`_code/terminology_mapping.py`](_code/terminology_mapping.py)
+
+| Tecton/Feast | Snowflake | Notes |
+|--------------|-----------|-------|
+| Feature Store | Feature Store | Schema + metadata |
+| Entity | Entity | Business object with join keys |
+| Feature View | FeatureView | Collection of features |
+| Batch Feature View | Dynamic Table FV | Pre-computed features |
+| On-Demand Feature View | View FV | Query-time computed |
+| Online Store | Online Feature Table | Hybrid Table serving |
+| Offline Store | FeatureView (DT) | Historical feature storage |
+| Feature Service | (N/A) | Use FeatureView slices |
+| Spine | Spine DataFrame | Entity keys + timestamps |
+| Feature Definition | `feature_df` | DataFrame transformation |
+| `get_historical_features` | `generate_dataset` | Training data generation |
+| `get_online_features` | `get_online_features` | Real-time retrieval |
+
+---
+
+## Migration Approach
+
+### Three-Phase Migration
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MIGRATION WORKFLOW                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Phase 1: ASSESSMENT          Phase 2: MIGRATION       Phase 3: VALID  │
+│  ┌───────────────────┐       ┌─────────────────────┐   ┌────────────┐  │
+│  │                   │       │                     │   │            │  │
+│  │ • Inventory       │       │ • Recreate entities │   │ • Compare  │  │
+│  │   existing        │──────▶│ • Port feature defs │──▶│   outputs  │  │
+│  │   features        │       │ • Setup pipelines   │   │ • Validate │  │
+│  │ • Map terminology │       │ • Migrate consumers │   │   PIT      │  │
+│  │ • Plan phases     │       │                     │   │ • Cutover  │  │
+│  │                   │       │                     │   │            │  │
+│  └───────────────────┘       └─────────────────────┘   └────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 1: Assessment
+
+1. **Inventory existing features**
+   - List all Feature Views/Groups
+   - Document entities and join keys
+   - Identify refresh frequencies
+
+2. **Map to Snowflake concepts**
+   - Use terminology mapping table
+   - Identify gaps or differences
+
+3. **Plan migration order**
+   - Start with simple features
+   - Group by model dependency
+
+### Phase 2: Migration
+
+> 📁 **Full code:** [`_code/migration_utils.py`](_code/migration_utils.py)
+
+```python
+# Example: Migrating a Tecton Feature View to Snowflake
+
+# Tecton (original)
+"""
+@batch_feature_view(
+    entities=[user_entity],
+    feature_table=user_features,
+    schedule=timedelta(hours=1),
+)
+def user_purchase_fv(user_txns):
+    return user_txns.groupby('USER_ID').agg(
+        total_spend=('AMOUNT', 'sum'),
+        order_count=('ORDER_ID', 'count'),
+    )
+"""
+
+# Snowflake (migrated)
+user_purchase_df = session.sql("""
+    SELECT 
+        USER_ID,
+        SUM(AMOUNT) AS TOTAL_SPEND,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM USER_TRANSACTIONS
+    GROUP BY USER_ID
+""")
+
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FV",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+)
+```
+
+### Phase 3: Validation
+
+```python
+def validate_migration(
+    source_features: DataFrame,
+    snowflake_features: DataFrame,
+    entity_cols: list,
+) -> dict:
+    """Compare features between source and Snowflake."""
+    
+    # Join on entity keys
+    comparison = source_features.join(
+        snowflake_features,
+        on=entity_cols,
+        how="full_outer",
+    )
+    
+    # Check for differences
+    mismatches = comparison.filter(
+        # Compare feature values
+        F.col("source_TOTAL_SPEND") != F.col("sf_TOTAL_SPEND")
+    ).count()
+    
+    return {
+        "total_rows": comparison.count(),
+        "mismatches": mismatches,
+        "match_rate": (1 - mismatches / comparison.count()) * 100,
+    }
+```
+
+---
+
+## Platform-Specific Guides
+
+### Tecton Migration
+
+::: {.callout-note}
+## Priority
+Tecton migration is prioritized given Databricks Online Tables EOL.
+:::
+
+```python
+# Key differences to handle:
+# 1. Feature definitions use SQL/Snowpark vs Python transformations
+# 2. Online serving uses Hybrid Tables vs Tecton's online store
+# 3. Scheduling uses refresh_freq vs Tecton's schedule parameter
+```
+
+### Feast Migration
+
+```python
+# Key differences:
+# 1. Feature Store is a Snowflake schema vs external metadata store
+# 2. Online store is Hybrid Table vs Redis/DynamoDB
+# 3. No separate Feature Service concept - use FV slices
+```
+
+---
+
+## Best Practices
+
+### 1. Migrate Incrementally
+
+```
+Week 1: Entities + 2-3 simple FeatureViews
+Week 2: Remaining batch features
+Week 3: Online serving setup
+Week 4: Consumer cutover
+```
+
+### 2. Run in Parallel
+
+Operate both systems during migration:
+
+```python
+# Generate features from both systems
+source_features = tecton_client.get_historical_features(...)
+sf_features = fs.generate_dataset(...)
+
+# Compare outputs
+validate_migration(source_features, sf_features)
+```
+
+### 3. Validate PIT Correctness
+
+```python
+# Ensure point-in-time retrieval produces same results
+def test_pit_correctness(spine, source_fs, snowflake_fs):
+    source_result = source_fs.get_historical_features(spine)
+    sf_result = snowflake_fs.generate_dataset(spine)
+    
+    assert_dataframes_equal(source_result, sf_result)
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Big Bang Migration
+
+**Problem**: Migrating everything at once causes extended outages.
+
+**Solution**: Phased migration with parallel operation.
+
+### ❌ Pitfall 2: Skipping Validation
+
+**Problem**: Subtle differences in feature values undetected.
+
+**Solution**: Comprehensive output comparison.
+
+### ❌ Pitfall 3: Ignoring Timestamp Semantics
+
+**Problem**: Different interpretation of event time vs. processing time.
+
+**Solution**: Document and align timestamp semantics.
+
+---
+
+## Summary
+
+| Phase | Activities |
+|-------|------------|
+| **Assessment** | Inventory, terminology mapping, planning |
+| **Migration** | Recreate entities, port definitions, setup pipelines |
+| **Validation** | Compare outputs, validate PIT, cutover |
+
+---
+
+## Additional Resources
+
+- [Snowflake Feature Store Documentation](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store)
+- [Tecton Documentation](https://docs.tecton.ai/) (for reference)
+- [Feast Documentation](https://docs.feast.dev/) (for reference)

@@ -1,0 +1,92 @@
+---
+title: "Snowflake Feature Store Implementation Guide"
+subtitle: "Best Practices for Building Production ML Feature Platforms"
+---
+
+## Welcome {.unnumbered}
+
+This guide provides comprehensive, practical guidance for implementing a Feature Store 
+using Snowflake's native Feature Store capabilities. Whether you're building your first 
+ML feature platform or migrating from another solution, this guide will help you design, 
+build, and operate a production-grade Snowflake Feature Store.
+
+## What You'll Learn {.unnumbered}
+
+::: {.callout-note appearance="simple"}
+## Key Topics Covered
+
+- **Core Concepts** - Entities, FeatureViews, and the Feature Store architecture
+- **Design Patterns** - Organization, naming conventions, and governance
+- **Feature Engineering** - Temporal features, aggregations, and pipelines
+- **Production Operations** - Online serving, preprocessing, and monitoring
+- **Advanced Patterns** - Streaming, CI/CD, and cross-domain ML
+:::
+
+## Prerequisites {.unnumbered}
+
+Before starting, ensure you have:
+
+- ✅ Snowflake account (Standard Edition or higher)
+- ✅ Python 3.8+ with `snowflake-ml-python` >= 1.7.0
+- ✅ Basic familiarity with SQL and Python
+- ✅ Understanding of ML concepts (training, inference, features, etc)
+
+## Quick Start {.unnumbered}
+
+```python
+# Install the required package
+# pip install snowflake-ml-python
+
+from snowflake.snowpark import Session
+from snowflake.ml.feature_store import FeatureStore, Entity, FeatureView
+
+# Connect to Snowflake
+session = Session.builder.configs(connection_params).create()
+
+# Initialize Feature Store
+fs = FeatureStore(
+    session=session,
+    database="ML_DB",
+    name="FEATURE_STORE",
+    default_warehouse="COMPUTE_WH",
+)
+
+# You're ready to start building features!
+```
+
+In the example above, the feature store schema will be created in the `ML_DB` database, with the name `FEATURE_STORE`. The default warehouse used for compute will be `COMPUTE_WH`. The feature store will be initialized with the `CREATE_IF_NOT_EXIST` creation mode, which will create the feature store schema if it does not already exist.  If the schema already exists, the feature store will be initialized and return a FeatureStore object that can be used to build feature store artifacts.
+
+## How to Use This Guide {.unnumbered}
+
+| Your Goal | Start Here |
+|-----------|------------|
+| New to Feature Store | [Chapter 0: Introduction](00_introduction/index.qmd) |
+| Design a Feature Store | [Chapter 2: Design & Organization](02_design_organization/index.qmd) |
+| Design Entities & hierarchies | [Chapter 3: Entities & Hierarchies](03_entities_hierarchies/index.qmd) |
+| Creating FeatureViews | [Chapter 4: FeatureViews](04_feature_views/index.qmd) |
+| Building Feature Pipelines | [Chapter 5: Feature Pipelines](05_feature_pipelines/index.qmd) |
+| Build temporal features | [Chapter 6: Temporal Features](06_temporal_features/index.qmd) |
+| Enable online serving | [Chapter 8: Online Features](08_online_features/index.qmd) |
+| Building ML Models | [Chapter 9: Preprocessing](09_preprocessing/index.qmd) |
+| Migrating from another Feature Store platform | [Chapter 13: Migration Guidance](13_migration_guide/index.qmd) |
+
+## Code Examples {.unnumbered}
+
+All code examples in this guide are:
+
+- ✅ **Tested** - Every example is verified to work
+- ✅ **Copy-ready** - Click the copy button on any code block
+- ✅ **Self-contained** - Each example includes necessary imports
+- ✅ **Available in repo** - Browse the `_code/` directories
+
+## Feedback & Contributions {.unnumbered}
+
+Found an issue or want to suggest an improvement?
+
+- 📝 Use the "Edit this page" link on any page
+- 🐛 [Report an issue](https://github.com/snowcat-cloud/FeatureStore_BestPractice/issues)
+- 💬 Questions? Reach out via GitHub Discussions
+
+---
+
+*Last updated: January 2026*

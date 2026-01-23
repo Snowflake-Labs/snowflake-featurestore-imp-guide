@@ -1,0 +1,313 @@
+---
+title: "Introduction"
+subtitle: "Setup, prerequisites, and guide overview"
+---
+
+## Overview
+
+This guide provides comprehensive best practices for implementing Snowflake Feature Store in production ML systems. It covers the full lifecycle from initial design through deployment and ongoing operations.
+
+The Snowflake Feature Store is a managed data management layer that helps ML teams organize, store, and serve features at scale. It provides:
+
+- **Centralized Feature Management**: A single source of truth for feature definitions and metadata
+- **Automated Feature Engineering Pipelines**: Dynamic Table-based materialization (pre-computed) or View-based (query-time computation)
+- **Point-in-Time Feature Retrieval**: Temporally correct feature joins for ML training and batch inference, preventing data leakage
+- **Online Serving**: Low-latency feature retrieval via Online Feature Tables for real-time inference
+- **Governance & Lineage**: Full tracking from source data to model predictions
+
+## What's Covered in This Guide
+
+| Chapter | Topic | Description |
+|---------|-------|-------------|
+| **00** | Introduction | Setup, prerequisites, guide overview |
+| [**01**](../01_concepts/index.qmd) | Concepts | Core objects, terminology, transformation taxonomy |
+| [**02**](../02_design_organization/index.qmd) | Design & Organization | Feature Store structure, multi-environment patterns |
+| [**03**](../03_entities_hierarchies/index.qmd) | Entities & Hierarchies | Entity keys (simple & compound), relationships |
+| [**04**](../04_feature_views/index.qmd) | Feature Views | DT vs View, versioning, lifecycle management |
+| [**05**](../05_feature_pipelines/index.qmd) | Feature Pipelines | DBT, Dynamic Tables, Temporal API pipelines |
+| [**06**](../06_temporal_features/index.qmd) | Temporal Features | Point-in-time correctness, tiling, aggregations |
+| [**07**](../07_aggregations_api/index.qmd) | Aggregations API | `Feature` class, windows, rollups |
+| [**08**](../08_online_features/index.qmd) | Online Features | Online Feature Tables, serving patterns |
+| [**09**](../09_preprocessing/index.qmd) | Preprocessing | Encoding, scaling, model-dependent transforms |
+| [**10**](../10_training_inference/index.qmd) | Training & Inference | Spine design, dataset generation |
+| [**11**](../11_operations/index.qmd) | Operations | Monitoring, DMFs, lineage, drift detection |
+| [**12**](../12_advanced_patterns/index.qmd) | Advanced Patterns | Streaming FeatureViews, multi-FS operations |
+| [**13**](../13_migration_guide/index.qmd) | Migration Guide | Tecton, SageMaker, Vertex AI migration paths |
+
+## Prerequisites
+
+### Required Snowflake Access
+
+- Snowflake account (Standard Edition or higher)
+- Database privileges to create schemas, tables, dynamic tables, views, and tags
+- Warehouse access for compute
+- `snowflake-ml-python` package installed (available via pip/conda)
+
+### Required Privileges
+
+Feature Store requires specific privileges. A role setup script is available in the [Snowflake documentation](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/rbac).
+
+Minimum required privileges:
+
+```sql
+-- Create a role for Feature Store users
+CREATE ROLE IF NOT EXISTS FEATURE_STORE_USER;
+
+-- Grant database and schema access
+GRANT USAGE ON DATABASE <database> TO ROLE FEATURE_STORE_USER;
+GRANT CREATE SCHEMA ON DATABASE <database> TO ROLE FEATURE_STORE_USER;
+GRANT USAGE ON WAREHOUSE <warehouse> TO ROLE FEATURE_STORE_USER;
+
+-- For Feature Store schema operations
+GRANT CREATE TABLE ON SCHEMA <schema> TO ROLE FEATURE_STORE_USER;
+GRANT CREATE DYNAMIC TABLE ON SCHEMA <schema> TO ROLE FEATURE_STORE_USER;
+GRANT CREATE VIEW ON SCHEMA <schema> TO ROLE FEATURE_STORE_USER;
+GRANT CREATE TAG ON SCHEMA <schema> TO ROLE FEATURE_STORE_USER;
+```
+
+### Software Requirements
+
+```python
+# Minimum package versions for this guide
+snowflake-ml-python >= 1.8.0      # Core Feature Store functionality
+snowflake-snowpark-python >= 1.25.0  # DataFrame operations
+
+# Additional packages used in examples
+pandas >= 2.0.0
+numpy >= 1.23.5
+scikit-learn >= 1.5.0
+```
+
+::: {.callout-note}
+## 🆕 New Features in snowflake-ml 1.21+
+
+The `Feature` aggregation class (@sec-aggregations-api) and Temporal Aggregated FeatureViews
+require version 1.21.0 or later. Earlier versions can use the approaches shown
+in @sec-feature-pipelines for temporal features.
+:::
+
+## Environment Setup
+
+### Session Configuration
+
+The following code establishes a Snowpark session and verifies the environment.
+
+> 📁 **Full code:** [`_code/setup_session.py`](_code/setup_session.py)
+
+```python
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+# Default configuration - override as needed
+SOURCE_DATABASE = 'FEATURE_STORE_GUIDE'
+SOURCE_SCHEMA = 'CLICKSTREAM_RAW'
+FS_NAME = 'GUIDE_FEATURE_STORE'
+WAREHOUSE = 'COMPUTE_WH'
+
+# ==============================================================================
+# IMPORTS
+# ==============================================================================
+
+# Python standard library
+import json
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+# Data processing
+import pandas as pd
+import numpy as np
+
+# Snowpark
+from snowflake.snowpark import Session
+from snowflake.snowpark.version import VERSION
+from snowflake.snowpark import functions as F
+from snowflake.snowpark import types as T
+from snowflake.snowpark.context import get_active_session
+
+# Feature Store
+from snowflake.ml.feature_store import (
+    FeatureStore, 
+    FeatureView, 
+    Entity,
+    CreationMode
+)
+
+# ==============================================================================
+# SESSION CREATION
+# ==============================================================================
+
+# Option 1: Running in Snowflake Notebook (preferred)
+try:
+    session = get_active_session()
+except:
+    # Option 2: Running locally with connection config
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+# Enable SQL simplifier for cleaner generated SQL
+session.sql_simplifier_enabled = True
+```
+
+### Verify Environment
+
+> 📁 **Full code:** [`_code/verify_environment.py`](_code/verify_environment.py)
+
+```python
+# Capture environment details
+snowflake_environment = session.sql('SELECT current_user(), current_version()').collect()
+snowpark_version = VERSION
+session_role = session.get_current_role().replace('"', "")
+session_database = session.get_current_database().replace('"', "")
+session_schema = session.get_current_schema().replace('"', "")
+session_warehouse = session.get_current_warehouse().replace('"', "")
+
+# Check warehouse status
+wh_status = session.sql(f"SHOW WAREHOUSES LIKE '{session_warehouse}'").collect()[0]
+
+print('=' * 70)
+print('CONNECTION ESTABLISHED')
+print('=' * 70)
+print(f'Account                : {session.sql("SELECT current_account()").collect()[0][0]}')
+print(f'User                   : {snowflake_environment[0][0]}')
+print(f'Role                   : {session_role}')
+print(f'Database               : {session_database}')
+print(f'Schema                 : {session_schema}')
+print(f'Warehouse              : {session_warehouse}')
+print(f'Warehouse Size         : {wh_status["size"].upper()}')
+print(f'Warehouse State        : {wh_status["state"]}')
+print(f'Snowflake Version      : {snowflake_environment[0][1]}')
+print(f'Snowpark Version       : {snowpark_version[0]}.{snowpark_version[1]}.{snowpark_version[2]}')
+print('=' * 70)
+```
+
+Expected output:
+
+```
+======================================================================
+CONNECTION ESTABLISHED
+======================================================================
+Account                : YOUR_ACCOUNT
+User                   : YOUR_USER
+Role                   : SYSADMIN
+Database               : FEATURE_STORE_GUIDE
+Schema                 : CLICKSTREAM_RAW
+Warehouse              : COMPUTE_WH
+Warehouse Size         : X-SMALL
+Warehouse State        : STARTED
+Snowflake Version      : 8.x.x
+Snowpark Version       : 1.25.0
+======================================================================
+```
+
+### Create Feature Store
+
+> 📁 **Full code:** [`_code/create_feature_store.py`](_code/create_feature_store.py)
+
+```python
+# Create working schema for sample data
+session.sql(f'CREATE SCHEMA IF NOT EXISTS {SOURCE_DATABASE}.{SOURCE_SCHEMA}').collect()
+
+# Initialize Feature Store
+# This creates a schema with Feature Store metadata tags
+fs = FeatureStore(
+    session=session,
+    database=SOURCE_DATABASE,
+    name=FS_NAME,
+    default_warehouse=WAREHOUSE,
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+print(f'Feature Store initialized: {SOURCE_DATABASE}.{FS_NAME}')
+```
+
+## Sample Data
+
+This guide uses a synthetic clickstream dataset designed to demonstrate all Feature Store capabilities, including:
+
+- **Temporal patterns**: Event timestamps with realistic distributions
+- **Entity hierarchies**: Visitor → User → Household relationships
+- **Composite keys**: Product-Supplier junction table (M:N)
+- **Semi-structured data**: VARIANT, ARRAY, OBJECT columns
+
+See [Appendix A: Clickstream Data Model](../appendices/A_sample_data/index.qmd) for the full data model specification.
+
+### Quick Data Overview
+
+The clickstream dataset includes these core tables:
+
+| Table | Description | Entity Key | Temporal Column |
+|-------|-------------|------------|-----------------|
+| `VISITORS` | Anonymous visitors | `VISITOR_ID` | `FIRST_SEEN_TS`, `LAST_SEEN_TS` |
+| `USERS` | Identified users | `USER_ID` | `CREATED_TS`, `UPDATED_TS` |
+| `SESSIONS` | User sessions | `SESSION_ID` | `SESSION_START_TS`, `SESSION_END_TS` |
+| `EVENTS` | Clickstream events | `EVENT_ID` | `EVENT_TS` |
+| `ORDERS` | Purchase orders | `ORDER_ID` | `ORDER_TS` |
+| `PRODUCTS` | Product catalog | `PRODUCT_ID` | `CREATED_TS` |
+| `PRODUCT_SUPPLIER` | Supplier relationships | `(PRODUCT_ID, SUPPLIER_ID)` | `VALID_FROM_TS`, `VALID_TO_TS` |
+
+### Inline Snippet Pattern
+
+For simple examples, we use self-contained data that you can copy-paste directly:
+
+```python
+# Example: Create sample events for quick testing
+from snowflake.snowpark import Session, Row
+
+# Assumes session is already created
+sample_events = session.create_dataframe([
+    Row(USER_ID='usr_001', EVENT_TS='2025-01-01 10:00:00', EVENT_TYPE='page_view', VALUE=1.0),
+    Row(USER_ID='usr_001', EVENT_TS='2025-01-01 10:05:00', EVENT_TYPE='click', VALUE=1.0),
+    Row(USER_ID='usr_001', EVENT_TS='2025-01-01 10:10:00', EVENT_TYPE='purchase', VALUE=99.0),
+    Row(USER_ID='usr_002', EVENT_TS='2025-01-01 11:00:00', EVENT_TYPE='page_view', VALUE=1.0),
+    Row(USER_ID='usr_002', EVENT_TS='2025-01-01 11:02:00', EVENT_TYPE='page_view', VALUE=1.0),
+])
+
+sample_events.write.save_as_table("SAMPLE_EVENTS", mode="overwrite")
+```
+
+::: {.callout-tip}
+## Full Code Available
+
+All code examples in this guide are available in the `_code/` directories.
+You can also click the "View source" icon on any code block to see the full file.
+:::
+
+## Guide Conventions
+
+### Code Examples
+
+All code examples follow these conventions:
+
+- **SQL**: UPPERCASE keywords, lowercase identifiers
+- **Python**: PEP 8 style, type hints where helpful
+- **Naming**: `SCREAMING_SNAKE_CASE` for Snowflake objects, `snake_case` for Python
+
+### Feature Naming Conventions {#sec-naming-conventions}
+
+| Suffix | Meaning | Example |
+|--------|---------|---------|
+| `_TS` | Timestamp | `ORDER_TS`, `CREATED_TS` |
+| `_DT` | Date | `ORDER_DT` |
+| `_CNT` | Count | `SESSION_CNT`, `ORDER_CNT` |
+| `_DCNT` | Distinct count | `PRODUCT_VIEW_DCNT` |
+| `_SUM` | Sum/total | `REVENUE_SUM`, `QUANTITY_SUM` |
+| `_AVG` | Average | `ORDER_VALUE_AVG` |
+| `_AMT` | Amount (currency) | `TOTAL_AMT`, `DISCOUNT_AMT` |
+| `IS_` | Boolean flag | `IS_CONVERTED`, `IS_CURRENT` |
+
+### Version Callouts
+
+New features are highlighted with version callouts:
+
+::: {.callout-note}
+## 🆕 New in snowflake-ml X.X.X
+
+Description of the new feature and how it improves on previous approaches.
+:::
+
+---
+
+## Next Steps
+
+Continue to [Chapter 01: Concepts](../01_concepts/index.qmd) to learn about the core Feature Store objects and terminology.

@@ -1,0 +1,700 @@
+---
+title: "Design & Organization"
+subtitle: "Feature Store structure, environments, and governance"
+---
+
+## Overview
+
+This chapter covers organizational patterns for Snowflake Feature Stores, including single vs. multiple Feature Store strategies, environment management, governance, and cross-environment promotion strategies. A well-designed Feature Store organization is critical for scalability, maintainability, and compliance.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Choose the appropriate Feature Store organization pattern for your needs
+- Design environment strategies for dev/test/prod workflows
+- Implement role-based access control (RBAC) for Feature Store objects
+- Plan and execute cross-environment feature promotion
+- Apply governance patterns for compliance and auditability
+
+---
+
+## Organization Patterns
+
+Snowflake Feature Store uses native Snowflake objects for storage and metadata:
+
+| Logical Concept | Snowflake Object | Scope |
+|-----------------|------------------|-------|
+| Feature Store | Schema + Tags | Database-level |
+| Entity | Tag | Schema-level |
+| FeatureView (materialized) | Dynamic Table | Schema-level |
+| FeatureView (query-time) | View | Schema-level |
+| Online Feature Table | Hybrid Table | Schema-level |
+| Feature metadata | Tags | Column/Object-level |
+
+### Basic Organization: One Database, One Schema
+
+The simplest organization uses a single database with one Feature Store schema:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        SINGLE FEATURE STORE                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Database: ML_PLATFORM                                                  │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  Schema: FEATURE_STORE                                            │  │
+│  │                                                                   │  │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐ │  │
+│  │  │ USER_FEATURES_FV │  │ PRODUCT_FV       │  │ SESSION_FV       │ │  │
+│  │  │ (Dynamic Table)  │  │ (Dynamic Table)  │  │ (View)           │ │  │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘ │  │
+│  │                                                                   │  │
+│  │  Entities: USER, PRODUCT, SESSION                                 │  │
+│  │  Tags: Feature metadata, descriptions, lineage                    │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+> 📁 **Full code:** [`_code/organization_patterns.py`](_code/organization_patterns.py)
+
+```python
+from snowflake.ml.feature_store import FeatureStore, CreationMode
+
+# Create a single Feature Store
+fs = FeatureStore(
+    session=session,
+    database="ML_PLATFORM",
+    name="FEATURE_STORE",
+    default_warehouse="ML_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+```
+
+**When to use**:
+
+- Small teams (1-5 data scientists)
+- Single ML project or use case
+- Quick proof-of-concept work
+- No regulatory separation requirements
+
+### Intermediate Organization: One Database, Multiple Schemas
+
+Separate schemas by domain, team, or use case within a single database:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     DOMAIN-BASED ORGANIZATION                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Database: ML_FEATURES                                                  │
+│                                                                         │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────┐  │
+│  │ Schema: MARKETING   │  │ Schema: FRAUD       │  │ Schema: SHARED  │  │
+│  │                     │  │                     │  │                 │  │
+│  │ • CAMPAIGN_FV       │  │ • TRANSACTION_FV    │  │ • USER_BASE_FV  │  │
+│  │ • SEGMENT_FV        │  │ • DEVICE_FV         │  │ • PRODUCT_FV    │  │
+│  │ • ATTRIBUTION_FV    │  │ • VELOCITY_FV       │  │ • SESSION_FV    │  │
+│  │                     │  │                     │  │                 │  │
+│  │ Team: Marketing DS  │  │ Team: Risk DS       │  │ Team: Platform  │  │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+```python
+# Marketing team's Feature Store
+marketing_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="MARKETING",
+    default_warehouse="MARKETING_WH",
+)
+
+# Fraud team's Feature Store
+fraud_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="FRAUD",
+    default_warehouse="FRAUD_WH",
+)
+
+# Shared features accessible to all
+shared_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="SHARED",
+    default_warehouse="ML_WH",
+)
+```
+
+**When to use**:
+
+- Multiple teams sharing a platform
+- Different domains with some shared features
+- Need for domain-specific access control
+- Medium-sized organizations (5-20 data scientists)
+
+---
+
+## Single vs Multiple Feature Stores
+
+### Decision Framework
+
+```
+Do you need strong data isolation between domains?
+├── YES → Multiple Feature Stores (separate schemas)
+└── NO  → Do you have compliance requirements?
+          ├── YES → Multiple Feature Stores with RBAC
+          └── NO  → Single Feature Store is sufficient
+```
+
+### Single Feature Store
+
+**Advantages**:
+
+- Simpler management and discovery
+- All features in one place
+- Easier cross-domain joins
+- Single point of governance
+
+**Disadvantages**:
+
+- More complex RBAC for many teams
+- Risk of naming conflicts
+- Can become unwieldy at scale
+- Harder to isolate compute costs
+
+### Multiple Feature Stores
+
+**Advantages**:
+
+- Clear domain boundaries
+- Independent team ownership
+- Separate compute/cost allocation
+- Compliance-friendly isolation
+
+**Disadvantages**:
+
+- Feature duplication risk
+- Harder cross-domain discovery
+- More complex management
+- Potential for inconsistent patterns
+
+### Hybrid: Shared + Domain-Specific
+
+The recommended pattern for larger organizations combines shared and domain-specific Feature Stores:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         HYBRID ORGANIZATION                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                     SHARED Feature Store                          │  │
+│  │  Database: ML_PLATFORM  Schema: SHARED_FEATURES                   │  │
+│  │                                                                   │  │
+│  │  • Core entity features (USER, PRODUCT, LOCATION)                 │  │
+│  │  • Foundational aggregations (purchase history, session stats)    │  │
+│  │  • Governed, versioned, production-grade                          │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              │ Read access granted                      │
+│              ┌───────────────┼───────────────┐                          │
+│              ▼               ▼               ▼                          │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐            │
+│  │ MARKETING_FS    │ │ FRAUD_FS        │ │ PERSONALIZATION │            │
+│  │                 │ │                 │ │                 │            │
+│  │ Domain-specific │ │ Domain-specific │ │ Domain-specific │            │
+│  │ features        │ │ features        │ │ features        │            │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Environment Strategies
+
+Production ML systems require separate environments for development, testing, and production.
+
+### Pattern 1: Schema-Based Environments (Same Account)
+
+Use different schemas for each environment within the same database:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SCHEMA-BASED ENVIRONMENTS                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Database: ML_FEATURES                                                  │
+│                                                                         │
+│  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐    │
+│  │ Schema: DEV       │  │ Schema: TEST      │  │ Schema: PROD      │    │
+│  │                   │  │                   │  │                   │    │
+│  │ USER_FEATURES_FV  │  │ USER_FEATURES_FV  │  │ USER_FEATURES_FV  │    │
+│  │ (v1, v2, v3)      │  │ (v2-promoted)     │  │ (v2-validated)    │    │
+│  │                   │  │                   │  │                   │    │
+│  │ Warehouse: DEV_WH │  │ Warehouse: TEST_WH│  │ Warehouse: PROD_WH│    │
+│  └───────────────────┘  └───────────────────┘  └───────────────────┘    │
+│                                                                         │
+│  Data Flow:  DEV ──(clone)──▶ TEST ──(clone)──▶ PROD                    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+> 📁 **Full code:** [`_code/environment_setup.py`](_code/environment_setup.py)
+
+```python
+# Development Feature Store
+dev_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="DEV",
+    default_warehouse="DEV_WH",
+)
+
+# Test Feature Store
+test_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="TEST",
+    default_warehouse="TEST_WH",
+)
+
+# Production Feature Store
+prod_fs = FeatureStore(
+    session=session,
+    database="ML_FEATURES",
+    name="PROD",
+    default_warehouse="PROD_WH",
+)
+```
+
+**Advantages**:
+
+- Simple setup
+- Zero-copy cloning between schemas
+- Shared source data access
+- Single account management
+
+### Pattern 2: Database-Based Environments
+
+Use separate databases for stronger logical isolation:
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    DATABASE-BASED ENVIRONMENTS                            │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐          │
+│  │ DB: ML_DEV      │   │ DB: ML_TEST     │   │ DB: ML_PROD     │          │
+│  │                 │   │                 │   │                 │          │
+│  │ Schema: FS      │   │ Schema: FS      │   │ Schema: FS      │          │
+│  │                 │   │                 │   │                 │          │
+│  │ Full R/W for    │   │ Read for devs   │   │ Read-only for   │          │
+│  │ developers      │   │ Write for CI/CD │   │ inference only  │          │
+│  └─────────────────┘   └─────────────────┘   └─────────────────┘          │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Environment Strategy Comparison
+
+| Aspect | Schema-Based | Database-Based | Multi-Account |
+|--------|--------------|----------------|---------------|
+| **Setup Complexity** | Low | Medium | High |
+| **Isolation Level** | Logical | Logical | Physical |
+| **RBAC Granularity** | Schema-level | Database-level | Account-level |
+| **Promotion Method** | Clone | Clone/Export | Share/Replicate |
+| **Compliance** | Basic | Moderate | Enterprise |
+| **Best For** | Small teams | Medium orgs | Regulated industries |
+
+---
+
+## Role-Based Access Control {#sec-rbac}
+
+Snowflake's native RBAC integrates with Feature Store objects. Design roles around the principle of least privilege.
+
+### Recommended Role Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      FEATURE STORE RBAC MODEL                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│                         ┌───────────────┐                               │
+│                         │  ACCOUNTADMIN │                               │
+│                         └───────┬───────┘                               │
+│                                 │                                       │
+│                         ┌───────┴───────┐                               │
+│                         │  SYSADMIN     │                               │
+│                         └───────┬───────┘                               │
+│                                 │                                       │
+│               ┌─────────────────┼─────────────────┐                     │
+│               │                 │                 │                     │
+│               ▼                 ▼                 ▼                     │
+│  ┌────────────────────┐ ┌────────────────┐ ┌────────────────┐           │
+│  │ FS_ADMIN           │ │ FS_DEVELOPER   │ │ FS_CONSUMER    │           │
+│  │                    │ │                │ │                │           │
+│  │ • Create schemas   │ │ • Create FVs   │ │ • Read FVs     │           │
+│  │ • Manage entities  │ │ • Register FVs │ │ • Generate     │           │
+│  │ • Grant access     │ │ • Update FVs   │ │   training sets│           │
+│  │ • Audit & monitor  │ │ • Test in DEV  │ │ • Retrieve     │           │
+│  │                    │ │                │ │   features     │           │
+│  └────────────────────┘ └────────────────┘ └────────────────┘           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### RBAC Implementation
+
+> 📁 **Full code:** [`_code/rbac_setup.sql`](_code/rbac_setup.sql)
+
+```sql
+-- Create Feature Store roles
+CREATE ROLE IF NOT EXISTS FS_ADMIN;
+CREATE ROLE IF NOT EXISTS FS_DEVELOPER;
+CREATE ROLE IF NOT EXISTS FS_CONSUMER;
+
+-- Grant schema privileges to admin
+GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_ADMIN;
+GRANT ALL PRIVILEGES ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
+GRANT CREATE DYNAMIC TABLE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
+GRANT CREATE VIEW ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
+
+-- Grant developer privileges (create and modify)
+GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_DEVELOPER;
+GRANT USAGE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
+GRANT CREATE DYNAMIC TABLE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
+GRANT CREATE VIEW ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
+
+-- Grant consumer privileges (read-only)
+GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_CONSUMER;
+GRANT USAGE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+GRANT SELECT ON ALL DYNAMIC TABLES IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+GRANT SELECT ON ALL VIEWS IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+
+-- Future grants for new objects
+GRANT SELECT ON FUTURE DYNAMIC TABLES IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+
+-- Role hierarchy
+GRANT ROLE FS_CONSUMER TO ROLE FS_DEVELOPER;
+GRANT ROLE FS_DEVELOPER TO ROLE FS_ADMIN;
+GRANT ROLE FS_ADMIN TO ROLE SYSADMIN;
+```
+
+---
+
+## Cross-Environment Promotion {#sec-promotion}
+
+Moving features from development to production requires a controlled promotion process.
+
+### Promotion Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     FEATURE PROMOTION WORKFLOW                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  DEV                         TEST                       PROD            │
+│  ┌─────────────────┐        ┌─────────────────┐       ┌──────────────┐  │
+│  │                 │        │                 │       │              │  │
+│  │ 1. Develop FV   │        │ 3. Validate     │       │ 5. Deploy    │  │
+│  │                 │        │                 │       │              │  │
+│  │ 2. Test locally │───────▶│ 4. Integration  │──────▶│ 6. Monitor   │  │
+│  │                 │ PR/CI  │    tests        │ Gate  │              │  │
+│  │ • Unit tests    │        │ • Data quality  │       │ • Drift      │  │
+│  │ • Schema valid  │        │ • Consistency   │       │ • Freshness  │  │
+│  └─────────────────┘        └─────────────────┘       └──────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Method 1: Object Cloning
+
+Snowflake's zero-copy cloning efficiently promotes FeatureViews:
+
+```sql
+-- Clone entire Feature Store schema from DEV to TEST
+CREATE SCHEMA ML_FEATURES.TEST CLONE ML_FEATURES.DEV;
+
+-- Or clone specific FeatureViews
+CREATE DYNAMIC TABLE ML_FEATURES.TEST.USER_FEATURES_FV 
+CLONE ML_FEATURES.DEV.USER_FEATURES_FV;
+
+-- Validate in TEST, then promote to PROD
+CREATE DYNAMIC TABLE ML_FEATURES.PROD.USER_FEATURES_FV 
+CLONE ML_FEATURES.TEST.USER_FEATURES_FV;
+```
+
+::: {.callout-note}
+Cloning copies the object definition and data at a point in time. The clone becomes independent of the source.
+:::
+
+### Method 2: Python-Based Promotion
+
+> 📁 **Full code:** [`_code/promotion_utils.py`](_code/promotion_utils.py)
+
+```python
+def promote_feature_view(
+    source_fs: FeatureStore,
+    target_fs: FeatureStore,
+    fv_name: str,
+    version: str
+) -> None:
+    """Promote a FeatureView from source to target Feature Store."""
+    
+    # Get the FeatureView from source
+    source_fv = source_fs.get_feature_view(name=fv_name, version=version)
+    
+    # Recreate in target (adjusting source table references if needed)
+    target_fv = FeatureView(
+        name=source_fv.name,
+        entities=source_fv.entities,  # Entities must exist in target
+        feature_df=source_fv.feature_df,
+        timestamp_col=source_fv.timestamp_col,
+        refresh_freq=source_fv.refresh_freq,
+        desc=source_fv.desc,
+    )
+    
+    # Register with same version
+    target_fs.register_feature_view(
+        feature_view=target_fv,
+        version=version,
+    )
+```
+
+---
+
+## Governance Considerations {#sec-governance}
+
+### Avoiding Duplicate Features
+
+A recurring challenge in fast-moving teams is **accidentally re-creating features** that already exist.
+
+**Recommended Practices**:
+
+1. **Establish team-wide naming standards**
+2. **Require meaningful descriptions and tags**
+3. **Query existing features before creating new ones**
+
+> 📁 **Full code:** [`_code/feature_discovery.sql`](_code/feature_discovery.sql)
+
+```sql
+-- Search for existing features by name pattern
+SELECT 
+    TABLE_NAME AS FEATURE_VIEW,
+    COLUMN_NAME AS FEATURE_NAME,
+    COMMENT AS DESCRIPTION
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'FEATURE_STORE'
+  AND (COLUMN_NAME LIKE '%SPEND%' OR COMMENT LIKE '%purchase%')
+ORDER BY TABLE_NAME, COLUMN_NAME;
+```
+
+::: {.callout-tip}
+## Field Tip
+This is particularly important when multiple squads work on the same entity (e.g., multiple "customer" feature pipelines) or when onboarding new teams unfamiliar with existing feature catalogs.
+:::
+
+### Feature Versioning {#sec-versioning}
+
+Version FeatureViews to enable safe updates and rollbacks.
+
+::: {.callout-important}
+## Key Insight
+Versioning happens at the **FeatureView level, not per individual feature**. A FV version is treated as an immutable bundle of features. When you change feature definitions, create a new FV version—the system does not automatically track per-feature deltas between versions.
+:::
+
+#### Recommended Version Naming
+
+Use **zero-padded, sequential version identifiers** so lexicographic order matches creation order:
+
+```python
+# RECOMMENDED: Zero-padded sequential versions
+fs.register_feature_view(fv, version="V01")
+fs.register_feature_view(fv, version="V02")
+fs.register_feature_view(fv, version="V10")  # Sorts correctly after V09
+
+# ALSO ACCEPTABLE: Environment-prefixed versions
+fs.register_feature_view(fv, version="DEV_V01")
+fs.register_feature_view(fv, version="PROD_V03")
+```
+
+#### Getting the "Latest" Version
+
+Feature Store is intentionally not opinionated on version semantics—there's **no built-in "latest version" alias**. Create a helper utility:
+
+> 📁 **Full code:** [`_code/version_utils.py`](_code/version_utils.py)
+
+```python
+def get_latest_feature_view(
+    fs: FeatureStore,
+    feature_view_name: str,
+) -> FeatureView:
+    """Get the most recent version of a FeatureView."""
+    versions = fs.list_feature_views(feature_view_name=feature_view_name)
+    
+    # Sort by version string (works with zero-padded versions)
+    versions_sorted = sorted(versions, key=lambda fv: fv.version, reverse=True)
+    
+    return versions_sorted[0] if versions_sorted else None
+```
+
+### Feature Store Ownership & SLAs
+
+Define clear ownership for each Feature Store or domain:
+
+```yaml
+# feature_manifest.yaml
+feature_views:
+  - name: USER_PURCHASE_AGGREGATES
+    owner: marketing-ds@company.com
+    team: Marketing Data Science
+    description: Core user purchase behavior features
+    consumers:
+      - churn-model
+      - ltv-model
+    sla:
+      refresh_frequency: "1 hour"
+      max_latency_minutes: 90
+```
+
+### Feature Discovery & Search
+
+Use metadata queries to find features across the organization:
+
+```python
+def search_features(fs: FeatureStore, search_term: str) -> list:
+    """Search for features by name or description."""
+    all_fvs = fs.list_feature_views()
+    results = []
+    
+    for fv_info in all_fvs.collect():
+        fv = fs.get_feature_view(name=fv_info.name, version=fv_info.version)
+        # Check name and description
+        if search_term.lower() in fv.name.lower():
+            results.append(fv)
+        elif fv.desc and search_term.lower() in fv.desc.lower():
+            results.append(fv)
+    
+    return results
+```
+
+---
+
+## Best Practices
+
+### 1. Start Simple, Scale as Needed
+
+```
+Start with:
+├── Single database
+├── Schema-based environments (DEV/TEST/PROD)
+├── Basic RBAC (Admin/Developer/Consumer)
+└── Manual promotion
+
+Scale to:
+├── Multiple databases by domain
+├── Multi-account for compliance
+├── Granular RBAC with environment-specific roles
+└── CI/CD automated promotion
+```
+
+### 2. Establish Naming Conventions Early
+
+| Object Type | Convention | Example |
+|-------------|------------|---------|
+| Database | `ML_<purpose>` | `ML_PLATFORM`, `ML_FEATURES` |
+| Schema (env) | `<ENV>` | `DEV`, `TEST`, `PROD` |
+| Schema (domain) | `<DOMAIN>_FEATURES` | `MARKETING_FEATURES` |
+| FeatureView | `<ENTITY>_<DOMAIN>_FV` | `USER_PURCHASE_FV` |
+| Entity | `<BUSINESS_OBJECT>` | `USER`, `PRODUCT`, `SESSION` |
+
+### 3. Separate Compute by Environment
+
+```sql
+-- Environment-specific warehouses with appropriate sizing
+CREATE WAREHOUSE DEV_WH     WITH WAREHOUSE_SIZE = 'XSMALL' AUTO_SUSPEND = 60;
+CREATE WAREHOUSE TEST_WH    WITH WAREHOUSE_SIZE = 'SMALL'  AUTO_SUSPEND = 120;
+CREATE WAREHOUSE PROD_WH    WITH WAREHOUSE_SIZE = 'MEDIUM' AUTO_SUSPEND = 300;
+CREATE WAREHOUSE PROD_OFT_WH WITH WAREHOUSE_SIZE = 'SMALL' AUTO_SUSPEND = 60;
+```
+
+### 4. Feature Store Health Monitoring
+
+Monitor Feature Store health using Snowflake views:
+
+```sql
+-- Check Dynamic Table refresh status
+SELECT 
+    NAME,
+    REFRESH_MODE,
+    SCHEDULING_STATE,
+    LAST_COMPLETED_REFRESH_START_TIME,
+    LAST_REFRESH_TRIGGER
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+WHERE SCHEMA_NAME = 'FEATURE_STORE'
+ORDER BY LAST_COMPLETED_REFRESH_START_TIME DESC;
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: No Environment Isolation
+
+**Problem**: Developers experimenting in production Feature Store.
+
+**Solution**: Always separate environments with RBAC. Developers should never have write access to PROD.
+
+### ❌ Pitfall 2: Feature Duplication Across Teams
+
+**Problem**: Multiple teams create similar features independently.
+
+**Solution**: Implement a shared Feature Store for common entities. Require feature review before creation.
+
+### ❌ Pitfall 3: No Promotion Process
+
+**Problem**: Features move from dev to prod without validation.
+
+**Solution**: Implement gated promotion with required tests and approvals.
+
+### ❌ Pitfall 4: Ignoring Cost Attribution
+
+**Problem**: Unable to charge back Feature Store costs to teams.
+
+**Solution**: Use separate warehouses per team/environment. Tag resources appropriately.
+
+### ❌ Pitfall 5: Over-Engineering Early
+
+**Problem**: Building complex multi-account setup for a small team.
+
+**Solution**: Start simple. Migrate to more complex patterns when actually needed.
+
+---
+
+## Summary
+
+| Pattern | When to Use | Key Benefit |
+|---------|-------------|-------------|
+| **Single FS** | Small teams, POC | Simplicity |
+| **Multi-Schema FS** | Multiple teams, domains | Organization |
+| **Multi-Database FS** | Clear domain boundaries | Isolation |
+| **Multi-Account FS** | Regulated industries | Compliance |
+
+| Environment Strategy | Isolation Level | Best For |
+|---------------------|-----------------|----------|
+| **Schema-based** | Logical | Most teams |
+| **Database-based** | Stronger logical | Growing orgs |
+| **Multi-account** | Physical | Enterprise/Regulated |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 03: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) to learn about entity design patterns, compound keys, and entity relationships.

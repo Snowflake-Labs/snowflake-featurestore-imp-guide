@@ -1,0 +1,255 @@
+---
+title: "Operations"
+subtitle: "Monitoring, data quality, lineage, and operational management"
+---
+
+## Overview
+
+Operational excellence is critical for production Feature Stores. This chapter covers monitoring, data quality, lineage tracking, and day-to-day operational management.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Monitor Feature Store health and performance
+- Implement data quality checks
+- Track data lineage end-to-end
+- Manage costs and compute resources
+- Troubleshoot common issues
+
+---
+
+## Refresh Monitoring
+
+### Dynamic Table Refresh Status
+
+> 📁 **Full code:** [`_code/monitoring.sql`](_code/monitoring.sql)
+
+```sql
+-- Check refresh history
+SELECT 
+    NAME,
+    STATE,
+    REFRESH_START_TIME,
+    REFRESH_END_TIME,
+    STATISTICS:numInsertedRows::INT AS ROWS_INSERTED
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'USER_PURCHASE_FV$V1'
+))
+ORDER BY REFRESH_START_TIME DESC
+LIMIT 10;
+
+-- Check current lag
+SELECT 
+    NAME,
+    TARGET_LAG,
+    SCHEDULING_STATE,
+    DATA_TIMESTAMP,
+    TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) AS LAG_MINUTES
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+WHERE SCHEMA_NAME = 'FEATURE_STORE';
+```
+
+### Alerting for Stale Features
+
+```sql
+-- Create alert for stale features (>60 min lag)
+CREATE ALERT feature_staleness_alert
+  WAREHOUSE = ML_WH
+  SCHEDULE = 'USING CRON 0 * * * * UTC'
+  IF (EXISTS (
+    SELECT * 
+    FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+    WHERE SCHEMA_NAME = 'FEATURE_STORE'
+      AND TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) > 60
+  ))
+  THEN
+    CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
+```
+
+---
+
+## Feature Discovery & Metadata
+
+### Listing FeatureViews
+
+> 📁 **Full code:** [`_code/discovery.py`](_code/discovery.py)
+
+```python
+# List all FeatureViews
+feature_views = fs.list_feature_views()
+print(feature_views.to_pandas())
+
+# Get specific FeatureView details
+fv = fs.get_feature_view(name="USER_PURCHASE_FV", version="V1")
+print(f"Name: {fv.name}")
+print(f"Entities: {fv.entities}")
+print(f"Refresh: {fv.refresh_freq}")
+```
+
+### SQL Metadata Queries
+
+```sql
+-- Describe FeatureView structure
+DESCRIBE FEATURE VIEW USER_PURCHASE_FV$V1;
+
+-- List all features across FeatureViews
+SELECT 
+    TABLE_NAME AS FEATURE_VIEW,
+    COLUMN_NAME AS FEATURE,
+    DATA_TYPE,
+    COMMENT
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'FEATURE_STORE';
+```
+
+---
+
+## Data Lineage
+
+### Object Dependencies
+
+```sql
+-- View FeatureView dependencies
+SELECT *
+FROM SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES
+WHERE REFERENCING_OBJECT_NAME = 'USER_PURCHASE_FV$V1'
+  AND REFERENCING_OBJECT_DOMAIN = 'DYNAMIC TABLE';
+```
+
+### Access History
+
+```sql
+-- Track feature usage
+SELECT *
+FROM SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY
+WHERE BASE_OBJECTS_ACCESSED LIKE '%USER_PURCHASE_FV%'
+ORDER BY QUERY_START_TIME DESC
+LIMIT 100;
+```
+
+---
+
+## Data Quality Monitoring
+
+### Data Metric Functions (DMFs)
+
+```sql
+-- Create DMF for null checks
+CREATE DATA METRIC FUNCTION null_rate(T TABLE(col STRING))
+RETURNS DECIMAL(5,4)
+AS
+$$
+SELECT COALESCE(
+    SUM(CASE WHEN col IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0),
+    0
+)
+$$;
+
+-- Apply to FeatureView
+ALTER DYNAMIC TABLE USER_PURCHASE_FV$V1
+SET DATA_METRIC_SCHEDULE = 'USING CRON 0 * * * * UTC';
+```
+
+---
+
+## Feature Store Health Monitoring
+
+### Key Metrics
+
+```sql
+-- Feature Store health dashboard query
+WITH fv_health AS (
+    SELECT 
+        NAME,
+        SCHEDULING_STATE,
+        TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) AS LAG_MINUTES,
+        CASE 
+            WHEN SCHEDULING_STATE = 'RUNNING' AND LAG_MINUTES < 60 THEN 'HEALTHY'
+            WHEN LAG_MINUTES >= 60 THEN 'STALE'
+            ELSE 'WARNING'
+        END AS STATUS
+    FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+    WHERE SCHEMA_NAME = 'FEATURE_STORE'
+)
+SELECT 
+    STATUS,
+    COUNT(*) AS COUNT,
+    ARRAY_AGG(NAME) AS FEATURE_VIEWS
+FROM fv_health
+GROUP BY STATUS;
+```
+
+---
+
+## Best Practices
+
+### 1. Monitor Proactively
+
+```sql
+-- Set up alerts before issues impact users
+CREATE ALERT ...
+```
+
+### 2. Track Lineage
+
+Document feature sources and consumers:
+
+```python
+fv = FeatureView(
+    desc="""
+    Sources: ORDERS table
+    Consumers: churn_model_v1, ltv_model_v2
+    Owner: ml-platform@company.com
+    """,
+    # ...
+)
+```
+
+### 3. Regular Health Checks
+
+Schedule weekly reviews:
+
+- FeatureView refresh status
+- Data quality metrics
+- Compute costs
+- Unused features
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: No Monitoring
+
+**Problem**: Issues discovered when models fail.
+
+**Solution**: Implement proactive alerting.
+
+### ❌ Pitfall 2: Missing Lineage
+
+**Problem**: Can't trace feature issues to source.
+
+**Solution**: Use OBJECT_DEPENDENCIES and document.
+
+### ❌ Pitfall 3: Stale Features
+
+**Problem**: Models using outdated features.
+
+**Solution**: Monitor lag and set appropriate refresh.
+
+---
+
+## Summary
+
+| Capability | Implementation |
+|------------|----------------|
+| **Refresh Monitoring** | `DYNAMIC_TABLE_REFRESH_HISTORY` |
+| **Feature Discovery** | `list_feature_views()`, `DESCRIBE` |
+| **Lineage** | `OBJECT_DEPENDENCIES`, `ACCESS_HISTORY` |
+| **Data Quality** | Data Metric Functions (DMFs) |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 12: Advanced Patterns](../12_advanced_patterns/index.qmd) to learn about streaming, multi-Feature Store, and CI/CD patterns.

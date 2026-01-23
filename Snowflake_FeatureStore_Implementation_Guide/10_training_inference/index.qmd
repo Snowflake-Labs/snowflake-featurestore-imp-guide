@@ -1,0 +1,285 @@
+---
+title: "Training & Inference"
+subtitle: "Generating datasets, spine design, and Model Registry integration"
+---
+
+## Overview
+
+This chapter covers the end-to-end workflow for using Feature Store in ML pipelines: from designing spines and generating training datasets to batch and online inference.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Design effective spines for training and inference
+- Generate training datasets with point-in-time correctness
+- Apply feature column prefixing for disambiguation
+- Integrate with Snowflake Model Registry
+- Implement batch and online inference workflows
+
+---
+
+## Spine Design
+
+The **spine** defines which entities need features and when. Its structure differs between training and inference.
+
+| Use Case | Required Columns | Optional Columns |
+|----------|------------------|------------------|
+| **Training** | Entity keys, Timestamp | Label (target) |
+| **Batch Inference** | Entity keys, Timestamp | — |
+| **Online Inference** | Entity keys only | — |
+
+### Training Spine
+
+> 📁 **Full code:** [`_code/spine_design.py`](_code/spine_design.py)
+
+```python
+# Training spine includes labels
+training_spine = session.sql("""
+    SELECT 
+        USER_ID,                           -- Entity key
+        EVENT_TS,                          -- Point-in-time timestamp
+        CHURNED AS LABEL                   -- Target variable
+    FROM CHURN_EVENTS
+""")
+```
+
+### Inference Spine
+
+```python
+# Inference spine: no label column
+inference_spine = session.sql("""
+    SELECT 
+        USER_ID,
+        CURRENT_TIMESTAMP() AS EVENT_TS    -- Features as of now
+    FROM ACTIVE_USERS
+""")
+```
+
+---
+
+## Generating Training Datasets
+
+### Basic Usage
+
+```python
+# Generate training dataset with PIT correctness
+training_set = fs.generate_dataset(
+    spine_df=training_spine,
+    features=[user_purchase_fv, user_session_fv],
+    spine_timestamp_col="EVENT_TS",
+)
+
+# Save to table for model training
+training_set.write.save_as_table("TRAINING_DATASET_V1")
+```
+
+### Multi-FeatureView Joins
+
+```python
+# Combine features from multiple FeatureViews
+dataset = fs.generate_dataset(
+    spine_df=spine,
+    features=[
+        user_purchase_fv,      # Purchase behavior
+        user_session_fv,       # Session activity
+        user_profile_fv,       # Demographics
+    ],
+    spine_timestamp_col="EVENT_TS",
+)
+```
+
+---
+
+## Feature Column Prefixing {#sec-prefixing}
+
+When joining multiple FeatureViews, column name collisions can occur.
+
+### Using `auto_prefix`
+
+```python
+# Automatically prefix columns with FeatureView name
+dataset = fs.generate_dataset(
+    spine_df=spine,
+    features=[user_orders_fv, user_sessions_fv],
+    auto_prefix=True,
+)
+
+# Result columns:
+# USER_ORDERS__TOTAL_SPEND_7D
+# USER_SESSIONS__SESSION_CNT_7D
+```
+
+### Using `.with_name()`
+
+```python
+# Custom prefixes for shorter names
+dataset = fs.generate_dataset(
+    spine_df=spine,
+    features=[
+        user_orders_fv.with_name("ord"),
+        user_sessions_fv.with_name("sess"),
+    ],
+)
+
+# Result columns:
+# ord__TOTAL_SPEND_7D
+# sess__SESSION_CNT_7D
+```
+
+### Choosing a Strategy
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Single FeatureView | No prefix needed |
+| Multiple FVs, unique names | No prefix needed |
+| Multiple FVs, potential collisions | Use `auto_prefix=True` |
+| Want custom short prefixes | Use `.with_name()` |
+
+---
+
+## Model Registry Integration
+
+### End-to-End Lineage
+
+> 📁 **Full code:** [`_code/model_registry.py`](_code/model_registry.py)
+
+```python
+from snowflake.ml.registry import Registry
+
+# Create registry
+registry = Registry(session=session)
+
+# Log model with feature lineage
+model_version = registry.log_model(
+    model=trained_model,
+    model_name="churn_prediction",
+    version_name="v1",
+    comment="Training features from USER_PURCHASE_FV V3",
+)
+```
+
+### Lineage Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        END-TO-END LINEAGE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Source Tables → FeatureViews → Training Dataset → Model → Predictions  │
+│                                                                         │
+│  ORDERS     →  USER_PURCHASE_FV  →  TRAINING_V1  →  churn_v1  →  ...   │
+│  SESSIONS   →  USER_SESSION_FV   ↗                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Batch Inference
+
+### Workflow
+
+```python
+# 1. Create inference spine (entities to score)
+inference_spine = session.sql("""
+    SELECT 
+        USER_ID,
+        CURRENT_TIMESTAMP() AS EVENT_TS
+    FROM USERS
+    WHERE IS_ACTIVE = TRUE
+""")
+
+# 2. Retrieve features
+inference_features = fs.generate_dataset(
+    spine_df=inference_spine,
+    features=[user_purchase_fv, user_session_fv],
+    spine_timestamp_col="EVENT_TS",
+)
+
+# 3. Run prediction
+predictions = model.predict(inference_features)
+```
+
+---
+
+## Best Practices
+
+### 1. Spine Design
+
+```python
+# ✅ GOOD: Clear column naming
+spine = session.sql("""
+    SELECT 
+        USER_ID,
+        PREDICTION_DATE AS EVENT_TS
+    FROM ...
+""")
+
+# ❌ BAD: Ambiguous timestamp column
+spine = session.sql("""
+    SELECT 
+        USER_ID,
+        SOME_DATE  -- What does this mean?
+    FROM ...
+""")
+```
+
+### 2. Feature Selection
+
+```python
+# Use slices to select specific features
+dataset = fs.generate_dataset(
+    spine_df=spine,
+    features=[
+        user_fv.slice(["TOTAL_SPEND_7D", "ORDER_CNT_30D"]),
+    ],
+)
+```
+
+### 3. Validate Before Training
+
+```python
+# Check for data issues
+assert dataset.filter(F.col("LABEL").isNull()).count() == 0
+assert dataset.count() > 1000  # Minimum samples
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: No Timestamp Column
+
+**Problem**: PIT retrieval doesn't work without timestamp.
+
+**Solution**: Always include timestamp in spine.
+
+### ❌ Pitfall 2: Feature Leakage
+
+**Problem**: Using features computed from future data.
+
+**Solution**: Use `spine_timestamp_col` and validate.
+
+### ❌ Pitfall 3: Column Collisions
+
+**Problem**: Same feature names from multiple FVs.
+
+**Solution**: Use `auto_prefix` or `.with_name()`.
+
+---
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| **Spine** | DataFrame defining entities and timestamps |
+| `generate_dataset` | PIT-correct feature retrieval |
+| `auto_prefix` | Automatic column prefixing |
+| `.with_name()` | Custom column prefixing |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 11: Operations](../11_operations/index.qmd) to learn about monitoring, data quality, and operational management.

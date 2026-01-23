@@ -1,0 +1,259 @@
+---
+title: "Preprocessing"
+subtitle: "Model-dependent transformations, encoding, and scaling"
+---
+
+## Overview
+
+Model-Dependent Transformations (MDT) are preprocessing steps that depend on training data statistics or are specific to particular models. Unlike Model-Independent Transformations (MIT) stored in FeatureViews, MDTs are stored with the model and applied consistently during training and inference.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Distinguish between MIT and MDT transformations
+- Apply encoding techniques (one-hot, ordinal)
+- Implement scaling (standard, min-max)
+- Use Snowflake ML preprocessing functions
+- Store and apply transformations consistently
+
+---
+
+## Transformation Taxonomy
+
+| Type | Location | Stored In | Examples |
+|------|----------|-----------|----------|
+| **MIT** | Feature Pipeline | FeatureView | Aggregations, joins, derived columns |
+| **MDT** | Training Pipeline | Model Registry | Scaling, encoding, imputation |
+| **ODT** | Inference Time | Not stored | Request-time calculations |
+
+### Decision Guide
+
+```
+Is the transformation reusable across multiple models?
+├── YES → MIT (store in FeatureView)
+└── NO  → Does it depend on training data statistics?
+          ├── YES → MDT (store with model)
+          └── NO  → ODT (compute at inference)
+```
+
+---
+
+## Encoding Techniques
+
+### One-Hot Encoding
+
+> 📁 **Full code:** [`_code/encoding.py`](_code/encoding.py)
+
+```python
+from snowflake.ml.modeling.preprocessing import OneHotEncoder
+
+# Create encoder
+encoder = OneHotEncoder(
+    input_cols=["CATEGORY"],
+    output_cols=["CATEGORY_ENCODED"],
+    drop="first",  # Avoid multicollinearity
+)
+
+# Fit on training data
+encoder.fit(train_df)
+
+# Transform
+train_encoded = encoder.transform(train_df)
+inference_encoded = encoder.transform(inference_df)
+```
+
+### Ordinal Encoding
+
+```python
+from snowflake.ml.modeling.preprocessing import OrdinalEncoder
+
+# For ordered categories
+encoder = OrdinalEncoder(
+    input_cols=["SIZE"],
+    output_cols=["SIZE_ENCODED"],
+    categories=[["S", "M", "L", "XL"]],  # Explicit order
+)
+
+encoder.fit(train_df)
+```
+
+---
+
+## Scaling Techniques
+
+### Standard Scaling (Z-score)
+
+```python
+from snowflake.ml.modeling.preprocessing import StandardScaler
+
+# Standardize features (mean=0, std=1)
+scaler = StandardScaler(
+    input_cols=["AMOUNT", "QUANTITY"],
+    output_cols=["AMOUNT_SCALED", "QUANTITY_SCALED"],
+)
+
+scaler.fit(train_df)
+train_scaled = scaler.transform(train_df)
+```
+
+### Min-Max Scaling
+
+```python
+from snowflake.ml.modeling.preprocessing import MinMaxScaler
+
+# Scale to [0, 1] range
+scaler = MinMaxScaler(
+    input_cols=["PRICE"],
+    output_cols=["PRICE_SCALED"],
+)
+
+scaler.fit(train_df)
+```
+
+### When to Use Each
+
+| Technique | Use When | Models |
+|-----------|----------|--------|
+| **Standard** | Features are normally distributed | Linear, SVM, Neural Networks |
+| **Min-Max** | Need bounded range [0,1] | Neural Networks, KNN |
+| **None** | Tree-based models | XGBoost, Random Forest |
+
+---
+
+## Preprocessing Pipeline
+
+### Building a Pipeline
+
+> 📁 **Full code:** [`_code/preprocessing_pipeline.py`](_code/preprocessing_pipeline.py)
+
+```python
+from snowflake.ml.modeling.pipeline import Pipeline
+from snowflake.ml.modeling.preprocessing import (
+    StandardScaler, OneHotEncoder
+)
+
+# Build preprocessing pipeline
+preprocessing = Pipeline(steps=[
+    ("encoder", OneHotEncoder(
+        input_cols=["CATEGORY"],
+        output_cols=["CATEGORY_ENCODED"],
+    )),
+    ("scaler", StandardScaler(
+        input_cols=["AMOUNT"],
+        output_cols=["AMOUNT_SCALED"],
+    )),
+])
+
+# Fit and transform
+preprocessing.fit(train_df)
+train_preprocessed = preprocessing.transform(train_df)
+```
+
+### Saving with Model
+
+```python
+from snowflake.ml.registry import Registry
+
+# Register model with preprocessing
+registry = Registry(session=session)
+
+# The model includes preprocessing transformations
+registry.log_model(
+    model=model,
+    model_name="churn_model",
+    version_name="v1",
+    # Preprocessing is embedded in model
+)
+```
+
+---
+
+## Preprocessing Ownership & SLAs
+
+Define ownership for preprocessing transformations:
+
+```yaml
+# preprocessing_manifest.yaml
+preprocessing:
+  - model: churn_model_v1
+    owner: ds-team@company.com
+    transformations:
+      - type: OneHotEncoder
+        columns: [CATEGORY, REGION]
+      - type: StandardScaler
+        columns: [AMOUNT, QUANTITY]
+    validation:
+      - check: no_nulls_after_encoding
+      - check: scaled_values_bounded
+```
+
+---
+
+## Best Practices
+
+### 1. Fit on Training Data Only
+
+```python
+# ✅ GOOD: Fit on training, transform both
+scaler.fit(train_df)
+train_scaled = scaler.transform(train_df)
+test_scaled = scaler.transform(test_df)
+
+# ❌ BAD: Fitting on test data (data leakage)
+scaler.fit(test_df)
+```
+
+### 2. Store Transformations with Model
+
+```python
+# Preprocessing becomes part of model artifact
+# Ensures consistency between training and inference
+```
+
+### 3. Choose Right Transformation for Model
+
+```python
+# Tree models: no scaling needed
+# Linear models: scaling important
+# Neural networks: both encoding and scaling
+```
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Training/Serving Skew
+
+**Problem**: Different preprocessing in training vs. inference.
+
+**Solution**: Use Pipeline and store with model.
+
+### ❌ Pitfall 2: Fitting on Test Data
+
+**Problem**: Fitting scaler on test data leaks information.
+
+**Solution**: Always fit on training data only.
+
+### ❌ Pitfall 3: Wrong Transformation for Model
+
+**Problem**: Using scaling for tree-based models (unnecessary).
+
+**Solution**: Match transformation to model requirements.
+
+---
+
+## Summary
+
+| Transformation | Purpose | Store Location |
+|---------------|---------|----------------|
+| **OneHotEncoder** | Categorical → Binary | Model Registry |
+| **OrdinalEncoder** | Categorical → Integer | Model Registry |
+| **StandardScaler** | Normalize (z-score) | Model Registry |
+| **MinMaxScaler** | Scale to [0,1] | Model Registry |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 10: Training & Inference](../10_training_inference/index.qmd) to learn about generating training datasets and inference workflows.

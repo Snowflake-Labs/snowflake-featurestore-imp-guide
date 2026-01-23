@@ -1,0 +1,328 @@
+---
+title: "Temporal Features"
+subtitle: "Point-in-time correctness, ASOF joins, and data leakage prevention"
+---
+
+## Overview
+
+Temporal correctness is critical for ML systems. When training a model, you must ensure features are computed using only data that would have been available at the time of prediction. Using future data ("data leakage") leads to artificially good training metrics but poor production performance.
+
+This chapter covers how Snowflake Feature Store ensures temporal correctness through point-in-time (PIT) retrieval and ASOF joins.
+
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+- Understand why point-in-time correctness matters
+- Configure FeatureViews for temporal retrieval
+- Generate training datasets without data leakage
+- Debug and validate temporal correctness
+- Handle late-arriving data in feature pipelines
+
+---
+
+## Why Temporal Correctness Matters
+
+### The Data Leakage Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DATA LEAKAGE PROBLEM                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ❌ WITHOUT Point-in-Time Correctness:                                      │
+│                                                                             │
+│  Training Label:                                                            │
+│  "Did user churn on Jan 15?"  ──────────────────────────┐                   │
+│                                                         │                   │
+│  Features Used:                                         │                   │
+│  ┌─────────────────────────────────────────────────────┐│                   │
+│  │ User's purchase history including Jan 16-31 data   ││ ← LEAKAGE!        │
+│  │ (Future data used to predict past event)           ││                   │
+│  └─────────────────────────────────────────────────────┘│                   │
+│                                                         │                   │
+│  Result: Model learns from "future" → inflated metrics  │                   │
+│                                                                             │
+│  ✅ WITH Point-in-Time Correctness:                                         │
+│                                                                             │
+│  Training Label:                                                            │
+│  "Did user churn on Jan 15?"  ──────────────────────────┐                   │
+│                                                         │                   │
+│  Features Used:                                         │                   │
+│  ┌─────────────────────────────────────────────────────┐│                   │
+│  │ User's purchase history ONLY through Jan 14        ││ ← CORRECT!        │
+│  │ (Only past data available at prediction time)      ││                   │
+│  └─────────────────────────────────────────────────────┘│                   │
+│                                                         │                   │
+│  Result: Model learns realistic patterns → accurate metrics                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Real-World Impact
+
+| Scenario | Without PIT | With PIT |
+|----------|-------------|----------|
+| **Training AUC** | 0.95 (looks great!) | 0.82 (realistic) |
+| **Production AUC** | 0.72 (unexpected drop) | 0.80 (matches training) |
+| **Business Impact** | Model fails in production | Model performs as expected |
+
+---
+
+## How Feature Store Ensures PIT Correctness
+
+### The Spine + timestamp_col Pattern
+
+> 📁 **Full code:** [`_code/pit_retrieval.py`](_code/pit_retrieval.py)
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+
+# 1. FeatureView with timestamp_col defined
+user_features_fv = FeatureView(
+    name="USER_PURCHASE_STATS",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",  # Critical for PIT!
+    refresh_freq="1 hour",
+)
+
+# 2. Spine with entity keys + timestamps
+training_spine = session.sql("""
+    SELECT 
+        USER_ID,
+        CHURN_DATE AS EVENT_TS,  -- When we want features "as of"
+        CHURNED AS LABEL
+    FROM CHURN_LABELS
+""")
+
+# 3. Generate training set with PIT retrieval
+training_set = fs.generate_dataset(
+    spine_df=training_spine,
+    features=[user_features_fv],
+    spine_timestamp_col="EVENT_TS",  # Join features as-of this timestamp
+)
+```
+
+### How ASOF Joins Work
+
+The Feature Store uses **ASOF joins** (also called temporal joins) to retrieve the most recent feature values available at each spine timestamp:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ASOF JOIN MECHANICS                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Spine (Training Labels)          FeatureView (Historical Features)         │
+│  ────────────────────────         ─────────────────────────────             │
+│                                                                             │
+│  USER_ID │ EVENT_TS               USER_ID │ FEATURE_TS │ TOTAL_SPEND        │
+│  ────────┼──────────               ────────┼────────────┼─────────────       │
+│  usr_001 │ Jan 15                 usr_001 │ Jan 10     │ $100               │
+│  usr_001 │ Jan 20                 usr_001 │ Jan 14     │ $250               │
+│  usr_002 │ Jan 18                 usr_001 │ Jan 18     │ $300               │
+│                                   usr_002 │ Jan 12     │ $50                │
+│                                   usr_002 │ Jan 17     │ $150               │
+│                                                                             │
+│  ASOF Join Result:                                                          │
+│  ─────────────────                                                          │
+│                                                                             │
+│  USER_ID │ EVENT_TS │ FEATURE_TS │ TOTAL_SPEND                              │
+│  ────────┼──────────┼────────────┼─────────────                              │
+│  usr_001 │ Jan 15   │ Jan 14     │ $250      ← Latest before Jan 15         │
+│  usr_001 │ Jan 20   │ Jan 18     │ $300      ← Latest before Jan 20         │
+│  usr_002 │ Jan 18   │ Jan 17     │ $150      ← Latest before Jan 18         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Configuring FeatureViews for Temporal Retrieval
+
+### timestamp_col Requirements
+
+The `timestamp_col` should represent when the features were valid or computed:
+
+> 📁 **Full code:** [`_code/timestamp_patterns.py`](_code/timestamp_patterns.py)
+
+```python
+# Pattern 1: Last event timestamp (most common)
+user_features_fv = FeatureView(
+    name="USER_PURCHASE_STATS",
+    feature_df=session.sql("""
+        SELECT 
+            USER_ID,
+            SUM(AMOUNT) AS TOTAL_SPEND,
+            MAX(ORDER_TS) AS LAST_ORDER_TS  -- Use as timestamp_col
+        FROM ORDERS
+        GROUP BY USER_ID
+    """),
+    timestamp_col="LAST_ORDER_TS",
+    # ...
+)
+
+# Pattern 2: Snapshot timestamp for periodic snapshots
+user_snapshot_fv = FeatureView(
+    name="USER_DAILY_SNAPSHOT",
+    feature_df=session.sql("""
+        SELECT 
+            USER_ID,
+            SNAPSHOT_DATE,  -- Daily snapshot timestamp
+            ACCOUNT_BALANCE,
+            LOYALTY_TIER
+        FROM USER_SNAPSHOTS
+    """),
+    timestamp_col="SNAPSHOT_DATE",
+    # ...
+)
+```
+
+---
+
+## Late-Arriving Data
+
+### The Challenge
+
+In real systems, data often arrives late. A transaction that occurred at 10:00 might only be recorded in the database at 10:15.
+
+### Solutions
+
+> 📁 **Full code:** [`_code/late_data.py`](_code/late_data.py)
+
+```python
+# Option 1: Use event timestamp (when event occurred)
+# Features reflect business reality
+fv_event_time = FeatureView(
+    timestamp_col="TRANSACTION_TS",  # When transaction happened
+    # ...
+)
+
+# Option 2: Use processing timestamp (when recorded)
+# Features reflect system state
+fv_processing_time = FeatureView(
+    timestamp_col="RECORDED_TS",  # When we learned about it
+    # ...
+)
+
+# Option 3: Add latency buffer in spine
+conservative_spine = session.sql("""
+    SELECT 
+        USER_ID,
+        DATEADD('hour', -2, EVENT_TS) AS FEATURE_TS,  -- 2-hour buffer
+        EVENT_TS,
+        LABEL
+    FROM LABELS
+""")
+```
+
+---
+
+## Validating Temporal Correctness
+
+### Data Leakage Detection
+
+> 📁 **Full code:** [`_code/validation.py`](_code/validation.py)
+
+```python
+def validate_no_data_leakage(
+    training_df,
+    spine_timestamp_col: str,
+    feature_timestamp_col: str,
+) -> dict:
+    """
+    Validate that no features have timestamps after the spine timestamp.
+    
+    Args:
+        training_df: Generated training dataset
+        spine_timestamp_col: Column with spine timestamps
+        feature_timestamp_col: Column with feature timestamps
+        
+    Returns:
+        Validation results
+    """
+    leakage_check = training_df.filter(
+        F.col(feature_timestamp_col) > F.col(spine_timestamp_col)
+    )
+    
+    leakage_count = leakage_check.count()
+    
+    return {
+        "valid": leakage_count == 0,
+        "leakage_count": leakage_count,
+        "total_rows": training_df.count(),
+    }
+```
+
+---
+
+## Best Practices
+
+### 1. Always Define timestamp_col
+
+```python
+# ✅ GOOD: timestamp_col defined
+fv = FeatureView(
+    timestamp_col="LAST_ORDER_TS",
+    # ...
+)
+
+# ❌ BAD: No timestamp_col - PIT retrieval won't work
+fv = FeatureView(
+    # timestamp_col missing!
+    # ...
+)
+```
+
+### 2. Use Meaningful Timestamps
+
+```python
+# ✅ GOOD: Timestamp represents feature validity
+timestamp_col="LAST_PURCHASE_TS"  # When last purchase happened
+
+# ❌ BAD: Arbitrary timestamps
+timestamp_col="CREATED_TS"  # When row was inserted (not meaningful)
+```
+
+### 3. Validate Before Training
+
+Always run leakage detection before training models on generated datasets.
+
+---
+
+## Common Pitfalls
+
+### ❌ Pitfall 1: Missing timestamp_col
+
+**Problem**: Features retrieved without temporal context.
+
+**Solution**: Always define `timestamp_col` in FeatureViews.
+
+### ❌ Pitfall 2: Wrong Timestamp Semantics
+
+**Problem**: Using processing time when event time is needed (or vice versa).
+
+**Solution**: Understand your data's temporal semantics and choose accordingly.
+
+### ❌ Pitfall 3: Not Validating
+
+**Problem**: Data leakage goes undetected until production.
+
+**Solution**: Implement leakage detection in your training pipeline.
+
+---
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| **Point-in-Time (PIT)** | Retrieve features as they existed at a specific time |
+| **timestamp_col** | Column defining when features were valid |
+| **ASOF Join** | Temporal join finding latest features before spine timestamp |
+| **Data Leakage** | Using future data to predict past events |
+
+---
+
+## Next Steps
+
+Continue to [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) to learn about the Feature class for declarative time-windowed aggregations.

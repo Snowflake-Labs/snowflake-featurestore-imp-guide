@@ -1,0 +1,96 @@
+# =============================================================================
+# DISABLED - Enable when SSO PAT authorization is approved
+# =============================================================================
+# To enable:
+#   1. Get PAT authorized for Snowflake-Labs SSO
+#   2. Add PAT as repository secret: SNOWFLAKE_LABS_PAT
+#   3. Rename this file to: sync-to-snowflake-labs.yml
+# =============================================================================
+
+name: Sync to Snowflake-Labs
+
+on:
+  # Manual trigger from Actions tab
+  workflow_dispatch:
+    inputs:
+      commit_message:
+        description: 'Commit message for the sync'
+        required: true
+        default: 'Sync updates from development repo'
+  
+  # Optionally trigger on releases
+  # release:
+  #   types: [published]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout development repo
+        uses: actions/checkout@v4
+        with:
+          path: dev-repo
+
+      - name: Checkout Snowflake-Labs repo
+        uses: actions/checkout@v4
+        with:
+          repository: Snowflake-Labs/snowflake-featurestore-imp-guide
+          token: ${{ secrets.SNOWFLAKE_LABS_PAT }}
+          path: labs-repo
+
+      - name: Sync content
+        run: |
+          # Sync Quarto book
+          rsync -av --delete \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.ipynb_checkpoints' \
+            --exclude '_site' \
+            --exclude '_freeze' \
+            --exclude '.quarto' \
+            dev-repo/Snowflake_FeatureStore_Implementation_Guide/ \
+            labs-repo/Snowflake_FeatureStore_Implementation_Guide/
+          
+          # Sync GitHub workflows
+          rsync -av --delete \
+            dev-repo/.github/ \
+            labs-repo/.github/
+          
+          # Remove the sync workflow from labs repo (it shouldn't be there)
+          rm -f labs-repo/.github/workflows/sync-to-snowflake-labs.yml
+          rm -f labs-repo/.github/workflows/sync-to-snowflake-labs.yml.disabled
+          
+          # Sync requirements
+          cp dev-repo/requirements.txt labs-repo/requirements.txt
+
+      - name: Check for changes
+        id: check_changes
+        working-directory: labs-repo
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff --cached --stat
+          fi
+
+      - name: Commit and push
+        if: steps.check_changes.outputs.has_changes == 'true'
+        working-directory: labs-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "${{ github.event.inputs.commit_message || 'Sync from development repo' }}"
+          git push
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
+            echo "✅ Successfully synced to Snowflake-Labs!"
+            echo "View at: https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide"
+          else
+            echo "ℹ️ No changes to sync - repos are already in sync."
+          fi

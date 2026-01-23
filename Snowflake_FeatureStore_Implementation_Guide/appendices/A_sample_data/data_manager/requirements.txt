@@ -1,0 +1,10 @@
+# Streamlit Data Manager Dependencies
+
+# Streamlit UI (optional - CLI works without this)
+streamlit>=1.28.0
+
+# Data processing
+pandas>=2.0.0
+
+# Snowflake
+snowflake-snowpark-python>=1.10.0
