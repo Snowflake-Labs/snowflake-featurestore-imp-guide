@@ -43,10 +43,10 @@ jobs:
         with:
           version: '1.4.550'
 
-      - name: Render Quarto Book
+      - name: Render Quarto Book (HTML only)
         run: |
           cd Snowflake_FeatureStore_Implementation_Guide
-          quarto render
+          quarto render --to html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
