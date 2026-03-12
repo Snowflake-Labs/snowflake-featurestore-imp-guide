@@ -178,6 +178,56 @@ def read_online_features(
     return result
 
 
+def example_single_user_lookup(
+    fs: FeatureStore,
+    feature_view: FeatureView,
+) -> DataFrame:
+    """
+    Example: retrieve online features for a single user.
+
+    Args:
+        fs: Initialized FeatureStore instance
+        feature_view: Registered FeatureView with online serving enabled
+
+    Returns:
+        Snowpark DataFrame with features for one user
+    """
+    print("--- Single Entity Lookup ---")
+    return read_online_features(
+        fs=fs,
+        feature_view=feature_view,
+        keys=[["usr_001"]],
+        feature_names=["TOTAL_PURCHASES", "AVG_ORDER_VALUE", "DAYS_SINCE_LAST_ORDER"],
+    )
+
+
+def example_batch_user_lookup(
+    fs: FeatureStore,
+    feature_view: FeatureView,
+    user_ids: List[str] = None,
+) -> DataFrame:
+    """
+    Example: retrieve online features for multiple users in one call.
+
+    Args:
+        fs: Initialized FeatureStore instance
+        feature_view: Registered FeatureView with online serving enabled
+        user_ids: List of user IDs to look up (defaults to sample list)
+
+    Returns:
+        Snowpark DataFrame with features for all requested users
+    """
+    if user_ids is None:
+        user_ids = ["usr_001", "usr_002", "usr_003", "usr_004", "usr_005"]
+
+    print(f"--- Batch Lookup ({len(user_ids)} users) ---")
+    return read_online_features(
+        fs=fs,
+        feature_view=feature_view,
+        keys=[[uid] for uid in user_ids],
+        feature_names=["TOTAL_PURCHASES", "AVG_ORDER_VALUE", "DAYS_SINCE_LAST_ORDER"],
+    )
+
 
 if __name__ == "__main__":
     recs = get_refresh_freq_recommendations()
@@ -186,3 +236,21 @@ if __name__ == "__main__":
         print(f"\n{use_case}:")
         print(f"  refresh_freq: {config['refresh_freq']}")
         print(f"  reason: {config['reason']}")
+
+    print("\n" + "=" * 60)
+    print("Online Feature Lookup Examples")
+    print("=" * 60)
+    print("NOTE: The examples below require an active FeatureStore")
+    print("with an online-enabled feature view. Uncomment to run.")
+    print()
+    print("  # from setup_session import create_session, SOURCE_DATABASE, FS_NAME, WAREHOUSE")
+    print("  # session = create_session()")
+    print("  # fs = FeatureStore(session=session, database=SOURCE_DATABASE,")
+    print("  #                   name=FS_NAME, default_warehouse=WAREHOUSE)")
+    print("  # fv = fs.get_feature_view('USER_PURCHASE_FEATURES', 'V03')")
+    print("  #")
+    print("  # single = example_single_user_lookup(fs, fv)")
+    print("  # single.show()")
+    print("  #")
+    print("  # batch = example_batch_user_lookup(fs, fv)")
+    print("  # batch.show()")
