@@ -26,15 +26,18 @@ After completing this chapter, you will be able to:
 > 📁 **Full code:** [`_code/monitoring.sql`](_code/monitoring.sql)
 
 ```sql
--- Check refresh history
+-- Check Dynamic Table Refresh History
 SELECT 
     NAME,
     STATE,
+    STATE_MESSAGE,
     REFRESH_START_TIME,
     REFRESH_END_TIME,
-    STATISTICS:numInsertedRows::INT AS ROWS_INSERTED
+    REFRESH_TRIGGER,
+    STATISTICS:numInsertedRows::INT AS ROWS_INSERTED,
+    STATISTICS:numUpdatedRows::INT AS ROWS_UPDATED
 FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-    NAME => 'USER_PURCHASE_FV$V1'
+    NAME => 'ML_FEATURES.FEATURE_STORE.USER_PURCHASE_FV$V1' -- Database.Schema.FeatureView$Version
 ))
 ORDER BY REFRESH_START_TIME DESC
 LIMIT 10;
@@ -42,29 +45,35 @@ LIMIT 10;
 -- Check current lag
 SELECT 
     NAME,
-    TARGET_LAG,
-    SCHEDULING_STATE,
-    DATA_TIMESTAMP,
-    TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) AS LAG_MINUTES
+    TARGET_LAG_SEC,
+    SCHEDULING_STATE:STATE::STRING AS SCHEDULING_STATE,
+    LATEST_DATA_TIMESTAMP,
+    TIMESTAMPDIFF('minute', LATEST_DATA_TIMESTAMP, CURRENT_TIMESTAMP()) AS LAG_MINUTES
 FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
-WHERE SCHEMA_NAME = 'FEATURE_STORE';
+WHERE SCHEMA_NAME = 'FEATURE_STORE'
+ORDER BY LAG_MINUTES DESC;
 ```
 
 ### Alerting for Stale Features
 
 ```sql
 -- Create alert for stale features (>60 min lag)
-CREATE ALERT feature_staleness_alert
-  WAREHOUSE = ML_WH
+CREATE OR REPLACE ALERT feature_staleness_alert
+  WAREHOUSE = COMPUTE_WH
   SCHEDULE = 'USING CRON 0 * * * * UTC'
   IF (EXISTS (
-    SELECT * 
+    SELECT *
     FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
     WHERE SCHEMA_NAME = 'FEATURE_STORE'
-      AND TIMESTAMPDIFF('minute', DATA_TIMESTAMP, CURRENT_TIMESTAMP()) > 60
+      AND TIMESTAMPDIFF('minute', LATEST_DATA_TIMESTAMP, CURRENT_TIMESTAMP()) > 60
   ))
   THEN
-    CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
+    CALL SYSTEM$SEND_EMAIL(
+      'feature_store_email_int',
+      'ml-alerts@company.com',
+      'Feature Store Alert: Stale FeatureViews Detected',
+      'One or more FeatureViews in FEATURE_STORE have data older than 60 minutes. Please investigate using the monitoring queries in monitoring.sql.'
+    );
 ```
 
 ---
@@ -90,17 +99,19 @@ print(f"Refresh: {fv.refresh_freq}")
 ### SQL Metadata Queries
 
 ```sql
--- Describe FeatureView structure
-DESCRIBE FEATURE VIEW USER_PURCHASE_FV$V1;
+-- Describe FeatureView structure (FeatureViews are Dynamic Tables)
+DESCRIBE DYNAMIC TABLE USER_PURCHASE_FV$V1;
 
 -- List all features across FeatureViews
+-- FeatureViews follow the NAME$VERSION naming convention
 SELECT 
     TABLE_NAME AS FEATURE_VIEW,
     COLUMN_NAME AS FEATURE,
     DATA_TYPE,
     COMMENT
 FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA = 'FEATURE_STORE';
+WHERE TABLE_SCHEMA = 'FEATURE_STORE'
+  AND TABLE_NAME LIKE '%$%';
 ```
 
 ---
