@@ -21,40 +21,45 @@ After completing this chapter, you will be able to:
 
 ## Streaming FeatureViews (Roadmap)
 
-### Current State
-
-Streaming FeatureViews are on the roadmap. Current workarounds:
-
 > 📁 **Full code:** [`_code/streaming_patterns.py`](_code/streaming_patterns.py)
 
+### Current State
+
+Streaming FeatureViews are on the Snowflake roadmap. Today, the two workarounds are:
+
+1. **Near real-time managed FV** — set `refresh_freq="1 minute"` (the minimum) to create a Dynamic Table that refreshes every minute.
+2. **External streaming pipeline** — ingest via Kafka / Snowpipe Streaming into a staging table, then wrap it with a view-based (external) FeatureView.
+
 ```python
-# Workaround: Short refresh interval with Dynamic Tables
 realtime_fv = FeatureView(
     name="USER_REALTIME_FEATURES",
-    refresh_freq="1 minute",  # Near real-time
-    # ...
+    entities=[user_entity],
+    feature_df=session.sql("SELECT USER_ID, ... FROM REALTIME_SOURCE"),
+    timestamp_col="EVENT_TS",
+    refresh_freq="1 minute",  # minimum allowed
+    warehouse="COMPUTE_WH",
 )
-
-# Alternative: External streaming + View-based FV
-# Use Kafka/Snowpipe → staging table → View FV
 ```
 
 ### Future Pattern (Planned)
 
 ```python
-# Streaming FeatureView (future)
+# Not yet available — planned streaming-native FeatureView
 streaming_fv = FeatureView(
     name="USER_STREAMING_FEATURES",
     entities=[user_entity],
     source_stream="USER_EVENTS_STREAM",  # Snowflake Stream
     streaming=True,
-    # ...
 )
 ```
 
 ---
 
 ## Multi-Feature Store Operations
+
+> 📁 **Full code:** [`_code/multi-feature-store-operations.md`](_code/multi-feature-store-operations.md)
+
+Each Feature Store is a Snowflake **schema**. Teams can have isolated schemas with their own RBAC, while sharing a common "shared" schema for base features.
 
 ### Cross-Domain ML
 
@@ -85,141 +90,334 @@ streaming_fv = FeatureView(
 ### RBAC Considerations
 
 ```python
-# Marketing team accesses their FS + shared
-marketing_fs = FeatureStore(session, database="ML", name="MARKETING")
-shared_fs = FeatureStore(session, database="ML", name="SHARED")
+from snowflake.ml.feature_store import FeatureStore, CreationMode
 
-# Fraud team accesses their FS + shared
-fraud_fs = FeatureStore(session, database="ML", name="FRAUD")
-# shared_fs also accessible with proper RBAC
+marketing_fs = FeatureStore(
+    session, database="ML", name="MARKETING",
+    default_warehouse="COMPUTE_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+shared_fs = FeatureStore(
+    session, database="ML", name="SHARED",
+    default_warehouse="COMPUTE_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+# Fraud team uses their own schema + shared
+fraud_fs = FeatureStore(session, database="ML", name="FRAUD", ...)
 ```
+
+Use `setup_feature_store()` to create producer/consumer database roles with the right grants on each schema.
 
 ---
 
 ## External FeatureViews
 
-### DBT Integration
+> 📁 **Full code:** [`_code/external_fvs.py`](_code/external_fvs.py)
+
+An **external FeatureView** has no `refresh_freq` — it is backed by a Snowflake view, not a Dynamic Table. Data refresh is managed externally (dbt, Snowpipe, etc.).
+
+### dbt Integration
 
 ```python
-# FeatureView backed by DBT-managed table
 dbt_fv = FeatureView(
     name="USER_FEATURES_DBT",
     entities=[user_entity],
     feature_df=session.table("ANALYTICS.FEATURES.USER_STATS"),
     timestamp_col="_DBT_UPDATED_TS",
-    # No refresh_freq → View-based
-    desc="Features managed by DBT pipeline"
+    # No refresh_freq → view-based (external)
+    desc="Features managed by dbt pipeline",
 )
+fs.register_feature_view(dbt_fv, version="v1", block=True)
 ```
 
-### Iceberg Integration
+### Iceberg-Backed FeatureView
+
+An **Iceberg FV** is a *managed* FV (has `refresh_freq`) whose output is stored in Iceberg format via `StorageConfig`. It reads from a standard Snowflake source — the Iceberg part controls the *output* storage, not the input.
 
 ```python
-# FeatureView from Iceberg source
+from snowflake.ml.feature_store import StorageConfig, StorageFormat
+
 iceberg_fv = FeatureView(
     name="USER_FEATURES_ICEBERG",
     entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID, ... 
-        FROM iceberg_catalog.events
-    """),
-    # ...
+    feature_df=session.sql("SELECT USER_ID, ... FROM SOURCE_TABLE"),
+    timestamp_col="EVENT_TS",
+    refresh_freq="1 hour",
+    storage_config=StorageConfig(
+        storage_format=StorageFormat.ICEBERG,
+        external_volume="MY_EXT_VOLUME",
+        base_location="features/user/",
+    ),
+    warehouse="COMPUTE_WH",
 )
+fs.register_feature_view(iceberg_fv, version="v1", block=True)
 ```
+
+::: {.callout-warning}
+`VECTOR` columns are **not supported** in Iceberg tables. Use standard storage for embedding features.
+:::
 
 ---
 
 ## CI/CD for Feature Store
 
-### Feature Definition as Code
+> 📁 **Full code:** [`_code/deploy_features.py`](_code/deploy_features.py) (deployment script) | [`_code/feature-deploy.yml`](_code/feature-deploy.yml) (GitHub Actions workflow) | [`_code/cicd_patterns.py`](_code/cicd_patterns.py) (config templates)
 
-> 📁 **Full code:** [`_code/cicd_patterns.py`](_code/cicd_patterns.py)
+### GitHub Actions Workflow
+
+Use `snowflakedb/snowflake-cli-action@v2.0` for authentication. Supports key-pair auth or OIDC/Workload Identity Federation.
 
 ```yaml
 # .github/workflows/feature-deploy.yml
 name: Deploy Features
-
 on:
   push:
     branches: [main]
-    paths:
-      - 'features/**'
-
+    paths: ['features/**']
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+      - uses: snowflakedb/snowflake-cli-action@v2.0
+        with:
+          default-config-file-path: config/snowflake.toml
       - name: Deploy FeatureViews
         env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
-        run: |
-          python scripts/deploy_features.py
+          SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_RAW: ${{ secrets.PRIVATE_KEY_RAW }}
+        run: python scripts/deploy_features.py --env PROD
 ```
 
 ### Deployment Script
 
+The deployment script resolves entity names to objects, builds FeatureViews from config, and registers them with `block=True`:
+
 ```python
-# scripts/deploy_features.py
-def deploy_feature_view(
-    fs: FeatureStore,
-    config: dict,
-    environment: str,
-) -> None:
-    """Deploy FeatureView from configuration."""
+def deploy_feature_view(fs, session, config, environment, warehouse=None):
+    entities = resolve_entities(fs, config["entities"])
     fv = FeatureView(
         name=config["name"],
-        entities=config["entities"],
+        entities=entities,
         feature_df=session.sql(config["query"]),
-        timestamp_col=config["timestamp_col"],
-        refresh_freq=config["refresh_freq"],
+        timestamp_col=config.get("timestamp_col"),
+        refresh_freq=config.get("refresh_freq", "1 hour"),
+        desc=config.get("desc"),
+        warehouse=warehouse,
     )
-    
     version = f"{environment}_{config['version']}"
-    fs.register_feature_view(fv, version=version)
+    return fs.register_feature_view(fv, version=version, block=True)
 ```
 
 ---
 
 ## Object-Wrapped Features
 
-### Embeddings and Arrays
+> 📁 **Full code:** [`_code/object_wrapped_features.py`](_code/object_wrapped_features.py)
+
+Feature Store supports complex Snowflake data types — `VECTOR`, `VARIANT`, `OBJECT`, and `ARRAY` — as feature columns. They pass through `generate_training_set()` and `retrieve_feature_values()` as-is.
+
+| Type | Use Case | Max Size | Iceberg? | Hybrid Table? |
+|------|----------|----------|----------|---------------|
+| `VECTOR(FLOAT, N)` | Embeddings | 4096 dim | ❌ No | Non-indexed only |
+| `VARIANT` | Arbitrary JSON | 128 MB | ✅ Yes | Non-indexed only |
+| `OBJECT` | Typed JSON map | 128 MB | ✅ Yes | Non-indexed only |
+| `ARRAY` | Lists/sequences | 128 MB | ✅ Yes | Non-indexed only |
+
+### Embeddings (VECTOR)
 
 ```python
-# FeatureView with embedding column
 embedding_fv = FeatureView(
     name="USER_EMBEDDINGS",
     entities=[user_entity],
     feature_df=session.sql("""
-        SELECT 
-            USER_ID,
-            EMBEDDING_VECTOR,  -- ARRAY<FLOAT>
-            LAST_UPDATED_TS
+        SELECT USER_ID,
+               EMBEDDING::VECTOR(FLOAT, 768) AS EMBEDDING,
+               UPDATED_TS
         FROM USER_EMBEDDINGS_TABLE
     """),
-    # ...
+    timestamp_col="UPDATED_TS",
+    refresh_freq="1 hour",
+    warehouse="COMPUTE_WH",
 )
 ```
 
-### JSON Features
+### JSON Features (VARIANT/OBJECT)
+
+For best performance, keep raw `VARIANT` alongside extracted scalar fields:
 
 ```python
-# FeatureView with VARIANT/OBJECT columns
-json_fv = FeatureView(
-    name="USER_PREFERENCES",
+hybrid_fv = FeatureView(
+    name="USER_PREFS_HYBRID",
     entities=[user_entity],
     feature_df=session.sql("""
-        SELECT 
-            USER_ID,
-            PREFERENCES,  -- OBJECT with nested structure
-            UPDATED_TS
+        SELECT USER_ID,
+               PREFERENCES,                          -- raw VARIANT (full flexibility)
+               PREFERENCES:theme::STRING AS THEME,   -- extracted scalar (fast queries)
+               PREFERENCES:lang::STRING AS LANGUAGE,
+               UPDATED_TS
         FROM USER_PROFILES
     """),
-    # ...
+    timestamp_col="UPDATED_TS",
+    refresh_freq="1 hour",
 )
 ```
+
+::: {.callout-tip}
+VARIANT columns auto-extract up to 200 elements for columnar optimization. JSON `null` ≠ SQL `NULL` — use `TO_VARCHAR()` to convert if needed.
+:::
+
+---
+
+## Complex Entity Relationships
+
+> 📁 **Full code:** [`_code/complex_entity.py`](_code/complex_entity.py)
+
+Real-world ML systems rarely have simple "one entity, one join key" schemas. The Feature Store handles complex relationships through Entity construction, `feature_df` SQL, and training-set generation options.
+
+| Pattern | Challenge | FS Solution |
+|---------|-----------|-------------|
+| Composite keys | Multi-column identity (e.g., PRODUCT_ID + SIZE + COLOR) | `Entity(join_keys=["COL_A", "COL_B"])` |
+| Multi-entity FV | Interaction features (user × product) | `FeatureView(entities=[entity_a, entity_b])` |
+| Self-referential | Same entity in two roles (sender & receiver) | `fv.with_name("sender")` for column prefixing |
+| Hierarchical | Child→parent roll-up (account → customer) | Aggregation in `feature_df` SQL via GROUP BY |
+| Bridge / M:N | Many-to-many (student ↔ course) | Pre-aggregate in SQL, or multi-entity FV |
+
+### Composite Join Keys
+
+```python
+product_variant = Entity(
+    name="PRODUCT_VARIANT",
+    join_keys=["PRODUCT_ID", "SIZE", "COLOR"],
+)
+fs.register_entity(product_variant)
+```
+
+::: {.callout-warning}
+All join-key columns must appear in both the `feature_df` AND the `spine_df`. A missing key column causes silent fan-out (duplicate rows) — no error is raised.
+:::
+
+### Multi-Entity FeatureViews
+
+```python
+interaction_fv = FeatureView(
+    name="USER_PRODUCT_INTERACTIONS",
+    entities=[user_entity, product_entity],
+    feature_df=session.sql("""
+        SELECT USER_ID, PRODUCT_ID,
+               COUNT(*) AS VIEW_COUNT,
+               MAX(EVENT_TS) AS LAST_INTERACTION_TS
+        FROM USER_PRODUCT_EVENTS
+        GROUP BY USER_ID, PRODUCT_ID
+    """),
+    timestamp_col="LAST_INTERACTION_TS",
+    refresh_freq="1 hour",
+)
+```
+
+The `feature_df` must be pre-aggregated to one row per unique combination of ALL entity keys to avoid join explosion.
+
+### Self-Referential Entities
+
+In fraud detection, both sender and receiver are "users." Use `with_name()` to join the same FeatureView twice with distinct column prefixes:
+
+```python
+user_fv = fs.get_feature_view("USER_FEATURES", "v1")
+
+training_set = fs.generate_training_set(
+    spine_df=session.table("TRANSACTIONS"),
+    features=[
+        user_fv.with_name("sender"),    # → SENDER_TOTAL_SPEND, SENDER_ACCOUNT_AGE
+        user_fv.with_name("receiver"),  # → RECEIVER_TOTAL_SPEND, RECEIVER_ACCOUNT_AGE
+    ],
+    spine_timestamp_col="TX_TS",
+    spine_label_cols=["IS_FRAUD"],
+)
+```
+
+### Hierarchical Roll-Ups
+
+Snowflake FS has no native hierarchy. Encode roll-ups in the `feature_df` SQL:
+
+```python
+rollup_fv = FeatureView(
+    name="CUSTOMER_ACCOUNT_ROLLUP",
+    entities=[customer_entity],  # keyed on parent only
+    feature_df=session.sql("""
+        SELECT b.CUSTOMER_ID,
+               SUM(c.BALANCE) AS SUM_BALANCE,
+               COUNT(c.ACCOUNT_ID) AS COUNT_ACCOUNTS
+        FROM CUSTOMER_ACCOUNT_XREF b
+        JOIN ACCOUNT_FEATURES c ON b.ACCOUNT_ID = c.ACCOUNT_ID
+        GROUP BY b.CUSTOMER_ID
+    """),
+    refresh_freq="1 hour",
+)
+```
+
+### Entity Limits
+
+Entities are implemented as Snowflake tags: **50 tags per object** (per FeatureView), **10,000 tags per account**.
+
+---
+
+## Optimizing for Large-Scale Deployments
+
+> 📁 **Full guide:** [`_code/large-scale-optimization.md`](_code/large-scale-optimization.md)
+
+Managed FeatureViews are backed by **Dynamic Tables**. Nearly every optimization maps to a DT tuning knob.
+
+### Refresh Mode
+
+Always set `refresh_mode` explicitly in production — don't rely on `AUTO`:
+
+```python
+fv = FeatureView(
+    name="HIGH_VOLUME_FV",
+    entities=[entity],
+    feature_df=feature_df,
+    refresh_freq="5 minutes",
+    refresh_mode="INCREMENTAL",  # explicit
+    warehouse="FV_REFRESH_WH",
+)
+```
+
+| Mode | Best When |
+|------|-----------|
+| `INCREMENTAL` | < 5% data changes between refreshes; source tables have change tracking and good locality |
+| `FULL` | Large % changes; unsupported operators; poor data locality |
+| `AUTO` | Prototyping only — **avoid in production** |
+
+### Warehouse Strategy
+
+- **Larger ≠ more expensive**: Doubling size often halves runtime → similar total cost.
+- **Watch for spills**: `BYTES_SPILLED_TO_LOCAL_STORAGE` in query history → warehouse too small.
+- **Dual warehouse**: Use `INITIALIZATION_WAREHOUSE` for full/initial refreshes (ALTER DT after FV registration).
+- **Tier your warehouses**: Critical FVs get dedicated warehouses; batch FVs share a smaller one.
+
+### Clustering
+
+```python
+fv = FeatureView(
+    name="HIGH_CARDINALITY_FV",
+    entities=[user_entity],
+    feature_df=feature_df,
+    cluster_by=["USER_ID", "EVENT_DATE"],  # improves incremental scan efficiency
+    refresh_freq="5 minutes",
+)
+```
+
+Defaults: entity join keys + `timestamp_col` (if provided). Also cluster **source tables** by the most selective join/GROUP BY keys.
+
+### Feature Design for Scale
+
+- **Split by update frequency**: Don't mix 1-minute and 1-day features in the same FV.
+- **Keep FVs narrow**: Fewer columns = smaller DT + cheaper Online Feature Table.
+- **Split complex pipelines**: Use intermediate FVs with `refresh_freq="DOWNSTREAM"`.
+
+### Online Serving Tuning
+
+Total lag = `refresh_freq` (offline) + `target_lag` (online). Right-size `target_lag` to actual freshness needs — `"10 seconds"` minimum is rarely necessary.
 
 ---
 
@@ -228,7 +426,6 @@ json_fv = FeatureView(
 ### 1. Design for Scale
 
 ```python
-# Partition features by update frequency
 fast_features_fv = FeatureView(refresh_freq="5 minutes", ...)
 slow_features_fv = FeatureView(refresh_freq="1 day", ...)
 ```
@@ -236,7 +433,6 @@ slow_features_fv = FeatureView(refresh_freq="1 day", ...)
 ### 2. Manage Complexity
 
 ```yaml
-# Document feature dependencies
 features:
   USER_AGGREGATES:
     depends_on:
@@ -250,7 +446,6 @@ features:
 ### 3. Test Feature Pipelines
 
 ```python
-# Implement feature tests
 def test_feature_freshness():
     lag = get_feature_lag("USER_PURCHASE_FV")
     assert lag < timedelta(hours=2)
@@ -290,9 +485,11 @@ def test_feature_quality():
 |---------|----------|
 | **Streaming** | Near real-time features |
 | **Multi-FS** | Domain isolation |
-| **External FV** | DBT/Iceberg integration |
+| **External FV** | dbt/Iceberg integration |
 | **CI/CD** | Automated deployments |
-| **Object Features** | Embeddings, JSON |
+| **Object Features** | Embeddings, JSON, VARIANT |
+| **Complex Entities** | Composite keys, hierarchies, M:N |
+| **Scale Optimization** | Refresh modes, warehouse sizing, clustering |
 
 ---
 

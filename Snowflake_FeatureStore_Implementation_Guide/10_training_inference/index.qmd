@@ -62,32 +62,90 @@ inference_spine = session.sql("""
 
 ### Basic Usage
 
-```python
-# Generate training dataset with PIT correctness
-training_set = fs.generate_dataset(
-    spine_df=training_spine,
-    features=[user_purchase_fv, user_session_fv],
-    spine_timestamp_col="EVENT_TS",
-)
+> 📁 **Full code:** [`_code/spine_design.py`](_code/spine_design.py)
 
-# Save to table for model training
-training_set.write.save_as_table("TRAINING_DATASET_V1")
+The Feature Store provides two methods for generating training data:
+
+| Method | Returns | Key Parameter | Use Case |
+|--------|---------|---------------|----------|
+| `generate_training_set()` | `DataFrame` | `save_as` (optional table name) | Iterative development, flexible downstream processing |
+| `generate_dataset()` | `Dataset` (immutable) | `name` (required) | Reproducible experiments, versioned snapshots |
+
+**Option A — DataFrame (default):**
+
+```python
+training_set = fs.generate_training_set(
+    spine_df=training_spine,                            # DataFrame with entity keys, timestamps, and labels
+    features=[user_purchase_fv, user_session_fv],       # FeatureViews to join into the spine
+    spine_timestamp_col="EVENT_TS",                     # Timestamp column for PIT lookups
+    spine_label_cols=["LABEL"],                         # Label column(s) to preserve in output
+    save_as="TRAINING_DATASET_V1",                      # Materialize result to this table name
+    include_feature_view_timestamp_col=False,           # Exclude FeatureView's own timestamp from output
+)
 ```
+
+**Option B — Immutable Dataset snapshot:**
+
+```python
+dataset = fs.generate_dataset(
+    name="TRAINING_DATASET_V1",                         # Required: name for the Dataset object
+    spine_df=training_spine,                            # DataFrame with entity keys, timestamps, and labels
+    features=[user_purchase_fv, user_session_fv],       # FeatureViews to join into the spine
+    spine_timestamp_col="EVENT_TS",                     # Timestamp column for PIT lookups
+    spine_label_cols=["LABEL"],                         # Label column(s) to preserve in output
+    version="v1",                                       # Optional version label
+)
+```
+
+::: {.callout-tip}
+## Choosing Between DataFrame and Dataset
+- Use **DataFrame** (`generate_training_set`) during development when you need flexibility — filter, transform, or iterate quickly.
+- Use **Dataset** (`generate_dataset`) for production pipelines where you need an immutable, versioned snapshot for reproducibility and auditability.
+:::
 
 ### Multi-FeatureView Joins
 
+**Option A — DataFrame (default):**
+
 ```python
-# Combine features from multiple FeatureViews
-dataset = fs.generate_dataset(
-    spine_df=spine,
+training_set = fs.generate_training_set(
+    spine_df=spine,                                     # DataFrame with entity keys and timestamps
     features=[
-        user_purchase_fv,      # Purchase behavior
-        user_session_fv,       # Session activity
-        user_profile_fv,       # Demographics
+        user_purchase_fv,                               # Purchase behavior features
+        user_session_fv,                                # Session activity features
+        user_profile_fv,                                # Demographic features
     ],
-    spine_timestamp_col="EVENT_TS",
+    spine_timestamp_col="EVENT_TS",                     # Timestamp column for PIT lookups
+    spine_label_cols=["LABEL"],                         # Label column(s) to preserve
+    save_as="MULTI_FV_TRAINING_V1",                     # Materialize to table
+    auto_prefix=True,                                   # Prefix columns with FeatureView name to avoid collisions
 )
 ```
+
+**Option B — Immutable Dataset snapshot:**
+
+```python
+dataset = fs.generate_dataset(
+    name="MULTI_FV_TRAINING",                           # Required: name for the Dataset object
+    spine_df=spine,                                     # DataFrame with entity keys and timestamps
+    features=[
+        user_purchase_fv,                               # Purchase behavior features
+        user_session_fv,                                # Session activity features
+        user_profile_fv,                                # Demographic features
+    ],
+    spine_timestamp_col="EVENT_TS",                     # Timestamp column for PIT lookups
+    spine_label_cols=["LABEL"],                         # Label column(s) to preserve
+    auto_prefix=True,                                   # Prefix columns with FeatureView name to avoid collisions
+    version="v1",                                       # Optional version label
+)
+```
+
+::: {.callout-important}
+## Use `auto_prefix=True` with Multiple FeatureViews
+When joining multiple FeatureViews, different views may share column names (e.g., `COUNT_7D`). Setting `auto_prefix=True` prefixes each feature column with its FeatureView name (e.g., `USER_PURCHASE__COUNT_7D`, `USER_SESSION__COUNT_7D`), preventing silent column overwrites.
+:::
+
+{{< include _code/spine_design.py >}}
 
 ---
 
@@ -140,24 +198,51 @@ dataset = fs.generate_dataset(
 
 ## Model Registry Integration
 
-### End-to-End Lineage
+After generating a training dataset from Feature Store, you train a model and log it to the Snowflake Model Registry. The registry stores models as first-class schema-level objects — versioned, governed by RBAC, and queryable via SQL or Python.
+
+Logging a model with the right metadata creates **end-to-end lineage**: source tables → FeatureViews → training dataset → model → predictions. This is critical for auditability, debugging, and reproducibility.
+
+### Logging a Model
 
 > 📁 **Full code:** [`_code/model_registry.py`](_code/model_registry.py)
 
 ```python
+from snowflake.ml.model import task
 from snowflake.ml.registry import Registry
 
-# Create registry
 registry = Registry(session=session)
 
-# Log model with feature lineage
-model_version = registry.log_model(
-    model=trained_model,
-    model_name="churn_prediction",
-    version_name="v1",
-    comment="Training features from USER_PURCHASE_FV V3",
+mv = registry.log_model(
+    model=trained_model,                                    # Trained model object (sklearn, xgboost, etc.)
+    model_name="churn_prediction",                          # Unique name in the registry schema
+    version_name="v1",                                      # Version identifier
+    comment="Trained with USER_PURCHASE_FV V3, USER_SESSION_FV V2",  # Include FV versions for lineage
+    metrics={"auc": 0.85, "f1": 0.78, "precision": 0.80},  # Evaluation metrics
+    sample_input_data=train_features,                       # For schema inference and data lineage
+    task=task.Task.TABULAR_BINARY_CLASSIFICATION,           # Enables ML Observability monitoring
 )
 ```
+
+| Parameter | Purpose |
+|-----------|---------|
+| `model` | The trained Python model object (must be serializable) |
+| `model_name` | Registry identifier — unique within the schema |
+| `version_name` | Version label; auto-generated if omitted |
+| `comment` | Free text — **include FeatureView names and versions** for manual lineage tracking |
+| `metrics` | Dict of evaluation metrics (AUC, F1, accuracy, etc.) — viewable in Snowsight |
+| `sample_input_data` | DataFrame used for schema inference and data lineage capture |
+| `task` | Enum (`TABULAR_BINARY_CLASSIFICATION`, `TABULAR_REGRESSION`, `TABULAR_MULTI_CLASSIFICATION`) — required for ML Observability |
+| `conda_dependencies` | List of Conda packages to deploy with the model |
+
+::: {.callout-tip}
+## Lineage Best Practice
+Always include the FeatureView names and versions in the `comment` field. This creates a traceable link between the model and the exact features used to train it, even without automated lineage tooling.
+:::
+
+::: {.callout-important}
+## Set the `task` Parameter
+Setting `task` (e.g., `task.Task.TABULAR_BINARY_CLASSIFICATION`) is required for Snowflake ML Observability to monitor your model's performance and detect drift. Without it, monitoring metrics will not be available.
+:::
 
 ### Lineage Flow
 
@@ -178,9 +263,17 @@ model_version = registry.log_model(
 
 ## Batch Inference
 
+Batch inference scores a set of entities (e.g., all active users) using the latest features. The workflow is: build an inference spine → retrieve features from Feature Store → run the model via the registry.
+
+Unlike training, the inference spine has **no label column** — it only contains entity keys and a timestamp.
+
 ### Workflow
 
+> 📁 **Full code:** [`_code/model_registry.py`](_code/model_registry.py)
+
 ```python
+from snowflake.ml.registry import Registry
+
 # 1. Create inference spine (entities to score)
 inference_spine = session.sql("""
     SELECT 
@@ -190,16 +283,38 @@ inference_spine = session.sql("""
     WHERE IS_ACTIVE = TRUE
 """)
 
-# 2. Retrieve features
-inference_features = fs.generate_dataset(
-    spine_df=inference_spine,
-    features=[user_purchase_fv, user_session_fv],
-    spine_timestamp_col="EVENT_TS",
+# 2. Retrieve features via Feature Store
+inference_features = fs.generate_training_set(
+    spine_df=inference_spine,                               # Spine with entity keys + timestamp
+    features=[user_purchase_fv, user_session_fv],           # Same FeatureViews used during training
+    spine_timestamp_col="EVENT_TS",                         # PIT lookup using current timestamp
 )
 
-# 3. Run prediction
-predictions = model.predict(inference_features)
+# 3. Load model from registry and run prediction
+registry = Registry(session=session)
+mv = registry.get_model("churn_prediction").default         # Get default (production) version
+predictions = mv.run(inference_features, function_name="predict")
+
+# 4. (Optional) Save predictions to a table
+predictions.write.save_as_table("CHURN_PREDICTIONS", mode="overwrite")
 ```
+
+| Step | What Happens |
+|------|--------------|
+| **1. Spine** | Defines *who* to score — active users with `CURRENT_TIMESTAMP()` as the PIT anchor |
+| **2. Features** | `generate_training_set` joins the latest features to each entity using PIT correctness |
+| **3. Predict** | `mv.run()` executes the model's method in a Snowflake warehouse — input and output are DataFrames |
+| **4. Save** | Optionally materialize predictions for downstream consumption |
+
+::: {.callout-warning}
+## Use the Same FeatureViews as Training
+The FeatureViews passed to `features` during inference must match those used during training. Using different FeatureViews (or different versions) will cause schema mismatches or silent prediction errors.
+:::
+
+::: {.callout-tip}
+## `mv.run()` vs `.predict()`
+`mv.run(data, function_name="predict")` runs the model **remotely in a Snowflake warehouse** — it accepts and returns Snowpark DataFrames. If you instead call `mv.load()` to get the raw Python model object, you can use `.predict()` locally, but the input must be a pandas DataFrame.
+:::
 
 ---
 
@@ -274,7 +389,8 @@ assert dataset.count() > 1000  # Minimum samples
 | Concept | Description |
 |---------|-------------|
 | **Spine** | DataFrame defining entities and timestamps |
-| `generate_dataset` | PIT-correct feature retrieval |
+| `generate_training_set` | Returns DataFrame, optional `save_as` |
+| `generate_dataset` | Returns immutable Dataset, requires `name` |
 | `auto_prefix` | Automatic column prefixing |
 | `.with_name()` | Custom column prefixing |
 

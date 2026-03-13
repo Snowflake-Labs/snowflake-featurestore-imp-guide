@@ -13,6 +13,7 @@ Tested in: tests/test_chapter_00.py::test_session_setup
 # ==============================================================================
 
 # Python standard library
+import os
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -42,24 +43,24 @@ from snowflake.ml.feature_store import (
 # ==============================================================================
 
 # Default configuration - override as needed
-SOURCE_DATABASE = 'FEATURE_STORE_GUIDE'
-SOURCE_SCHEMA = 'CLICKSTREAM_RAW'
-FS_NAME = 'GUIDE_FEATURE_STORE'
-WAREHOUSE = 'COMPUTE_WH'
+SOURCE_DATABASE = '...'
+SOURCE_SCHEMA = '...'
+FS_NAME = '...'
+WAREHOUSE = '...'
 
 
 # ==============================================================================
 # SESSION CREATION
 # ==============================================================================
 
-def create_session(connection_params: dict = None) -> Session:
+def create_session(connection_params: dict = None, connection_name: str = None) -> Session:
     """
     Create a Snowpark session.
     
     Args:
         connection_params: Optional dict with connection parameters.
-                          If None, attempts to get active session (Snowflake Notebook)
-                          or use SnowflakeLoginOptions.
+        connection_name: Optional connection name from ~/.snowflake/config.toml.
+                         Falls back to SNOWFLAKE_CONNECTION_NAME env var or 'default'.
     
     Returns:
         Active Snowpark Session
@@ -67,17 +68,18 @@ def create_session(connection_params: dict = None) -> Session:
     if connection_params:
         session = Session.builder.configs(connection_params).create()
     else:
-        # Option 1: Running in Snowflake Notebook
         try:
             session = get_active_session()
         except Exception:
-            # Option 2: Running locally with connection config
-            from snowflake.ml.utils import connection_params as cp
-            session = Session.builder.configs(cp.SnowflakeLoginOptions()).create()
-    
-    # Enable SQL simplifier for cleaner generated SQL
+            conn_name = connection_name or os.getenv('SNOWFLAKE_CONNECTION_NAME', '...')
+            session = Session.builder.config('connection_name', conn_name).create()
+
     session.sql_simplifier_enabled = True
-    
+
+    session.sql(f'USE WAREHOUSE {WAREHOUSE}').collect()
+    session.sql(f'USE DATABASE {SOURCE_DATABASE}').collect()
+    session.sql(f'USE SCHEMA {SOURCE_SCHEMA}').collect()
+
     return session
 
 

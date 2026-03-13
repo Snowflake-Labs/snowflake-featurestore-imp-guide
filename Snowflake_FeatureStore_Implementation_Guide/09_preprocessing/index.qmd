@@ -45,38 +45,76 @@ Is the transformation reusable across multiple models?
 
 > 📁 **Full code:** [`_code/encoding.py`](_code/encoding.py)
 
+One-hot encoding converts **nominal** categorical features (no inherent order) into binary columns — one column per category. Each row gets a `1` in the matching category column and `0` elsewhere.
+
+For example, a `COLOR` column with values `[Red, Blue, Green]` becomes three columns: `COLOR_Red`, `COLOR_Blue`, `COLOR_Green`.
+
+**When to use:** Nominal categories where no ordering exists (e.g., color, brand, region).
+
 ```python
 from snowflake.ml.modeling.preprocessing import OneHotEncoder
 
-# Create encoder
 encoder = OneHotEncoder(
     input_cols=["CATEGORY"],
-    output_cols=["CATEGORY_ENCODED"],
-    drop="first",  # Avoid multicollinearity
+    output_cols=["CATEGORY_OHE"],
+    drop="first",
+    handle_unknown="ignore",
 )
 
-# Fit on training data
 encoder.fit(train_df)
-
-# Transform
 train_encoded = encoder.transform(train_df)
 inference_encoded = encoder.transform(inference_df)
 ```
 
+**Key parameters:**
+
+| Parameter | Default | Purpose |
+|-----------|---------|----------|
+| `drop` | `None` | Set to `"first"` to drop one column per feature and avoid multicollinearity |
+| `handle_unknown` | `"error"` | Set to `"ignore"` so unseen categories become all-zero rows instead of raising an error |
+| `max_categories` | `None` | Cap output columns; groups rare values into an "infrequent" category |
+| `min_frequency` | `None` | Categories below this threshold are grouped as "infrequent" |
+
+::: {.callout-warning}
+**Multicollinearity:** One-hot columns are perfectly collinear (they always sum to 1). This destabilizes coefficient estimates in linear and logistic regression. Use `drop="first"` to break the dependency — the dropped category becomes the implicit reference level. Tree-based models (XGBoost, Random Forest) are immune to this and do not require dropping.
+:::
+
 ### Ordinal Encoding
 
+Ordinal encoding maps categorical values to **integer ranks**, preserving a meaningful order. Each category is assigned a single integer based on its position in the provided order.
+
+For example, a `SIZE` column ordered as `[S, M, L, XL]` becomes `[0, 1, 2, 3]`.
+
+**When to use:** Categories with a natural ordering (e.g., size, rating, priority, education level).
+
 ```python
+import numpy as np
 from snowflake.ml.modeling.preprocessing import OrdinalEncoder
 
-# For ordered categories
 encoder = OrdinalEncoder(
     input_cols=["SIZE"],
-    output_cols=["SIZE_ENCODED"],
-    categories=[["S", "M", "L", "XL"]],  # Explicit order
+    output_cols=["SIZE_ORD"],
+    categories={"SIZE": np.array(["S", "M", "L", "XL"])},
+    handle_unknown="use_encoded_value",
+    unknown_value=-1,
 )
 
 encoder.fit(train_df)
+train_encoded = encoder.transform(train_df)
 ```
+
+**Key parameters:**
+
+| Parameter | Default | Purpose |
+|-----------|---------|----------|
+| `categories` | `"auto"` | Explicit ordered arrays per column. **Always set this for ordinal data.** |
+| `handle_unknown` | `"error"` | Set to `"use_encoded_value"` to assign a fallback integer for unseen categories |
+| `unknown_value` | N/A | Integer for unknown categories (e.g., `-1`). Required when `handle_unknown="use_encoded_value"` |
+| `encoded_missing_value` | `NaN` | Integer to assign to NULL values |
+
+::: {.callout-warning}
+**Always pass explicit `categories`:** The default `"auto"` sorts categories alphabetically, which produces incorrect rankings for ordinal data. For example, `[L, M, S, XL]` instead of the correct `[S, M, L, XL]`. This causes the model to learn wrong relationships between categories.
+:::
 
 ---
 
@@ -84,10 +122,17 @@ encoder.fit(train_df)
 
 ### Standard Scaling (Z-score)
 
+Standard scaling standardizes features by removing the mean and scaling to unit variance, producing z-scores:
+
+$z = \frac{x - \mu}{\sigma}$
+
+The result has **mean ≈ 0** and **standard deviation = 1**. This puts features on comparable scales so that no single feature dominates distance-based or gradient-based computations.
+
+**When to use:** Linear regression, logistic regression, SVM, KNN, neural networks — any model sensitive to feature magnitude. Not needed for tree-based models.
+
 ```python
 from snowflake.ml.modeling.preprocessing import StandardScaler
 
-# Standardize features (mean=0, std=1)
 scaler = StandardScaler(
     input_cols=["AMOUNT", "QUANTITY"],
     output_cols=["AMOUNT_SCALED", "QUANTITY_SCALED"],
@@ -97,19 +142,51 @@ scaler.fit(train_df)
 train_scaled = scaler.transform(train_df)
 ```
 
+**Key parameters:**
+
+| Parameter | Default | Purpose |
+|-----------|---------|----------|
+| `with_mean` | `True` | Subtract the mean. Set `False` for sparse data to preserve sparsity. |
+| `with_std` | `True` | Scale by standard deviation. |
+
+::: {.callout-note}
+**StandardScaler vs MinMaxScaler:** StandardScaler produces unbounded values and is moderately affected by outliers. MinMaxScaler compresses values to [0, 1] but is highly sensitive to outliers (a single extreme value compresses all other values). StandardScaler is generally preferred when you don't need a fixed range.
+:::
+
 ### Min-Max Scaling
+
+Min-Max scaling transforms features to a fixed range (by default **[0, 1]**) using the formula:
+
+$$x_{scaled} = \frac{x - x_{min}}{x_{max} - x_{min}}$$
+
+The minimum value maps to 0, the maximum maps to 1, and everything else is linearly distributed between.
+
+**When to use:** Neural networks with sigmoid/tanh activations, KNN and other distance-based models, or image pixel data where a bounded [0, 1] range is expected.
 
 ```python
 from snowflake.ml.modeling.preprocessing import MinMaxScaler
 
-# Scale to [0, 1] range
 scaler = MinMaxScaler(
-    input_cols=["PRICE"],
-    output_cols=["PRICE_SCALED"],
+    input_cols=["PRICE", "QUANTITY"],
+    output_cols=["PRICE_MINMAX", "QUANTITY_MINMAX"],
+    feature_range=(0, 1),
+    clip=False,
 )
 
 scaler.fit(train_df)
+train_scaled = scaler.transform(train_df)
 ```
+
+**Key parameters:**
+
+| Parameter | Default | Purpose |
+|-----------|---------|----------|
+| `feature_range` | `(0, 1)` | Target range. Set to e.g. `(-1, 1)` for models that expect centered inputs. |
+| `clip` | `False` | If `True`, clips transformed values to `feature_range` during transform. Useful when inference data exceeds training min/max. |
+
+::: {.callout-warning}
+**Outlier sensitivity:** MinMaxScaler is highly sensitive to outliers. A single extreme value in the training data will compress all other values into a narrow band. For example, if `PRICE` ranges from 10–100 but one row has 10,000, then 99.9% of values will be squeezed into [0, 0.01]. If your data has outliers, prefer `StandardScaler`.
+:::
 
 ### When to Use Each
 
@@ -127,17 +204,18 @@ scaler.fit(train_df)
 
 > 📁 **Full code:** [`_code/preprocessing_pipeline.py`](_code/preprocessing_pipeline.py)
 
+Snowflake ML's `Pipeline` chains multiple preprocessing steps into a single object that can be fit and transformed in sequence. Each step is a `(name, transformer)` tuple.
+
 ```python
 from snowflake.ml.modeling.pipeline import Pipeline
-from snowflake.ml.modeling.preprocessing import (
-    StandardScaler, OneHotEncoder
-)
+from snowflake.ml.modeling.preprocessing import OneHotEncoder, StandardScaler
 
-# Build preprocessing pipeline
-preprocessing = Pipeline(steps=[
+pipeline = Pipeline(steps=[
     ("encoder", OneHotEncoder(
         input_cols=["CATEGORY"],
-        output_cols=["CATEGORY_ENCODED"],
+        output_cols=["CATEGORY_OHE"],
+        drop="first",
+        handle_unknown="ignore",
     )),
     ("scaler", StandardScaler(
         input_cols=["AMOUNT"],
@@ -145,27 +223,96 @@ preprocessing = Pipeline(steps=[
     )),
 ])
 
-# Fit and transform
-preprocessing.fit(train_df)
-train_preprocessed = preprocessing.transform(train_df)
+pipeline.fit(train_df)
+train_preprocessed = pipeline.transform(train_df)
+inference_preprocessed = pipeline.transform(inference_df)
 ```
+
+The pipeline ensures that all preprocessing steps are applied in the same order during both training and inference, preventing training/serving skew.
 
 ### Saving with Model
 
+There are two approaches to saving preprocessing with the model in the Snowflake Model Registry. Choosing the right one depends on how your pipeline and model are structured.
+
+#### Option 1: Log the Pipeline directly
+
+When the Snowflake ML `Pipeline` includes an estimator (e.g., a classifier or regressor) as its **final step**, you can log the entire pipeline as the model. Preprocessing is automatically included.
+
 ```python
+from snowflake.ml.modeling.pipeline import Pipeline
+from snowflake.ml.modeling.preprocessing import OneHotEncoder, StandardScaler
+from snowflake.ml.modeling.linear_model import LogisticRegression
 from snowflake.ml.registry import Registry
 
-# Register model with preprocessing
-registry = Registry(session=session)
+pipeline = Pipeline(steps=[
+    ("encoder", OneHotEncoder(
+        input_cols=["CATEGORY"],
+        output_cols=["CATEGORY_OHE"],
+        drop="first",
+    )),
+    ("scaler", StandardScaler(
+        input_cols=["AMOUNT"],
+        output_cols=["AMOUNT_SCALED"],
+    )),
+    ("classifier", LogisticRegression(
+        input_cols=["CATEGORY_OHE", "AMOUNT_SCALED"],
+        label_cols=["CHURNED"],
+    )),
+])
 
-# The model includes preprocessing transformations
+pipeline.fit(train_df)
+
+registry = Registry(session=session)
 registry.log_model(
-    model=model,
+    model=pipeline,
     model_name="churn_model",
     version_name="v1",
-    # Preprocessing is embedded in model
+    sample_input_data=train_df,
 )
 ```
+
+#### Option 2: Use CustomModel + ModelContext
+
+When preprocessing and the model are **separate objects** (e.g., a scikit-learn pipeline for preprocessing and a separately trained model), wrap them in a `CustomModel` using `ModelContext`. This gives you full control over the inference logic.
+
+```python
+import pandas as pd
+from snowflake.ml.model import custom_model
+from snowflake.ml.registry import Registry
+
+mc = custom_model.ModelContext(
+    feature_preproc=preprocessing_pipeline,
+    my_model=model,
+)
+
+class PreprocessedModel(custom_model.CustomModel):
+    @custom_model.inference_api
+    def predict(self, input: pd.DataFrame) -> pd.DataFrame:
+        features = self.context["feature_preproc"].transform(input)
+        predictions = self.context["my_model"].predict(features)
+        return pd.DataFrame({"output": predictions})
+
+wrapped_model = PreprocessedModel(context=mc)
+
+registry = Registry(session=session)
+registry.log_model(
+    model=wrapped_model,
+    model_name="churn_model",
+    version_name="v1",
+    sample_input_data=train_df,
+)
+```
+
+#### When to use which
+
+| Approach | Use when | Advantages |
+|----------|----------|------------|
+| **Option 1: Log Pipeline** | Preprocessing and model are all Snowflake ML objects in a single `Pipeline` | Simple, no custom code needed |
+| **Option 2: CustomModel** | Preprocessing and model are separate objects, or you need custom inference logic (e.g., combining multiple models, post-processing) | Full flexibility over inference behavior |
+
+::: {.callout-warning}
+**Common mistake:** Logging only the model without the preprocessing pipeline (e.g., `registry.log_model(model=model, ...)`) will **not** capture preprocessing. At inference time the model will receive raw, unprocessed features and produce incorrect predictions. Always use one of the two options above to bundle preprocessing with the model.
+:::
 
 ---
 
@@ -206,18 +353,27 @@ scaler.fit(test_df)
 
 ### 2. Store Transformations with Model
 
-```python
-# Preprocessing becomes part of model artifact
-# Ensures consistency between training and inference
-```
+Always bundle preprocessing with the model so the same transformations are applied at training and inference time. Use one of the two approaches described in the [Saving with Model](#saving-with-model) section above:
+
+- **Log a Pipeline directly** when preprocessing and the estimator are all Snowflake ML objects in a single `Pipeline`.
+- **Use CustomModel + ModelContext** when preprocessing and the model are separate objects.
+
+Never log a model without its preprocessing — doing so causes **training/serving skew**, where the model receives raw features at inference time instead of the transformed features it was trained on.
 
 ### 3. Choose Right Transformation for Model
 
-```python
-# Tree models: no scaling needed
-# Linear models: scaling important
-# Neural networks: both encoding and scaling
-```
+Different model families have different sensitivity to feature scales and encoding:
+
+| Model Family | Scaling | Encoding | Why |
+|-------------|---------|----------|-----|
+| **Linear / Logistic Regression** | Required | One-hot for nominal, ordinal for ordered | Coefficients are directly affected by feature magnitude |
+| **SVM, KNN** | Required | One-hot for nominal, ordinal for ordered | Distance-based — unscaled features with large ranges dominate |
+| **Neural Networks** | Required | One-hot for nominal, ordinal for ordered | Gradient descent converges faster with normalized inputs |
+| **XGBoost, Random Forest** | Not needed | Ordinal is sufficient | Tree splits are scale-invariant; one-hot can increase dimensionality unnecessarily |
+
+::: {.callout-tip}
+**Rule of thumb:** If the model uses gradients or distances, scale your features. If the model splits on thresholds (tree-based), scaling adds no value and can be skipped.
+:::
 
 ---
 

@@ -1,0 +1,212 @@
+# .github/workflows/feature-deploy.yml
+#
+# CI/CD workflow for deploying Snowflake Feature Store FeatureViews.
+#
+# Authentication options (choose ONE):
+#   1. Key-pair (recommended default): Store SNOWFLAKE_PRIVATE_KEY_RAW in GitHub Secrets
+#   2. OIDC / WIF (most secure, no stored secrets): Requires Snowflake CLI >= 3.11
+#      and a Snowflake SERVICE user with WORKLOAD_IDENTITY configured.
+#
+# This workflow uses key-pair auth. For OIDC, see the OIDC variant at the bottom.
+#
+# Required GitHub Secrets:
+#   SF_ACCOUNT           - Snowflake account identifier (e.g. "abc12345.us-east-1")
+#   SF_USER              - Snowflake service user for CI/CD
+#   SF_PRIVATE_KEY_RAW   - PEM-encoded private key (unencrypted) for key-pair auth
+#   SF_ROLE              - Snowflake role (e.g. "FS_PRODUCER")
+#   SF_WAREHOUSE         - Warehouse for Feature Store operations
+#   SF_DATABASE          - Target database
+#   SF_SCHEMA            - Target Feature Store schema
+#
+# References:
+#   - https://github.com/snowflakedb/snowflake-cli-action
+#   - https://docs.snowflake.com/en/developer-guide/snowflake-cli/cicd/integrate-ci-cd
+#   - https://docs.snowflake.com/en/user-guide/key-pair-auth
+
+name: Deploy Feature Store
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'features/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'features/**'
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Validate configs and run unit tests
+  # ──────────────────────────────────────────────
+  validate:
+    name: Validate Feature Definitions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install snowflake-ml-python snowflake-snowpark-python
+
+      - name: Validate feature configs
+        run: python scripts/validate_features.py
+
+      - name: Run unit tests
+        run: pytest tests/features/ -v
+
+  # ──────────────────────────────────────────────
+  # Job 2: Deploy to DEV (on push to main)
+  # ──────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy to DEV
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Snowflake CLI
+        uses: snowflakedb/snowflake-cli-action@v2.0
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install snowflake-ml-python snowflake-snowpark-python
+
+      - name: Test Snowflake connection
+        env:
+          SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SF_PRIVATE_KEY_RAW }}
+          SNOWFLAKE_ROLE: ${{ secrets.SF_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SF_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SF_SCHEMA }}
+        run: snow connection test --temporary-connection
+
+      - name: Deploy FeatureViews to DEV
+        env:
+          SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SF_PRIVATE_KEY_RAW }}
+          SNOWFLAKE_ROLE: ${{ secrets.SF_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SF_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SF_SCHEMA }}
+        run: python scripts/deploy_features.py --env DEV
+
+      - name: Run integration tests
+        env:
+          SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SF_PRIVATE_KEY_RAW }}
+          SNOWFLAKE_ROLE: ${{ secrets.SF_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SF_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SF_SCHEMA }}
+        run: pytest tests/integration/ -v
+
+  # ──────────────────────────────────────────────
+  # Job 3: Deploy to PROD (requires manual approval)
+  # ──────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy to PROD
+    needs: deploy-dev
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: prod    # ← Configure required reviewers in GitHub repo settings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Snowflake CLI
+        uses: snowflakedb/snowflake-cli-action@v2.0
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install snowflake-ml-python snowflake-snowpark-python
+
+      - name: Test Snowflake connection
+        env:
+          SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SF_PRIVATE_KEY_RAW }}
+          SNOWFLAKE_ROLE: ${{ secrets.SF_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SF_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SF_SCHEMA }}
+        run: snow connection test --temporary-connection
+
+      - name: Deploy FeatureViews to PROD
+        env:
+          SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SF_PRIVATE_KEY_RAW }}
+          SNOWFLAKE_ROLE: ${{ secrets.SF_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SF_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SF_SCHEMA }}
+        run: python scripts/deploy_features.py --env PROD
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OIDC VARIANT (alternative to key-pair auth above)
+#
+# Replace the key-pair auth steps with the following to use OIDC / WIF:
+#
+# Prerequisites:
+#   1. Snowflake CLI >= 3.11
+#   2. A Snowflake SERVICE user with WORKLOAD_IDENTITY configured:
+#
+#      CREATE USER GITHUB_CICD_USER
+#      TYPE = SERVICE
+#      WORKLOAD_IDENTITY = (
+#        TYPE = OIDC
+#        ISSUER = 'https://token.actions.githubusercontent.com'
+#        SUBJECT = 'repo:your-org/your-repo:environment:prod'
+#      );
+#
+#   3. Add top-level permissions to the workflow:
+#
+#      permissions:
+#        id-token: write
+#        contents: read
+#
+#   4. Use OIDC in the Snowflake CLI action step:
+#
+#      - name: Install Snowflake CLI
+#        uses: snowflakedb/snowflake-cli-action@v2.0
+#        with:
+#          use-oidc: true
+#          cli-version: "3.11"
+#
+#      - name: Deploy FeatureViews
+#        env:
+#          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+#        run: python scripts/deploy_features.py --env PROD
+# ──────────────────────────────────────────────────────────────────────────────
