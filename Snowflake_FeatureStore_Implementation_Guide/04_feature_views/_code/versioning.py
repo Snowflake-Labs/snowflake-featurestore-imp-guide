@@ -1,21 +1,24 @@
 """
-FeatureView versioning utilities.
+Feature View versioning utilities.
+
+Uses canonical Feature View names (e.g. USER_ORDER_FV, PRODUCT_CATALOG_FV)
+and zero-padded versions (V01, V02) with FEATURE_STORE_DEMO.FEATURE_STORE.
 
 This module demonstrates how to:
-- Version FeatureViews correctly
+- Version Feature Views correctly
 - List and manage versions
 - Get the latest version
 
 Tested in: tests/test_chapter_04.py
 """
-from snowflake.ml.feature_store import FeatureStore, FeatureView
+from snowflake.ml.feature_store import FeatureStore
 from typing import Optional, List
 
 
 def get_version_naming_examples() -> dict:
     """
     Get examples of version naming conventions.
-    
+
     Returns:
         Dict with version naming examples
     """
@@ -52,20 +55,20 @@ def get_latest_version(
     fv_name: str,
 ) -> Optional[str]:
     """
-    Get the latest version string for a FeatureView.
-    
+    Get the latest version string for a Feature View.
+
     Args:
         fs: FeatureStore instance
-        fv_name: FeatureView name
-        
+        fv_name: Feature View name
+
     Returns:
         Latest version string or None
     """
     versions = list(fs.list_feature_views(feature_view_name=fv_name).collect())
-    
+
     if not versions:
         return None
-    
+
     return sorted([v.version for v in versions], reverse=True)[0]
 
 
@@ -74,12 +77,12 @@ def list_versions(
     fv_name: str,
 ) -> List[str]:
     """
-    List all versions for a FeatureView.
-    
+    List all versions for a Feature View.
+
     Args:
         fs: FeatureStore instance
-        fv_name: FeatureView name
-        
+        fv_name: Feature View name
+
     Returns:
         List of version strings
     """

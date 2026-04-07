@@ -7,6 +7,8 @@ subtitle: "The Feature class for declarative time-windowed aggregations"
 
 The Aggregations API provides a declarative way to define time-windowed features using the `Feature` class. Instead of writing complex SQL with window functions, you specify what aggregations you want and the Feature Store handles the efficient computation.
 
+Examples in this chapter use the canonical demo layout: database `FEATURE_STORE_DEMO`, Feature Store schema `FEATURE_STORE`, clickstream source schema `CLICKSTREAM_DATA`, warehouse `FS_DEV_WH`, and tables such as `ORDERS` (`ORDER_TS`, `ORDER_ID`, `USER_ID`, `TOTAL_AMT`).
+
 ::: {.callout-note}
 ## 🆕 New in snowflake-ml 1.21+
 The Feature class and tiled aggregation are new capabilities requiring `snowflake-ml-python >= 1.21.0`.
@@ -31,43 +33,123 @@ After completing this chapter, you will be able to:
 > 📁 **Full code:** [`_code/feature_class.py`](_code/feature_class.py)
 
 ```python
-from snowflake.ml.feature_store import Feature, FeatureView
+from snowflake.ml.feature_store import FeatureStore, Feature, FeatureView, Entity
 
-# Define time-windowed aggregations declaratively
+# Define time-windowed aggregations declaratively (aliases: _SUM, _CNT, _AVG, …)
 features = [
-    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-    Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
-    Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
-    Feature.max("AMOUNT", "30d").alias("MAX_ORDER_30D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+    Feature.avg("TOTAL_AMT", "7d").alias("TOTAL_AMT_AVG_7D"),
+    Feature.max("TOTAL_AMT", "30d").alias("TOTAL_AMT_MAX_30D"),
 ]
 
-# Create tiled FeatureView
+# Create tiled Feature View (source: canonical clickstream ORDERS)
+orders_fqn = "FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"
 user_agg_fv = FeatureView(
     name="USER_PURCHASE_AGGREGATES",
     entities=[user_entity],
-    feature_df=session.table("ORDERS"),
+    feature_df=session.table(orders_fqn),
     timestamp_col="ORDER_TS",
     refresh_freq="1 hour",
     feature_granularity="1 hour",  # Tile size
     features=features,
 )
+
+# After creation, register with a zero-padded version string, e.g. V01
+# fs.register_feature_view(feature_view=user_agg_fv, version="V01", block=True)
 ```
 
 ### Available Aggregation Functions
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `Feature.sum(col, window)` | Sum over window | `Feature.sum("AMOUNT", "7d")` |
+| `Feature.sum(col, window)` | Sum over window | `Feature.sum("TOTAL_AMT", "7d")` |
+| `Feature.min(col, window)` | Minimum over window | `Feature.min("TOTAL_AMT", "30d")` |
+| `Feature.max(col, window)` | Maximum over window | `Feature.max("TOTAL_AMT", "30d")` |
 | `Feature.count(col, window)` | Count over window | `Feature.count("ORDER_ID", "30d")` |
-| `Feature.avg(col, window)` | Average over window | `Feature.avg("AMOUNT", "7d")` |
-| `Feature.min(col, window)` | Minimum over window | `Feature.min("AMOUNT", "30d")` |
-| `Feature.max(col, window)` | Maximum over window | `Feature.max("AMOUNT", "30d")` |
-| `Feature.std(col, window)` | Standard deviation | `Feature.std("AMOUNT", "30d")` |
-| `Feature.var(col, window)` | Variance | `Feature.var("AMOUNT", "30d")` |
-| `Feature.approx_count_distinct(col, window)` | Approximate distinct count | `Feature.approx_count_distinct("PRODUCT_ID", "7d")` |
-| `Feature.last_n(col, window, n)` | Last N values | `Feature.last_n("PRODUCT_ID", "7d", n=5)` |
-| `Feature.first_n(col, window, n)` | First N values | `Feature.first_n("PRODUCT_ID", "7d", n=5)` |
+| `Feature.avg(col, window)` | Average over window | `Feature.avg("TOTAL_AMT", "7d")` |
+| `Feature.std(col, window)` | Standard deviation | `Feature.std("TOTAL_AMT", "30d")` |
+| `Feature.var(col, window)` | Variance | `Feature.var("TOTAL_AMT", "30d")` |
+| `Feature.last_n(col, window, n=N)` | N most recent values | `Feature.last_n("PRODUCT_ID", "7d", n=5)` |
+| `Feature.first_n(col, window, n=N)` | N oldest values | `Feature.first_n("PRODUCT_ID", "7d", n=5)` |
+| `Feature.last_distinct_n(col, window, n=N)` | N most recent unique values | `Feature.last_distinct_n("PRODUCT_ID", "7d", n=5)` |
+| `Feature.first_distinct_n(col, window, n=N)` | N oldest unique values | `Feature.first_distinct_n("PRODUCT_ID", "7d", n=5)` |
+| `Feature.approx_count_distinct(col, window)` | HLL distinct count | `Feature.approx_count_distinct("PRODUCT_ID", "7d")` |
+| `Feature.approx_percentile(col, window, percentile=0.5)` | Approximate percentile | `Feature.approx_percentile("TOTAL_AMT", "30d", percentile=0.5)` |
+
+::: {.callout-warning title="Float columns and incremental refresh"}
+Aggregation Feature Views backed by Dynamic Tables may fall back to **full refresh** if the underlying SQL combines aggregations on `FLOAT`-typed expressions (`sum`, `avg`, `min`, `max`, `std`, `var`) with a JOIN in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins.
+
+If your source columns are `FLOAT`/`DOUBLE`, cast them to a fixed-point type **before** the aggregation reaches the DT definition:
+
+```sql
+CAST(TOTAL_AMT AS NUMBER(38, 6))
+```
+
+The Temporal Aggregation API generates the underlying DT SQL automatically, so if your source table's numeric columns are `FLOAT` and the API introduces a join (e.g., for tiling or rollup), the resulting DT may silently use full refresh. Check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration and alter source column types to `NUMBER` if needed.
+
+**ML model impact:** For most ML use cases the precision difference between `FLOAT` and `NUMBER(38, 8)` is negligible -- the variance across training runs or hyperparameter choices far exceeds the rounding delta. If you need higher fidelity, `NUMBER(38, 12)` provides ~12 decimal digits of precision, comparable to `FLOAT` for the value ranges typical in feature engineering. The key trade-off is **incremental refresh (fast, cheap) vs full refresh (slow, expensive)** -- the precision loss from fixed-point casting is almost always the better deal.
+
+**Recommended approach for source table owners:** Alter the source column type to `NUMBER`/`DECIMAL` at the table level rather than casting in every Feature View query. This avoids repeating the cast in multiple Feature Views and ensures all downstream consumers benefit:
+
+```sql
+ALTER TABLE FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+  ALTER COLUMN TOTAL_AMT SET DATA TYPE NUMBER(18, 8);
+```
+
+For rollup Feature Views, the same constraint applies transitively -- if the source tiled Feature View aggregates `FLOAT` columns, the rollup DT also falls back to full refresh. Fix the types at the source level.
+:::
+
+### Aggregation Function Performance Characteristics {#sec-agg-performance}
+
+Not all aggregation functions are equal in terms of tile storage, computation cost, and incremental refresh compatibility. Understanding these trade-offs is important when designing features at scale.
+
+| Function | Tile storage | Incremental | Notes |
+|----------|-------------|-------------|-------|
+| `count` | Partial counts per tile | Yes | Lightweight; most efficient aggregation |
+| `sum` | Partial sums per tile | Yes (if not `FLOAT`+JOIN) | Cast to `NUMBER` if source is `FLOAT` |
+| `min`, `max` | Per-tile min/max | Yes | Used for windowed extremes |
+| `avg` | Stored as sum + count | Yes (derived) | Reconstructed from partial sum/count at query time |
+| `std`, `var` | Partial sum, sum-of-squares, count | Yes (derived) | Higher storage per tile; 3 partial aggregates |
+| `approx_count_distinct` | HLL sketch per tile | Yes | Fixed-size sketch (~12 KB); merges across tiles |
+| `last_n`, `first_n` | Array per tile | Yes | Storage scales with `n`; larger `n` increases tile size |
+| `last_distinct_n`, `first_distinct_n` | Deduplicated array per tile | Yes | More expensive than `last_n` due to dedup logic |
+| `approx_percentile` | T-Digest sketch per tile | Yes | Fixed-size sketch; approximate result |
+
+**Guidance for high-cardinality, high-volume data:**
+
+- **Prefer `count` and `sum`** as primary features -- they are the most efficient for both tiling and query-time reassembly.
+- **Use `approx_count_distinct`** instead of exact distinct counts when precision within ~2% is acceptable. The HLL sketch is constant-size regardless of cardinality, whereas exact distinct counts require per-tile array storage.
+- **Limit `last_n` / `first_n` values of `n`** to what the model actually needs. Each tile stores up to `n` values; at `n=100` with hourly tiles and 90-day windows, tile storage grows substantially.
+- **`std` and `var`** store three partial aggregates per tile (sum, sum-of-squares, count). If you only need variance for a subset of features, consider computing it post-retrieval from `sum` and `count` features to reduce tile storage.
+
+### Filter Expressions Within Features {#sec-filter-expr}
+
+When the same source data feeds features that differ only by a **filter condition** (e.g., count of automated messages vs. count of all messages), use separate `Feature` definitions with filter logic in the source `feature_df` rather than creating multiple Feature Views:
+
+```python
+# Approach 1: Filtered features via CASE in the source DataFrame
+filtered_source_df = session.sql("""
+    SELECT
+        USER_ID,
+        EVENT_TS,
+        ORDER_ID,
+        TOTAL_AMT,
+        CASE WHEN CHANNEL = 'AUTOMATED' THEN ORDER_ID END AS AUTO_ORDER_ID,
+        CASE WHEN CHANNEL = 'AUTOMATED' THEN TOTAL_AMT END AS AUTO_TOTAL_AMT
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+""")
+
+features = [
+    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+    Feature.count("AUTO_ORDER_ID", "7d").alias("AUTO_ORDER_CNT_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("SPEND_SUM_30D"),
+    Feature.sum("AUTO_TOTAL_AMT", "30d").alias("AUTO_SPEND_SUM_30D"),
+]
+```
+
+This approach keeps all related features in a **single Feature View**, which means they share tiles and refresh together -- significantly more efficient than creating separate Feature Views per filter condition. The `CASE WHEN` produces `NULL` for non-matching rows, and aggregation functions skip NULLs, giving the correct filtered result.
 
 ### Window Specifications
 
@@ -81,6 +163,16 @@ Windows can be specified using shorthand notation:
 | `"30d"` | 30 days |
 | `"1w"` or `"1 week"` | 1 week |
 
+### Window offset
+
+Pass `offset` to shift the aggregation window backward in time (for example, “previous week” vs “current week”):
+
+```python
+Feature.sum("TOTAL_AMT", "7d", offset="7d").alias("TOTAL_AMT_SUM_PREV_WEEK")
+```
+
+Use `.alias("NAME")` on each `Feature` to set the output column name.
+
 ---
 
 ## Naming Aggregated Features {#sec-naming}
@@ -90,17 +182,17 @@ Windows can be specified using shorthand notation:
 Always use `.alias()` to give features meaningful names:
 
 ```python
-# ✅ GOOD: Descriptive names with window suffix
+# ✅ GOOD: Suffix metric role (_SUM, _CNT, _AVG) and window
 features = [
-    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-    Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
 ]
 
 # ❌ BAD: Auto-generated names are hard to interpret
 features = [
-    Feature.sum("AMOUNT", "7d"),  # Name will be SUM_AMOUNT_7D
-    Feature.sum("AMOUNT", "30d"),
+    Feature.sum("TOTAL_AMT", "7d"),  # opaque default name
+    Feature.sum("TOTAL_AMT", "30d"),
 ]
 ```
 
@@ -108,34 +200,39 @@ features = [
 
 ## Feature Column Prefixing for Disambiguation {#sec-prefixing}
 
-When joining features from multiple FeatureViews, column name collisions can occur. Feature Store provides two mechanisms for disambiguation.
+When joining features from multiple Feature Views, column name collisions can occur. Feature Store provides two mechanisms for disambiguation.
 
 ### The Problem
 
 ```python
-# Both FeatureViews have ORDER_CNT_7D
+# Name collision: same aggregation function on same column, different entity groupings,
+# using the default naming derivation -- both resolve to ORDER_ID_CNT_7D
 user_orders_fv = FeatureView(
     name="USER_ORDERS",
-    features=[Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D")],
+    entities=[user_entity],
+    features=[Feature.count("ORDER_ID", "7d")],  # default name: ORDER_ID_CNT_7D
     # ...
 )
 
-user_sessions_fv = FeatureView(
-    name="USER_SESSIONS", 
-    features=[Feature.count("SESSION_ID", "7d").alias("ORDER_CNT_7D")],  # Same name!
+merchant_orders_fv = FeatureView(
+    name="MERCHANT_ORDERS",
+    entities=[merchant_entity],
+    features=[Feature.count("ORDER_ID", "7d")],  # same default name: ORDER_ID_CNT_7D
     # ...
 )
 
 # Without prefixing, collision occurs
 dataset = fs.generate_dataset(
     spine_df=spine,
-    features=[user_orders_fv, user_sessions_fv],  # Which ORDER_CNT_7D?
+    features=[user_orders_fv, user_sessions_fv],  # Which ORDER_ID_CNT_7D?
 )
 ```
 
+Prefer explicit `.alias()` calls with distinct names (e.g., `MERCHANT_ORDER_ID_CNT_7D`) or use `auto_prefix=True` / `.with_name()` so semantics stay clear even when multiple Feature Views aggregate the same source column.
+
 ### Solution 1: Auto-Prefix
 
-Use `auto_prefix=True` to automatically prefix columns with FeatureView name:
+Use `auto_prefix=True` to automatically prefix columns with Feature View name:
 
 > 📁 **Full code:** [`_code/prefixing.py`](_code/prefixing.py)
 
@@ -143,17 +240,17 @@ Use `auto_prefix=True` to automatically prefix columns with FeatureView name:
 dataset = fs.generate_dataset(
     spine_df=spine,
     features=[user_orders_fv, user_sessions_fv],
-    auto_prefix=True,  # Columns become USER_ORDERS__ORDER_CNT_7D, etc.
+    auto_prefix=True,  # Columns become USER_ORDERS__ORDER_ID_CNT_7D, etc.
 )
 
 # Result columns:
-# - USER_ORDERS__ORDER_CNT_7D
-# - USER_SESSIONS__ORDER_CNT_7D
+# - USER_ORDERS__ORDER_ID_CNT_7D
+# - USER_SESSIONS__SESSION_ID_CNT_7D
 ```
 
 ### Solution 2: Custom Prefixes with `.with_name()`
 
-For more control, use `.with_name()` on individual FeatureViews or slices:
+For more control, use `.with_name()` on individual Feature Views or slices:
 
 ```python
 dataset = fs.generate_dataset(
@@ -165,8 +262,8 @@ dataset = fs.generate_dataset(
 )
 
 # Result columns:
-# - orders__ORDER_CNT_7D
-# - sessions__ORDER_CNT_7D
+# - orders__ORDER_ID_CNT_7D
+# - sessions__SESSION_ID_CNT_7D
 ```
 
 ### Solution 3: Combining Both Approaches
@@ -184,14 +281,14 @@ dataset = fs.generate_dataset(
 
 ::: {.callout-note}
 ## Priority
-`.with_name()` takes precedence over `auto_prefix`. If a FeatureView has `.with_name()` set, that prefix is used regardless of `auto_prefix` setting.
+`.with_name()` takes precedence over `auto_prefix`. If a Feature View has `.with_name()` set, that prefix is used regardless of `auto_prefix` setting.
 :::
 
 ### Choosing a Prefixing Strategy
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Single FeatureView | No prefix needed |
+| Single Feature View | No prefix needed |
 | Multiple FVs, unique column names | No prefix needed |
 | Multiple FVs, potential collisions | Use `auto_prefix=True` |
 | Want short, custom prefixes | Use `.with_name()` |
@@ -222,6 +319,71 @@ fv = FeatureView(
 | Transactions (medium) | `1 day` | Daily aggregation patterns |
 | Weekly metrics | `1 week` | Coarse granularity sufficient |
 
+### Multi-Granularity Tile Strategy {#sec-multi-granularity}
+
+When Feature Views need to serve both **short lookback windows** (1d, 7d) and **long lookback windows** (90d, 360d), a single tile size creates a trade-off: small tiles (1 hour) provide precision for short windows but require combining thousands of tiles for 360-day windows; large tiles (1 day) are efficient for long windows but lose sub-day precision.
+
+The recommended approach is to use **multiple Feature Views at different tile granularities**, each optimised for the windows it serves:
+
+```python
+short_window_features = [
+    Feature.sum("TOTAL_AMT", "1d").alias("SPEND_SUM_1D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("SPEND_SUM_7D"),
+    Feature.count("ORDER_ID", "1d").alias("ORDER_CNT_1D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+]
+
+short_window_fv = FeatureView(
+    name="USER_PURCHASE_SHORT_WINDOW",
+    entities=[user_entity],
+    feature_df=session.table(orders_fqn),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    feature_granularity="1 hour",
+    features=short_window_features,
+    desc="Short-window purchase features (1d, 7d) with hourly tiles",
+)
+
+long_window_features = [
+    Feature.sum("TOTAL_AMT", "30d").alias("SPEND_SUM_30D"),
+    Feature.sum("TOTAL_AMT", "90d").alias("SPEND_SUM_90D"),
+    Feature.sum("TOTAL_AMT", "360d").alias("SPEND_SUM_360D"),
+    Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
+    Feature.count("ORDER_ID", "360d").alias("ORDER_CNT_360D"),
+]
+
+long_window_fv = FeatureView(
+    name="USER_PURCHASE_LONG_WINDOW",
+    entities=[user_entity],
+    feature_df=session.table(orders_fqn),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 day",
+    feature_granularity="1 day",
+    features=long_window_features,
+    desc="Long-window purchase features (30d-360d) with daily tiles",
+)
+```
+
+At training time, join both Feature Views on the same spine:
+
+```python
+training_df = fs.generate_training_set(
+    spine_df=spine,
+    features=[short_window_fv, long_window_fv],
+    spine_timestamp_col="EVENT_TS",
+)
+```
+
+**Trade-offs:**
+
+| Approach | Tiles for 360d window | Refresh cost | Short-window precision |
+|----------|----------------------|--------------|----------------------|
+| Single FV, `1 hour` tiles | 8,640 tiles | High (hourly refresh) | Sub-hour |
+| Single FV, `1 day` tiles | 360 tiles | Low (daily refresh) | Daily only |
+| Two FVs (recommended) | 360 tiles (daily FV) + 168 tiles for 7d (hourly FV) | Balanced | Sub-hour for short, daily for long |
+
+The two-FV approach also lets you set different `refresh_freq` values: hourly for short windows where freshness matters, daily for long windows where the marginal value of hourly refresh is negligible.
+
 ---
 
 ## Multi-Window Features
@@ -230,23 +392,42 @@ Define features with multiple time windows efficiently:
 
 ```python
 features = [
-    # Same metric, different windows
-    Feature.sum("AMOUNT", "1d").alias("SPEND_1D"),
-    Feature.sum("AMOUNT", "7d").alias("SPEND_7D"),
-    Feature.sum("AMOUNT", "30d").alias("SPEND_30D"),
-    Feature.sum("AMOUNT", "90d").alias("SPEND_90D"),
-    
-    # Useful for trend detection
-    Feature.count("ORDER_ID", "7d").alias("ORDERS_7D"),
-    Feature.count("ORDER_ID", "30d").alias("ORDERS_30D"),
+    Feature.sum("TOTAL_AMT", "1d").alias("TOTAL_AMT_SUM_1D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+    Feature.sum("TOTAL_AMT", "90d").alias("TOTAL_AMT_SUM_90D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+    Feature.count("ORDER_ID", "30d").alias("ORDER_ID_CNT_30D"),
 ]
 
-# Single FeatureView efficiently computes all windows
+# Single Feature View efficiently computes all windows (required FV args shown above)
 multi_window_fv = FeatureView(
     name="USER_MULTI_WINDOW",
+    entities=[user_entity],
+    feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 day",
     features=features,
     feature_granularity="1 day",
-    # ...
+)
+```
+
+When you have many columns and windows, a helper function avoids repetitive boilerplate and enforces consistent naming:
+
+```python
+from snowflake.ml.feature_store import Feature
+
+def build_features(columns: list[str], windows: list[str], agg: str = "sum") -> list[Feature]:
+    agg_fn = getattr(Feature, agg)
+    return [
+        agg_fn(col, w).alias(f"{col}_{agg.upper()}_{w.upper()}")
+        for col in columns
+        for w in windows
+    ]
+
+features = (
+    build_features(["TOTAL_AMT", "DISCOUNT_AMT"], ["7d", "30d", "90d"], "sum")
+    + build_features(["ORDER_ID"], ["7d", "30d"], "count")
 )
 ```
 
@@ -257,12 +438,12 @@ multi_window_fv = FeatureView(
 ### 1. Use Consistent Naming Conventions
 
 ```python
-# Pattern: <METRIC>_<WINDOW>
+# Pattern: <COL_OR_ENTITY>_<ROLE>_<WINDOW> (roles: _SUM, _CNT, _AVG, …)
 features = [
-    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-    Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
-    Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_AMT_7D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+    Feature.avg("TOTAL_AMT", "7d").alias("TOTAL_AMT_AVG_7D"),
 ]
 ```
 
@@ -282,22 +463,141 @@ weekly_metrics_fv = FeatureView(
 )
 ```
 
-### 3. Group Related Features
+### 3. Group Related Features and Consolidate Feature Views {#sec-consolidate}
+
+When multiple Feature Views share the **same source table, entity, and tile granularity**, they automatically share the same underlying tile computation. Consolidating them into a single Feature View reduces operational overhead (fewer DTs to monitor) and ensures tile computation happens once:
 
 ```python
-# ✅ GOOD: Related features in same FeatureView
+# ✅ GOOD: Related features in same Feature View -- single tile computation
 purchase_features = [
-    Feature.sum("AMOUNT", "7d").alias("SPEND_7D"),
-    Feature.count("ORDER_ID", "7d").alias("ORDERS_7D"),
-    Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+    Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+    Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+    Feature.count("ORDER_ID", "30d").alias("ORDER_ID_CNT_30D"),
+    Feature.avg("TOTAL_AMT", "7d").alias("TOTAL_AMT_AVG_7D"),
 ]
 
+# ❌ BAD: Same source split across multiple FVs -- duplicated tile computation
+spend_fv = FeatureView(
+    name="USER_SPEND_FV",
+    feature_df=session.table(orders_fqn),
+    features=[Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D")],
+    # ...
+)
+count_fv = FeatureView(
+    name="USER_ORDER_COUNT_FV",
+    feature_df=session.table(orders_fqn),
+    features=[Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D")],
+    # ...
+)
+```
+
+Splitting features from the same source into separate Feature Views forces independent tile computations over the same data. Each Feature View creates its own DT with its own tiles, effectively doubling (or more) the compute cost. Consolidate into one Feature View when the source, entity, and granularity are shared.
+
+**When separate Feature Views are appropriate:**
+
+- Different **source tables** (e.g., ORDERS vs EVENTS)
+- Different **entities** (e.g., USER vs PRODUCT)
+- Different **tile granularities** (e.g., hourly tiles for short windows, daily for long -- see [Multi-Granularity](#sec-multi-granularity))
+- Different **refresh cadences** needed for operational reasons
+- **Unrelated** feature domains that evolve independently
+
+```python
 # ❌ BAD: Unrelated features mixed together
 mixed_features = [
-    Feature.sum("AMOUNT", "7d"),  # Purchase feature
-    Feature.count("LOGIN_ID", "7d"),  # Session feature (different entity!)
+    Feature.sum("TOTAL_AMT", "7d"),  # Purchase feature
+    Feature.count("EVENT_ID", "7d"),  # Clickstream feature (different grain / entity!)
 ]
 ```
+
+### 4. Tile Sharing Across Feature Views {#sec-tile-sharing}
+
+When two Feature Views use the **same source, entity, and `feature_granularity`**, the underlying tile DTs compute identical partial aggregates. Today, the Feature Store does not automatically share tiles between separately registered Feature Views -- each creates its own tile DT. This means:
+
+- **Consolidating features** into fewer Feature Views (per best practice #3 above) is the primary mechanism for avoiding duplicate tile computation.
+- If you need separate Feature Views for organisational reasons (different owners, different version lifecycles), be aware that tile compute is duplicated. The cost impact depends on source data volume and tile granularity.
+- A future platform optimisation may deduplicate tiles across Feature Views with identical source/entity/granularity, but until then, consolidation is the recommended approach.
+
+::: {.callout-warning title="Stacking tiled Feature Views is not supported"}
+You **cannot** chain (stack) one Time Aggregation Feature View on top of another. Attempting it causes duplicate internal `_PARTIAL_*` column names and SQL compilation errors that block both `retrieve_feature_values()` and `generate_training_set()`. To aggregate from a finer-grained entity to a coarser one (e.g., visitor → subscriber), use **Rollup Feature Views** with `RollupConfig` as described below -- not raw stacking of tiled Feature Views.
+:::
+
+---
+
+## Rollup Aggregated Feature Views {#sec-rollup}
+
+Rollup Feature Views enable **hierarchical aggregation** -- creating coarser-grained features from finer-grained tiled Feature Views without recomputing from raw data. For example, clickstream-style hierarchies often roll up **VISITOR** → **USER** → **HOUSEHOLD**: a visitor-level "7-day page view count" can be rolled up to user-level (sum across all visitors linked to that user) and then to household-level (sum across all users in the household).
+
+The `RollupConfig` defines the relationship between a finer-grained (source) Feature View and the coarser-grained (target) Feature View. The Feature Store leverages Dynamic Tables for automatic, incremental updates.
+
+### RollupConfig Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `source` | The parent **tiled** Feature View to roll up from. Must be registered (not in DRAFT status) |
+| `mapping_df` | A Snowpark DataFrame containing the entity mapping -- all join keys from both the source (finer) and target (coarser) entities |
+
+### Example: Visitor → Subscriber Rollup
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity, RollupConfig, Feature
+
+# Entities at both levels of the hierarchy
+visitor_entity = Entity("VISITOR", ["VISITOR_ID", "COMPANY_ID"])
+subscriber_entity = Entity("SUBSCRIBER", ["SUBSCRIBER_ID", "COMPANY_ID"])
+fs.register_entity(visitor_entity)
+fs.register_entity(subscriber_entity)
+
+# Fine-grained: tiled visitor-level Feature View (already registered)
+visitor_features = [
+    Feature.sum("PAGE_VIEWS", "7d").alias("PAGE_VIEWS_7D"),
+    Feature.count("SESSION_ID", "30d").alias("SESSION_CNT_30D"),
+]
+visitor_fv = FeatureView(
+    name="VISITOR_ENGAGEMENT_FV",
+    entities=[visitor_entity],
+    feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS"),
+    timestamp_col="EVENT_TS",
+    refresh_freq="1 hour",
+    feature_granularity="1 hour",
+    features=visitor_features,
+    desc="Visitor-level engagement features — tiled",
+)
+registered_visitor_fv = fs.register_feature_view(visitor_fv, version="V01")
+
+# Entity mapping: links visitor keys to subscriber keys
+mapping_df = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.VISITOR_SUBSCRIBER_MAPPING")
+# Expected columns: VISITOR_ID, COMPANY_ID, SUBSCRIBER_ID
+
+# Rollup configuration
+rollup_config = RollupConfig(
+    source=registered_visitor_fv,
+    mapping_df=mapping_df,
+)
+
+# Coarse-grained: subscriber-level rollup Feature View
+subscriber_fv = FeatureView(
+    name="SUBSCRIBER_ENGAGEMENT_FV",
+    entities=[subscriber_entity],
+    rollup_config=rollup_config,
+    desc="Subscriber-level engagement — rolled up from visitor-level tiles",
+)
+fs.register_feature_view(subscriber_fv, version="V01")
+```
+
+The resulting `SUBSCRIBER_ENGAGEMENT_FV` automatically aggregates the visitor-level tiles up to the subscriber level using the entity mapping. Because it is backed by a Dynamic Table, it refreshes incrementally as the source visitor Feature View updates.
+
+::: {.callout-note}
+The source Feature View **must** be a registered, tiled Feature View (one with `features` and `feature_granularity`). You cannot roll up a non-tiled DT-based or View-based Feature View.
+:::
+
+### Rollup Design Guidelines
+
+- **Define entities** that match the grain of each Feature View (for example, visitor-level tiles on `EVENTS`, user-level aggregates on `ORDERS` keyed by `USER_ID`).
+- **Reuse the same aggregation patterns** (`Feature.sum`, `Feature.count`, …) at each level; change the spine entity and join keys when moving from visitor to user to household.
+- **Keep aliases explicit** (`VISITOR_PAGE_VIEWS_7D` vs `USER_PAGE_VIEWS_7D`) so rolled-up datasets remain interpretable when multiple hierarchy levels appear in one training set.
+- **Design mapping tables carefully.** The `mapping_df` determines which fine-grained entities roll up to which coarse-grained entities. For static relationships a simple `DISTINCT` mapping suffices; for time-varying relationships (visitors identified as subscribers over time), consider SCD-Type2 patterns or `MAPPED_AT` timestamps. See [Chapter 03: Entity Mapping Tables](../03_entities_hierarchies/index.qmd#sec-mapping-tables) for patterns and PIT correctness implications.
+- **Watch for late-arriving mappings.** If entity mappings are added retroactively, the rollup may aggregate historical tile data under a mapping that did not exist at the original event time, creating subtle data leakage. See the mapping table PIT warning in [Chapter 03](../03_entities_hierarchies/index.qmd#sec-mapping-tables) and [Chapter 06](../06_temporal_features/index.qmd#sec-mapping-leakage).
 
 ---
 
@@ -317,9 +617,23 @@ mixed_features = [
 
 ### ❌ Pitfall 3: Column Collisions
 
-**Problem**: Same column names from different FeatureViews.
+**Problem**: Same column names from different Feature Views.
 
 **Solution**: Use `auto_prefix=True` or `.with_name()`.
+
+### ❌ Pitfall 4: Internal _PARTIAL Columns in Output
+
+**Problem**: Internal columns used for tile aggregation (prefixed `_PARTIAL_`) sometimes appear in output DataFrames from `generate_training_set()` or `retrieve_feature_values()`. These are implementation artifacts -- partial aggregates stored per tile -- and are not user-facing features.
+
+**Solution**: Filter them before consuming the output:
+
+```python
+result_df = fs.generate_training_set(spine_df=spine, features=fv_list, ...)
+
+# Drop internal tile columns
+output_cols = [c for c in result_df.columns if not c.startswith("_PARTIAL_")]
+result_df = result_df.select(output_cols)
+```
 
 ---
 
@@ -327,11 +641,14 @@ mixed_features = [
 
 | Concept | Description |
 |---------|-------------|
-| **Feature class** | Declarative API for time-windowed aggregations |
-| **Window** | Time period for aggregation (e.g., "7d", "30d") |
+| **Feature class** | Declarative API for time-windowed aggregations (`Feature.sum`, `Feature.count`, …) |
+| **Window** | Time period for aggregation (e.g., `"7d"`, `"30d"`); optional `offset` shifts the window back |
 | **Tile (feature_granularity)** | Pre-computation unit for efficiency |
+| **Required FV args** | `timestamp_col`, `refresh_freq`, `feature_granularity`, `features` (plus `name`, `entities`, `feature_df`) |
+| **Version** | Register with zero-padded strings such as `"V01"`, `"V02"` |
 | **auto_prefix** | Automatic column prefixing with FV name |
 | `.with_name()` | Custom column prefixing |
+| **RollupConfig** | Hierarchical aggregation from fine-grained to coarse-grained entities via `RollupConfig(source, mapping_df)` |
 
 ---
 

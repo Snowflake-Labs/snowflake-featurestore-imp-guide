@@ -3,12 +3,20 @@ Compound entity examples.
 
 This module demonstrates how to:
 - Define compound (multi-key) entities
-- Model many-to-many relationships
-- Create intersection entities
+- Model many-to-many relationships (e.g. PRODUCT_SUPPLIER)
+- Create intersection entities for orders and affinity
+
+Canonical environment: database FEATURE_STORE_DEMO, source schema CLICKSTREAM_DATA,
+Feature Store schema FEATURE_STORE, warehouse FS_DEV_WH.
 
 Tested in: tests/test_chapter_03.py
 """
 from snowflake.ml.feature_store import Entity
+
+DATABASE = "FEATURE_STORE_DEMO"
+FEATURE_STORE_SCHEMA = "FEATURE_STORE"
+SOURCE_SCHEMA = "CLICKSTREAM_DATA"
+WAREHOUSE = "FS_DEV_WH"
 
 
 def create_product_supplier_entity() -> Entity:

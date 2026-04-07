@@ -1,8 +1,8 @@
 """
-FeatureView version management utilities.
+Feature View version management utilities.
 
 This module demonstrates how to:
-- Get the latest version of a FeatureView
+- Get the latest version of a Feature View
 - List all versions
 - Compare versions
 
@@ -17,16 +17,16 @@ def get_latest_feature_view(
     feature_view_name: str,
 ) -> Optional[FeatureView]:
     """
-    Get the most recent version of a FeatureView.
+    Get the most recent version of a Feature View.
     
     Assumes zero-padded version names (V01, V02, etc.) for correct sorting.
     
     Args:
         fs: FeatureStore instance
-        feature_view_name: Name of the FeatureView
+        feature_view_name: Name of the Feature View
         
     Returns:
-        Latest FeatureView or None if not found
+        Latest Feature View or None if not found
     """
     versions = list(fs.list_feature_views(feature_view_name=feature_view_name).collect())
     
@@ -45,11 +45,11 @@ def list_feature_view_versions(
     feature_view_name: str,
 ) -> List[str]:
     """
-    List all versions of a FeatureView.
+    List all versions of a Feature View.
     
     Args:
         fs: FeatureStore instance
-        feature_view_name: Name of the FeatureView
+        feature_view_name: Name of the Feature View
         
     Returns:
         List of version strings sorted newest first
@@ -65,11 +65,11 @@ def compare_feature_view_versions(
     version_b: str,
 ) -> dict:
     """
-    Compare two versions of a FeatureView.
+    Compare two versions of a Feature View.
     
     Args:
         fs: FeatureStore instance
-        feature_view_name: Name of the FeatureView
+        feature_view_name: Name of the Feature View
         version_a: First version
         version_b: Second version
         

@@ -45,10 +45,10 @@ class ConnectionConfig:
     account: Optional[str] = None
     user: Optional[str] = None
     password: Optional[str] = None
-    warehouse: str = "COMPUTE_WH"
-    role: str = "ACCOUNTADMIN"
-    database: str = "FEATURE_STORE_GUIDE"
-    schema: str = "CLICKSTREAM_RAW"
+    warehouse: str = "FS_DEV_WH"
+    role: str = "FS_ADMIN_ROLE"
+    database: str = "FEATURE_STORE_DEMO"
+    schema: str = "CLICKSTREAM_DATA"
     
     @classmethod
     def from_env(cls) -> "ConnectionConfig":
@@ -58,10 +58,10 @@ class ConnectionConfig:
             account=os.environ.get("SNOWFLAKE_ACCOUNT"),
             user=os.environ.get("SNOWFLAKE_USER"),
             password=os.environ.get("SNOWFLAKE_PASSWORD"),
-            warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-            role=os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
-            database=os.environ.get("SNOWFLAKE_DATABASE", "FEATURE_STORE_GUIDE"),
-            schema=os.environ.get("SNOWFLAKE_SCHEMA", "CLICKSTREAM_RAW"),
+            warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "FS_DEV_WH"),
+            role=os.environ.get("SNOWFLAKE_ROLE", "FS_ADMIN_ROLE"),
+            database=os.environ.get("SNOWFLAKE_DATABASE", "FEATURE_STORE_DEMO"),
+            schema=os.environ.get("SNOWFLAKE_SCHEMA", "CLICKSTREAM_DATA"),
         )
 
 
@@ -391,15 +391,25 @@ class DataManager:
         prod_schema: Optional[str] = None,
         sample_pct: float = 10.0,
         target_lag: str = "1 HOUR",
+        warehouse: Optional[str] = None,
     ) -> LoadResult:
         """Create a development database branch with sampled data.
         
         This implements the subset creation step-by-step with error tracking.
+        
+        Args:
+            dev_database: Name of the development database to create
+            prod_database: Source production database (default: from config)
+            prod_schema: Source schema (default: from config)
+            sample_pct: Percentage of visitors to sample
+            target_lag: Target lag for Dynamic Tables
+            warehouse: Warehouse for DT refresh (default: FS_DEV_WH)
         """
         prod_database = prod_database or self.config.database
         prod_schema = prod_schema or self.config.schema
-        admin_schema = "_SUBSET_ADMIN"
-        warehouse = self.config.warehouse
+        admin_schema = "CLICKSTREAM_ADMIN"
+        # Use feature store dev warehouse for DT refresh by default
+        warehouse = warehouse or "FS_DEV_WH"
         
         result = LoadResult(success=False, message="")
         start_time = datetime.now()
@@ -592,7 +602,7 @@ INNER JOIN {dev_database}.{admin_schema}.{sample_table} s ON src.{filter_col} = 
             dts = []
             try:
                 rows = self.session.sql("""
-                    SHOW DYNAMIC TABLES IN SCHEMA CLICKSTREAM_RAW
+                    SHOW DYNAMIC TABLES IN SCHEMA CLICKSTREAM_DATA
                 """).collect()
                 for row in rows:
                     dts.append({
@@ -640,6 +650,65 @@ INNER JOIN {dev_database}.{admin_schema}.{sample_table} s ON src.{filter_col} = 
             return True
         except:
             return False
+    
+    def update_dev_branch_target_lag(
+        self, 
+        dev_database: str, 
+        schema: str,
+        new_target_lag: str
+    ) -> Tuple[bool, str]:
+        """Update the target lag for all Dynamic Tables in a dev branch.
+        
+        Args:
+            dev_database: The development database name
+            schema: The schema containing Dynamic Tables
+            new_target_lag: New target lag (e.g., '1 MINUTE', '15 MINUTES', '1 HOUR')
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        # List of Dynamic Tables in a typical dev branch
+        dt_tables = ["VISITORS", "SESSIONS", "USERS", "ORDERS", "EVENTS", "ORDER_ITEMS"]
+        
+        updated = []
+        errors = []
+        
+        for table in dt_tables:
+            try:
+                self.session.sql(f"""
+                    ALTER DYNAMIC TABLE {dev_database}.{schema}.{table}
+                    SET TARGET_LAG = '{new_target_lag}'
+                """).collect()
+                updated.append(table)
+            except Exception as e:
+                error_msg = str(e)
+                # Skip if table doesn't exist (not all branches have all tables)
+                if "does not exist" in error_msg.lower():
+                    continue
+                errors.append(f"{table}: {error_msg[:50]}")
+        
+        # Also update the config table if it exists (try both old and new schema names)
+        for admin_schema in ['CLICKSTREAM_ADMIN', '_SUBSET_ADMIN']:
+            try:
+                self.session.sql(f"""
+                    UPDATE {dev_database}.{admin_schema}.SUBSET_CONFIG
+                    SET CONFIG_VALUE = '{new_target_lag}'
+                    WHERE CONFIG_KEY = 'TARGET_LAG'
+                """).collect()
+                break  # Success, stop trying
+            except:
+                continue  # Try next schema name
+        
+        if updated:
+            if errors:
+                return True, f"Updated {len(updated)} DTs to {new_target_lag}. Errors: {len(errors)}"
+            else:
+                return True, f"Updated {len(updated)} Dynamic Tables to {new_target_lag}"
+        else:
+            if errors:
+                return False, f"Failed to update: {'; '.join(errors[:3])}"
+            else:
+                return False, "No Dynamic Tables found to update"
     
     # =========================================================================
     # Public Datasets
@@ -700,31 +769,72 @@ INNER JOIN {dev_database}.{admin_schema}.{sample_table} s ON src.{filter_col} = 
         self,
         database: Optional[str] = None,
         schema: Optional[str] = None,
-        limit: int = 50,
+        limit: int = 100,
     ) -> pd.DataFrame:
-        """Get Dynamic Table refresh history."""
+        """Get Dynamic Table refresh history.
+        
+        Uses INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY() table function
+        which provides real-time data (no latency).
+        
+        See: https://docs.snowflake.com/en/sql-reference/functions/dynamic_table_refresh_history
+        
+        Args:
+            database: Database name
+            schema: Schema name  
+            limit: Maximum number of rows to return (applied after sorting)
+        """
         database = database or self.config.database
         schema = schema or self.config.schema
         
         try:
+            # Use INFORMATION_SCHEMA table function - real-time, no latency
+            # NAME_PREFIX filters to a specific database.schema
+            # Fetch more rows than needed, then sort and limit externally
             df = self.session.sql(f"""
                 SELECT 
                     NAME,
                     SCHEMA_NAME,
                     STATE,
+                    STATE_MESSAGE,
                     REFRESH_START_TIME,
                     REFRESH_END_TIME,
                     REFRESH_ACTION,
+                    REFRESH_TRIGGER,
                     DATEDIFF('second', REFRESH_START_TIME, REFRESH_END_TIME) as DURATION_SEC
                 FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-                    NAME_PREFIX => '{database}.{schema}'
+                    NAME_PREFIX => '{database}.{schema}.',
+                    RESULT_LIMIT => 1000
                 ))
                 ORDER BY REFRESH_START_TIME DESC
                 LIMIT {limit}
             """).to_pandas()
             return df
-        except:
-            return pd.DataFrame()
+        except Exception as e:
+            # Fallback to ACCOUNT_USAGE if INFORMATION_SCHEMA fails
+            # (e.g., missing MONITOR privilege on DTs)
+            try:
+                df = self.session.sql(f"""
+                    SELECT 
+                        NAME,
+                        SCHEMA_NAME,
+                        STATE,
+                        '' as STATE_MESSAGE,
+                        REFRESH_START_TIME,
+                        REFRESH_END_TIME,
+                        REFRESH_ACTION,
+                        REFRESH_TRIGGER,
+                        DATEDIFF('second', REFRESH_START_TIME, REFRESH_END_TIME) as DURATION_SEC
+                    FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+                    WHERE DATABASE_NAME = '{database}'
+                      AND SCHEMA_NAME = '{schema}'
+                      AND REFRESH_START_TIME > DATEADD('day', -7, CURRENT_TIMESTAMP())
+                    ORDER BY REFRESH_START_TIME DESC
+                    LIMIT {limit}
+                """).to_pandas()
+                return df
+            except Exception as e2:
+                print(f"DT History Error: INFORMATION_SCHEMA: {e}, ACCOUNT_USAGE: {e2}")
+                return pd.DataFrame()
     
     def get_task_history(
         self,
@@ -732,10 +842,17 @@ INNER JOIN {dev_database}.{admin_schema}.{sample_table} s ON src.{filter_col} = 
         admin_schema: str = "CLICKSTREAM_ADMIN",
         limit: int = 50,
     ) -> pd.DataFrame:
-        """Get task execution history."""
+        """Get task execution history.
+        
+        Uses SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY view which requires 
+        access to the SNOWFLAKE database.
+        """
         database = database or self.config.database
+        task_name = f"{database}.{admin_schema}.INCREMENTAL_DATA_TASK"
         
         try:
+            # Use ACCOUNT_USAGE view which has better historical data
+            # Note: ACCOUNT_USAGE has up to 45 minute latency
             df = self.session.sql(f"""
                 SELECT 
                     NAME,
@@ -745,15 +862,39 @@ INNER JOIN {dev_database}.{admin_schema}.{sample_table} s ON src.{filter_col} = 
                     DATEDIFF('second', SCHEDULED_TIME, COMPLETED_TIME) as DURATION_SEC,
                     ERROR_CODE,
                     ERROR_MESSAGE
-                FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(
-                    TASK_NAME => '{database}.{admin_schema}.INCREMENTAL_DATA_TASK'
-                ))
+                FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY
+                WHERE DATABASE_NAME = '{database}'
+                  AND SCHEMA_NAME = '{admin_schema}'
+                  AND NAME = 'INCREMENTAL_DATA_TASK'
+                  AND SCHEDULED_TIME > DATEADD('day', -7, CURRENT_TIMESTAMP())
                 ORDER BY SCHEDULED_TIME DESC
                 LIMIT {limit}
             """).to_pandas()
             return df
-        except:
-            return pd.DataFrame()
+        except Exception as e1:
+            # Fallback to INFORMATION_SCHEMA (real-time but requires specific context)
+            try:
+                self.session.sql(f"USE DATABASE {database}").collect()
+                df = self.session.sql(f"""
+                    SELECT 
+                        NAME,
+                        STATE,
+                        SCHEDULED_TIME,
+                        COMPLETED_TIME,
+                        DATEDIFF('second', SCHEDULED_TIME, COMPLETED_TIME) as DURATION_SEC,
+                        ERROR_CODE,
+                        ERROR_MESSAGE
+                    FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(
+                        TASK_NAME => '{task_name}',
+                        RESULT_LIMIT => {limit}
+                    ))
+                    ORDER BY SCHEDULED_TIME DESC
+                """).to_pandas()
+                return df
+            except Exception as e2:
+                # Return empty with error info for debugging
+                print(f"Task History Error: ACCOUNT_USAGE: {e1}, INFORMATION_SCHEMA: {e2}")
+                return pd.DataFrame()
     
     def get_table_row_counts(
         self,

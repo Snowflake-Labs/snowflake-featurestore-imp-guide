@@ -31,7 +31,7 @@ def main():
     parser = argparse.ArgumentParser(description="Clickstream Data Generator Setup")
     
     parser.add_argument("--database", default="FEATURE_STORE_GUIDE")
-    parser.add_argument("--data-schema", default="CLICKSTREAM_RAW")
+    parser.add_argument("--data-schema", default="CLICKSTREAM_DATA")
     parser.add_argument("--admin-schema", default="CLICKSTREAM_ADMIN")
     parser.add_argument("--scale", type=float, default=SCALE_FACTOR)
     parser.add_argument("--start-date", default="2022-01-01")
@@ -667,8 +667,8 @@ Examples:
     # Configuration
     parser.add_argument("--database", default="FEATURE_STORE_GUIDE",
                        help="Target database name (default: FEATURE_STORE_GUIDE)")
-    parser.add_argument("--data-schema", default="CLICKSTREAM_RAW",
-                       help="Schema for data tables (default: CLICKSTREAM_RAW)")
+    parser.add_argument("--data-schema", default="CLICKSTREAM_DATA",
+                       help="Schema for data tables (default: CLICKSTREAM_DATA)")
     parser.add_argument("--admin-schema", default="CLICKSTREAM_ADMIN",
                        help="Schema for generator config (default: CLICKSTREAM_ADMIN)")
     parser.add_argument("--scale", type=float, default=SCALE_FACTOR,

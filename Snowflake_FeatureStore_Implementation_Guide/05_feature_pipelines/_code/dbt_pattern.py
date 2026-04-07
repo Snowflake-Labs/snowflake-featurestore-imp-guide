@@ -2,7 +2,7 @@
 DBT + Feature Store integration pattern.
 
 This module demonstrates how to:
-- Register DBT-managed tables as View-based FeatureViews
+- Register DBT-managed tables as View-based Feature Views
 - Integrate external orchestration with Feature Store
 
 Tested in: tests/test_chapter_05.py
@@ -17,10 +17,10 @@ def register_dbt_feature_view(
     dbt_table: str,
     entity: Entity,
     timestamp_col: str = "_DBT_UPDATED_TS",
-    version: str = "V1",
+    version: str = "V01",
 ) -> FeatureView:
     """
-    Register a DBT-managed table as a View-based FeatureView.
+    Register a DBT-managed table as a View-based Feature View.
     
     This pattern is used when DBT handles the transformation logic
     and Feature Store provides PIT retrieval and serving.
@@ -29,20 +29,20 @@ def register_dbt_feature_view(
         session: Active Snowpark session
         fs: FeatureStore instance
         dbt_table: Fully qualified DBT table name
-        entity: Entity for the FeatureView
+        entity: Entity for the Feature View
         timestamp_col: Column containing last update timestamp
         version: Version string
         
     Returns:
-        Registered FeatureView
+        Registered Feature View
     """
     # Reference DBT table directly
     feature_df = session.table(dbt_table)
     
-    # Extract table name for FeatureView naming
+    # Extract table name for Feature View naming
     fv_name = dbt_table.split(".")[-1]
     
-    # Create View-based FeatureView (no refresh_freq)
+    # Create View-based Feature View (no refresh_freq)
     fv = FeatureView(
         name=fv_name,
         entities=[entity],
@@ -60,7 +60,7 @@ def register_dbt_feature_view(
 
 def get_dbt_feature_table_info(
     session: Session,
-    schema: str = "FEATURES",
+    schema: str = "FEATURE_STORE",
 ) -> list:
     """
     List DBT feature tables in a schema.

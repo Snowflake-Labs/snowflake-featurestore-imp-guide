@@ -25,7 +25,9 @@ def get_streaming_options() -> dict:
             "complexity": "Low",
             "code": """
                 FeatureView(
+                    name="USER_REALTIME_FEATURES",
                     refresh_freq="1 minute",
+                    # feature_df from FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
                     # ...
                 )
             """,
@@ -36,22 +38,26 @@ def get_streaming_options() -> dict:
             "cost": "Variable",
             "complexity": "High",
             "code": """
-                # External: Kafka → Snowpipe → EVENTS_STAGING
-                # FeatureView reads from staging
+                # External: Kafka → Snowpipe → clickstream staging
+                # Feature View reads from FEATURE_STORE_DEMO.CLICKSTREAM_DATA (or staging)
                 FeatureView(
-                    feature_df=session.table("EVENTS_STAGING"),
+                    name="SESSION_EVENT_FEATURES",
+                    feature_df=session.table(
+                        "FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS_STAGING"
+                    ),
                     # No refresh_freq (View-based)
                 )
             """,
         },
         "future_streaming_fv": {
-            "approach": "Native Streaming FeatureView (planned)",
-            "latency": "Sub-second",
+            "approach": "Native Streaming Feature View (rollout; verify availability in your account)",
+            "latency": "Sub-second (target)",
             "cost": "TBD",
             "complexity": "Low",
             "code": """
-                # Future API (not yet available)
+                # Streaming Feature View API — confirm preview/GA status in release notes
                 FeatureView(
+                    name="USER_STREAMING_FEATURES",
                     source_stream="USER_EVENTS_STREAM",
                     streaming=True,
                 )

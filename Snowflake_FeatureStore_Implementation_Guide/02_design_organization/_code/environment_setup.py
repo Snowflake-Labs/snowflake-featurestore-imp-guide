@@ -14,7 +14,7 @@ from snowflake.ml.feature_store import FeatureStore, CreationMode
 
 def create_schema_based_environments(
     session: Session,
-    database: str = "ML_FEATURES",
+    database: str = "FEATURE_STORE_DEMO",
 ) -> dict:
     """
     Create schema-based environments (DEV/TEST/PROD) in same database.
@@ -30,7 +30,11 @@ def create_schema_based_environments(
     """
     environments = {}
     
-    for env, warehouse in [("DEV", "DEV_WH"), ("TEST", "TEST_WH"), ("PROD", "PROD_WH")]:
+    for env, warehouse in [
+        ("DEV", "FS_DEV_WH"),
+        ("TEST", "FS_TEST_WH"),
+        ("PROD", "FS_PROD_WH"),
+    ]:
         environments[env.lower()] = FeatureStore(
             session=session,
             database=database,
@@ -50,10 +54,10 @@ def setup_environment_warehouses(session: Session) -> None:
         session: Active Snowpark session
     """
     warehouses = [
-        ("DEV_WH", "XSMALL", 60),
-        ("TEST_WH", "SMALL", 120),
-        ("PROD_WH", "MEDIUM", 300),
-        ("PROD_OFT_WH", "SMALL", 60),  # For Online Feature Table refresh
+        ("FS_DEV_WH", "XSMALL", 60),
+        ("FS_TEST_WH", "SMALL", 120),
+        ("FS_PROD_WH", "MEDIUM", 300),
+        ("FS_PROD_OFT_WH", "SMALL", 60),  # For Online Feature Table refresh
     ]
     
     for name, size, auto_suspend in warehouses:

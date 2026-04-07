@@ -13,7 +13,7 @@ from snowflake.snowpark import Session, DataFrame
 
 def create_training_spine(
     session: Session,
-    source_table: str = "SUBSCRIPTION_EVENTS",
+    source_table: str = "SESSIONS",
 ) -> DataFrame:
     """
     Create a training spine with entity keys, timestamps, and labels.
@@ -32,17 +32,17 @@ def create_training_spine(
     """
     return session.sql(f"""
         SELECT 
-            USER_ID,                           -- Entity key
-            SUBSCRIPTION_END_TS AS EVENT_TS,   -- Point-in-time timestamp  
-            CASE WHEN CHURNED THEN 1 ELSE 0 END AS LABEL  -- Target variable
-        FROM {source_table}
-        WHERE EVENT_TYPE = 'renewal_decision'
+            s.USER_ID,                         -- Entity key
+            s.SESSION_START_TS AS EVENT_TS,    -- Point-in-time timestamp
+            s.IS_CONVERTED AS LABEL            -- Target: did the session convert?
+        FROM {source_table} s
+        WHERE s.USER_ID IS NOT NULL
     """)
 
 
 def create_batch_inference_spine(
     session: Session,
-    source_table: str = "ACTIVE_USERS",
+    source_table: str = "USERS",
 ) -> DataFrame:
     """
     Create a batch inference spine (no labels).
@@ -114,12 +114,12 @@ def create_online_inference_spine(
 
 def create_multi_entity_spine(
     session: Session,
-    source_table: str = "PRODUCT_VIEWS",
+    source_table: str = "EVENTS",
 ) -> DataFrame:
     """
     Create a spine with multiple entity keys.
     
-    This is used when retrieving features from FeatureViews
+    This is used when retrieving features from Feature Views
     with different entities (e.g., user features AND product features).
     
     Args:
@@ -133,10 +133,13 @@ def create_multi_entity_spine(
         SELECT 
             USER_ID,                           -- User entity key
             PRODUCT_ID,                        -- Product entity key
-            VIEW_TS AS EVENT_TS,               -- Point-in-time timestamp
-            PURCHASED AS LABEL                 -- Target: did user purchase?
+            EVENT_TS,                          -- Point-in-time timestamp
+            CASE WHEN EVENT_NAME = 'Order Completed'
+                 THEN 1 ELSE 0 END AS LABEL   -- Target: did user purchase?
         FROM {source_table}
-        WHERE VIEW_TS >= DATEADD('day', -90, CURRENT_DATE())
+        WHERE EVENT_NAME = 'Product Viewed'
+          AND USER_ID IS NOT NULL
+          AND EVENT_TS >= DATEADD('day', -90, CURRENT_DATE())
     """)
 
 

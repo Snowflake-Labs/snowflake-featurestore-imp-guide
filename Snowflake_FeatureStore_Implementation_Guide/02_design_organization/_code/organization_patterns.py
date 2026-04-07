@@ -14,9 +14,9 @@ from snowflake.ml.feature_store import FeatureStore, CreationMode
 
 def create_single_feature_store(
     session: Session,
-    database: str = "ML_PLATFORM",
+    database: str = "FEATURE_STORE_DEMO",
     name: str = "FEATURE_STORE",
-    warehouse: str = "ML_WH",
+    warehouse: str = "FS_DEV_WH",
 ) -> FeatureStore:
     """
     Create a single Feature Store - simplest organization pattern.
@@ -46,7 +46,7 @@ def create_single_feature_store(
 
 def create_domain_feature_stores(
     session: Session,
-    database: str = "ML_FEATURES",
+    database: str = "FEATURE_STORE_DEMO",
 ) -> dict:
     """
     Create domain-based Feature Stores for multiple teams.
@@ -68,21 +68,21 @@ def create_domain_feature_stores(
             session=session,
             database=database,
             name="MARKETING",
-            default_warehouse="MARKETING_WH",
+            default_warehouse="FS_DEV_WH",
             creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
         ),
         "fraud": FeatureStore(
             session=session,
             database=database,
             name="FRAUD",
-            default_warehouse="FRAUD_WH",
+            default_warehouse="FS_DEV_WH",
             creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
         ),
         "shared": FeatureStore(
             session=session,
             database=database,
             name="SHARED",
-            default_warehouse="ML_WH",
+            default_warehouse="FS_DEV_WH",
             creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
         ),
     }

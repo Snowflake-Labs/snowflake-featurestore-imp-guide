@@ -163,7 +163,7 @@ class IncrementalLoader:
         self,
         session,
         config: IncrementalConfig = None,
-        schema: str = "CLICKSTREAM_RAW",
+        schema: str = "CLICKSTREAM_DATA",
     ):
         """
         Initialize incremental loader.

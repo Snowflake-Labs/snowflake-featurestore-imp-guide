@@ -2,13 +2,30 @@
 Entity definition examples.
 
 This module demonstrates how to:
-- Define simple entities
+- Define simple entities for the clickstream demo domain
 - Create entity descriptions
-- Register entities with Feature Store
+- Register entities with Feature Store before Feature Views
+
+Canonical environment: database FEATURE_STORE_DEMO, source schema CLICKSTREAM_DATA,
+Feature Store schema FEATURE_STORE, warehouse FS_DEV_WH.
 
 Tested in: tests/test_chapter_03.py
 """
 from snowflake.ml.feature_store import Entity
+
+DATABASE = "FEATURE_STORE_DEMO"
+FEATURE_STORE_SCHEMA = "FEATURE_STORE"
+SOURCE_SCHEMA = "CLICKSTREAM_DATA"
+WAREHOUSE = "FS_DEV_WH"
+
+
+def create_visitor_entity() -> Entity:
+    """Create a visitor entity (pre- or non-login identity)."""
+    return Entity(
+        name="VISITOR",
+        join_keys=["VISITOR_ID"],
+        desc="Site visitor identified by cookie or device before login",
+    )
 
 
 def create_user_entity() -> Entity:
@@ -38,11 +55,32 @@ def create_session_entity() -> Entity:
     )
 
 
+def create_household_entity() -> Entity:
+    """Create a household rollup entity."""
+    return Entity(
+        name="HOUSEHOLD",
+        join_keys=["HOUSEHOLD_ID"],
+        desc="Household shared by one or more users",
+    )
+
+
+def create_category_entity() -> Entity:
+    """Create a product category entity."""
+    return Entity(
+        name="CATEGORY",
+        join_keys=["CATEGORY_ID"],
+        desc="Product taxonomy category",
+    )
+
+
 def get_common_entities() -> dict:
     """Get a dictionary of common entity definitions."""
     return {
+        "visitor": create_visitor_entity(),
         "user": create_user_entity(),
+        "household": create_household_entity(),
         "product": create_product_entity(),
+        "category": create_category_entity(),
         "session": create_session_entity(),
     }
 

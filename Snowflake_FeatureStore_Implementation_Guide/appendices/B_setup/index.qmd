@@ -1,0 +1,438 @@
+---
+title: "Environment Setup"
+subtitle: "Security model, databases, and role configuration"
+---
+
+## Overview
+
+This appendix provides setup scripts to create the Snowflake environment used throughout the Feature Store Implementation Guide. The setup follows a **layered approach** that mirrors real enterprise environments:
+
+1. **Admin setup** - Creates databases, roles, warehouse (requires ACCOUNTADMIN)
+2. **DEV setup** - Creates tables, deploys generator (requires `FS_ADMIN_ROLE`)
+3. **Consumer Quickstart** - Demonstrates consumer capabilities (requires Consumer role)
+
+::: {.callout-tip}
+## Single User, Multiple Roles
+
+For learning purposes, we use a single service user (`FS_DEMO_USER`) with three roles that can be switched as needed. In production, you would typically have separate users for each role.
+
+```sql
+-- Switch between roles as needed
+USE ROLE FS_ADMIN_ROLE;      -- Administrative tasks
+USE ROLE FS_DEV_ROLE;      -- Feature development  
+USE ROLE FS_CONSUMER_ROLE; -- Query and training
+```
+:::
+
+## Quick Start
+
+### Prerequisites
+
+- Snowflake account with ACCOUNTADMIN access (for bootstrap only)
+- SnowSQL CLI or Snowsight worksheet access
+
+### Step 1: Bootstrap (Existing ACCOUNTADMIN)
+
+Run the minimal bootstrap script with your existing admin user to create `FS_DEMO_USER`:
+
+```bash
+snowsql -f scripts/00_bootstrap.sql
+```
+
+This creates the `FS_DEMO_USER` and grants SYSADMIN, SECURITYADMIN, and ACCOUNTADMIN roles.
+
+### Step 2: Admin setup (`FS_DEMO_USER`)
+
+Log in as `FS_DEMO_USER` and run the main setup:
+
+```bash
+snowsql -a <account> -u FS_DEMO_USER -r ACCOUNTADMIN -f scripts/01_dba_setup.sql
+```
+
+This creates:
+
+- User: `FS_DEMO_USER`
+- Roles: `FS_ADMIN_ROLE`, `FS_DEV_ROLE`, `FS_CONSUMER_ROLE`
+- Warehouse: `FS_DEV_WH` (X-Small) — default for this guide (matches main chapters; larger deployments often add dedicated warehouses for training or DT refresh)
+- API Integration: `FS_GIT_API_INTEGRATION` - GitHub integration for Git-backed development
+- Databases: `FEATURE_STORE_DEMO`, `FEATURE_STORE_DEMO_DEV`
+
+### Step 3: DEV Setup (FS_ADMIN_ROLE)
+
+Switch to `FS_ADMIN_ROLE` and run the dev setup to create tables and deploy the generator:
+
+```bash
+snowsql -a <account> -u FS_DEMO_USER -r FS_ADMIN_ROLE -f scripts/02_dev_setup.sql
+```
+
+This creates:
+
+- Production data tables (CLICKSTREAM_DATA schema)
+- Incremental generator stored procedure and task
+- Development branch creation procedure
+
+### Step 4: Load Initial Data
+
+Use the Streamlit Data Manager or CLI to load sample data:
+
+::: {.panel-tabset}
+
+## Streamlit UI
+
+```bash
+cd appendices/A_sample_data/data_manager/
+export SNOWFLAKE_CONNECTION_NAME=fs_demo_conn
+streamlit run app.py
+```
+
+Update your connection config in `~/.snowflake/connections.toml`:
+
+```toml
+[fs_demo_conn]
+account = "your_account"
+user = "FS_DEMO_USER"
+role = "FS_ADMIN_ROLE"
+warehouse = "FS_DEV_WH"
+database = "FEATURE_STORE_DEMO"
+schema = "CLICKSTREAM_DATA"
+authenticator = "externalbrowser"
+```
+
+## CLI
+
+```bash
+cd appendices/A_sample_data/generator/
+python main.py --scale 0.01 --database FEATURE_STORE_DEMO --output snowflake
+```
+
+:::
+
+### Step 5: Consumer Quickstart (Optional)
+
+Test consumer role capabilities:
+
+```bash
+snowsql -a <account> -u FS_DEMO_USER -r FS_CONSUMER_ROLE -f scripts/03_consumer_quickstart.sql
+```
+
+## Security Model
+
+### Role Hierarchy
+
+```
+ACCOUNTADMIN
+    └── SYSADMIN
+            └── FS_ADMIN_ROLE
+                    └── FS_DEV_ROLE
+                            └── FS_CONSUMER_ROLE
+```
+
+Each role inherits all privileges from roles below it. This means:
+
+- **DBA** can do everything DEV and Consumer can do
+- **DEV** can do everything Consumer can do
+- **Consumer** has the most restricted access
+
+### Role Privileges Matrix
+
+| Capability | Consumer | Dev | DBA |
+|------------|:--------:|:---:|:---:|
+| Query production data | ✅ | ✅ | ✅ |
+| Query development data | ✅ | ✅ | ✅ |
+| Create View-based Feature Views | ✅ | ✅ | ✅ |
+| Generate training datasets | ✅ | ✅ | ✅ |
+| Create personal schemas (dev) | ✅ | ✅ | ✅ |
+| Create Dynamic Tables | ❌ | ✅ | ✅ |
+| Create Tasks | ❌ | ✅ | ✅ |
+| Suspend/Resume DTs | ❌ | ✅ | ✅ |
+| Deploy incremental generator | ❌ | ❌ | ✅ |
+| Create databases | ❌ | ❌ | ✅ |
+| Promote to production | ❌ | ❌ | ✅ |
+| Manage roles/privileges | ❌ | ❌ | ✅ |
+
+### Cost Control
+
+The privilege model implements cost control by restricting who can create cost-incurring objects:
+
+- **Dynamic Tables**: Only DEV and DBA roles can create DTs. DTs incur ongoing compute costs for refresh.
+- **Tasks**: Only DEV and DBA roles can create scheduled tasks.
+- **Warehouses**: All roles can use warehouses, but only DBA can create or resize them.
+
+::: {.callout-warning}
+## Consumer Role Restrictions
+
+The Consumer role is intentionally restricted from creating Dynamic Tables and Tasks. This is a **cost control measure** - these objects incur ongoing compute charges even when no one is actively using them.
+
+If a consumer needs DT-based features, they should request that a developer create them.
+:::
+
+## Database Organization
+
+### FEATURE_STORE_DEMO (Production)
+
+| Schema | Purpose | Contents |
+|--------|---------|----------|
+| `CLICKSTREAM_DATA` | Source data | Visitors, Users, Sessions, Events, Orders |
+| `CLICKSTREAM_ADMIN` | Generator admin | Config, State, Logs, Task |
+| `FEATURE_STORE` | Production features | Entities, Feature Views |
+| `ML_DATASETS` | Public datasets | Iris, Titanic, etc. |
+| `TRAINING_DATA` | Training outputs | Generated datasets |
+| `INFERENCE_DATA` | Inference data | Batch predictions |
+| `SPINES` | Spine tables | Entity-timestamp combinations |
+
+### FEATURE_STORE_DEMO_DEV (Development)
+
+The development database mirrors the production schema structure. Key differences:
+
+- **CLICKSTREAM_DATA**: Contains Dynamic Tables that sample from production
+- **FEATURE_STORE**: Development feature views (can be modified freely)
+- **Personal schemas**: Consumers can create their own workspaces
+
+## Multi-User / Classroom Setup
+
+For instructor-led training or workshops with multiple students:
+
+### Per-Student Database Pattern
+
+```sql
+-- Run as ACCOUNTADMIN
+-- Create per-student databases
+CREATE DATABASE FEATURE_STORE_DEMO_DEV_STUDENT01;
+CREATE DATABASE FEATURE_STORE_DEMO_DEV_STUDENT02;
+-- ...
+
+-- Create per-student roles
+CREATE ROLE FEATURE_STORE_DEMO_DEV_STUDENT01_ROLE;
+CREATE ROLE FEATURE_STORE_DEMO_DEV_STUDENT02_ROLE;
+-- ...
+
+-- Grant ownership
+GRANT OWNERSHIP ON DATABASE FEATURE_STORE_DEMO_DEV_STUDENT01 
+    TO ROLE FEATURE_STORE_DEMO_DEV_STUDENT01_ROLE;
+-- ...
+
+-- Grant production read access to all student roles
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO ROLE FEATURE_STORE_DEMO_DEV_STUDENT01_ROLE;
+GRANT SELECT ON ALL TABLES IN DATABASE FEATURE_STORE_DEMO 
+    TO ROLE FEATURE_STORE_DEMO_DEV_STUDENT01_ROLE;
+-- ...
+```
+
+### Benefits
+
+- All students query the same production data
+- Each student has isolated development environment
+- Students can't interfere with each other's work
+- Instructor can monitor all environments
+
+## Creating Development Branches
+
+The `CREATE_DEV_BRANCH` procedure creates a development database with Dynamic Tables that sample from production. You can specify a custom database name for flexibility.
+
+### Basic Usage
+
+```sql
+-- Create default dev branch (FEATURE_STORE_DEMO_DEV)
+CALL FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.CREATE_DEV_BRANCH();
+
+-- Create with custom settings
+CALL FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.CREATE_DEV_BRANCH(
+    'FEATURE_STORE_DEMO_DEV',                    -- dev_database
+    10.0,                                -- sample_pct (10%)
+    '1 HOUR',                           -- target_lag
+    'FS_DEV_WH'     -- warehouse for DT refresh
+);
+
+-- Create named branch (e.g., for a student or feature)
+CALL FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.CREATE_DEV_BRANCH(
+    'FEATURE_STORE_DEMO_DEV_STUDENT01',
+    10.0,
+    '30 MINUTES',
+    'FS_DEV_WH'
+);
+```
+
+### Managing Development Branches
+
+```sql
+-- Update refresh frequency for all DTs in a branch
+CALL FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.UPDATE_DEV_BRANCH_TARGET_LAG(
+    'FEATURE_STORE_DEMO_DEV',
+    '15 MINUTES'
+);
+
+-- Drop a development branch
+CALL FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.DROP_DEV_BRANCH('FEATURE_STORE_DEMO_DEV_STUDENT01');
+```
+
+### What Gets Created
+
+The procedure creates:
+
+| Object | Type | Description |
+|--------|------|-------------|
+| `VISITORS` | Dynamic Table | Sampled visitors (root entity) |
+| `USERS` | Dynamic Table | Users linked to sampled visitors |
+| `SESSIONS` | Dynamic Table | Sessions for sampled visitors |
+| `EVENTS` | Dynamic Table | Events for sampled sessions |
+| `ORDERS` | Dynamic Table | Orders for sampled users |
+| `ORDER_ITEMS` | Dynamic Table | Items for sampled orders |
+| `CATEGORIES` | Table | Full copy (rarely changes) |
+| `SUPPLIERS` | Table | Full copy (rarely changes) |
+| `PRODUCTS` | Table | Full copy (rarely changes) |
+| `HOUSEHOLDS` | Table | Full copy (rarely changes) |
+
+## Git Integration
+
+The setup includes a GitHub API integration that enables Git-backed development workflows. This allows you to:
+
+- Create Git repositories linked to Snowflake schemas
+- Version control SQL scripts and stored procedures
+- Implement CI/CD pipelines for feature store promotion
+
+### Creating a Git Repository
+
+```sql
+-- Create a Git repository for feature store development
+CREATE OR REPLACE GIT REPOSITORY FEATURE_STORE_DEMO_DEV.FEATURE_STORE.FEATURE_REPO
+    API_INTEGRATION = FS_GIT_API_INTEGRATION
+    ORIGIN = 'https://github.com/your-org/feature-store-repo.git';
+
+-- List branches
+SHOW GIT BRANCHES IN GIT REPOSITORY FEATURE_STORE_DEMO_DEV.FEATURE_STORE.FEATURE_REPO;
+
+-- Fetch latest changes
+ALTER GIT REPOSITORY FEATURE_STORE_DEMO_DEV.FEATURE_STORE.FEATURE_REPO FETCH;
+```
+
+### Using Git for Feature Definitions
+
+```sql
+-- Execute a SQL file from the repository
+EXECUTE IMMEDIATE FROM @FEATURE_STORE_DEMO_DEV.FEATURE_STORE.FEATURE_REPO/branches/main/features/user_features.sql;
+
+-- List files in the repository
+LS @FEATURE_STORE_DEMO_DEV.FEATURE_STORE.FEATURE_REPO/branches/main/;
+```
+
+::: {.callout-note}
+## GitHub App Authentication
+
+The API integration uses Snowflake's GitHub App for authentication. Users will need to authorize the Snowflake GitHub App when first connecting to a repository.
+:::
+
+## CI/CD Integration
+
+For automated deployments, consider these patterns:
+
+### Service Account Pattern
+
+```sql
+-- Create CI/CD service user
+CREATE USER FS_CICD_USER
+    PASSWORD = 'SecurePassword!'
+    DEFAULT_ROLE = FS_ADMIN_ROLE
+    RSA_PUBLIC_KEY = '...';  -- Key-pair auth for automation
+
+GRANT ROLE FS_ADMIN_ROLE TO USER FS_CICD_USER;
+```
+
+### Promotion Workflow
+
+```
+Development (FEATURE_STORE_DEMO_DEV)
+    │
+    ▼  [Code Review + Approval]
+    │
+Production (FEATURE_STORE_DEMO)
+```
+
+Using Snowflake CLI with `CREATE OR ALTER`:
+
+```bash
+# Deploy feature view to production
+snow sql -q "CREATE OR ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE.USER_FEATURES ..."
+```
+
+See [Chapter 12: Advanced Patterns](../../12_advanced_patterns/index.qmd) for detailed CI/CD patterns.
+
+## Troubleshooting
+
+### Common Issues
+
+**"Insufficient privileges" error**
+
+Check your current role:
+```sql
+SELECT CURRENT_ROLE();
+```
+
+Switch to appropriate role:
+```sql
+USE ROLE FS_ADMIN_ROLE;
+```
+
+**"Object does not exist" for warehouses**
+
+Ensure DBA setup was run first:
+```sql
+SHOW WAREHOUSES LIKE 'FS_%';
+```
+
+**Tasks not running**
+
+Check task status:
+```sql
+SHOW TASKS IN SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN;
+
+-- Resume if suspended
+ALTER TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK RESUME;
+```
+
+**Dynamic Tables not refreshing**
+
+Check DT status:
+```sql
+SELECT * FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME_PREFIX => 'FEATURE_STORE_DEMO_DEV.CLICKSTREAM_DATA.'
+));
+```
+
+### Cleanup
+
+To remove all objects created by this guide:
+
+```sql
+-- Run as ACCOUNTADMIN
+DROP DATABASE IF EXISTS FEATURE_STORE_DEMO;
+DROP DATABASE IF EXISTS FEATURE_STORE_DEMO_DEV;
+DROP INTEGRATION IF EXISTS FS_GIT_API_INTEGRATION;
+DROP WAREHOUSE IF EXISTS FS_DEV_WH;
+DROP USER IF EXISTS FS_DEMO_USER;
+DROP ROLE IF EXISTS FS_CONSUMER_ROLE;
+DROP ROLE IF EXISTS FS_DEV_ROLE;
+DROP ROLE IF EXISTS FS_ADMIN_ROLE;
+```
+
+::: {.callout-danger}
+## Irreversible Action
+
+The cleanup script permanently deletes all databases and their contents. Make sure you have exported any data you need before running.
+:::
+
+## Files Reference
+
+| File | Purpose | Run As |
+|------|---------|--------|
+| `scripts/00_bootstrap.sql` | Create FS_DEMO_USER | Existing ACCOUNTADMIN |
+| `scripts/01_dba_setup.sql` | Roles, warehouses, databases | FS_DEMO_USER (ACCOUNTADMIN) |
+| `scripts/02_dev_setup.sql` | Tables, generator, procedures | FS_DEMO_USER (DBA role) |
+| `scripts/03_consumer_quickstart.sql` | Consumer role demo | FS_DEMO_USER (Consumer role) |
+
+## Next Steps
+
+After completing the setup:
+
+1. **Load Sample Data**: Use the [Streamlit Data Manager](../A_sample_data/data_manager/streamlit_app.qmd) to load initial data
+2. **Create Development Branch**: Start incremental generator and create dev branch
+3. **Explore the Guide**: Start with [Chapter 1: Concepts](../../01_concepts/index.qmd)

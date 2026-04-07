@@ -228,15 +228,15 @@ def render_sidebar():
     # Common config
     warehouse = st.sidebar.text_input(
         "Warehouse",
-        value=os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
+        value=os.environ.get("SNOWFLAKE_WAREHOUSE", "FS_DEV_WH")
     )
     database = st.sidebar.text_input(
         "Database",
-        value=os.environ.get("SNOWFLAKE_DATABASE", "FEATURE_STORE_GUIDE")
+        value=os.environ.get("SNOWFLAKE_DATABASE", "FEATURE_STORE_DEMO")
     )
     schema = st.sidebar.text_input(
         "Schema",
-        value="CLICKSTREAM_RAW"
+        value="CLICKSTREAM_DATA"
     )
     
     config.warehouse = warehouse
@@ -651,8 +651,14 @@ def render_dev_branch():
         )
         target_lag = st.selectbox(
             "Dynamic Table Refresh Lag",
-            ["15 MINUTES", "30 MINUTES", "1 HOUR", "2 HOURS", "6 HOURS"],
-            index=2
+            ["1 MINUTE", "10 MINUTES", "15 MINUTES", "30 MINUTES", "1 HOUR", "2 HOURS", "6 HOURS"],
+            index=4,  # Default to 1 HOUR
+            help="How frequently Dynamic Tables refresh from production"
+        )
+        dt_warehouse = st.text_input(
+            "DT Refresh Warehouse",
+            value="FS_DEV_WH",
+            help="Warehouse used for Dynamic Table refresh operations"
         )
     
     # Estimated size
@@ -660,6 +666,7 @@ def render_dev_branch():
     **Estimated Development Data:**
     - ~{sample_pct}% of production visitors
     - Dynamic Tables with {target_lag} refresh lag
+    - DT refresh using warehouse: {dt_warehouse}
     - Includes anonymous sessions and events
     """)
     
@@ -671,6 +678,7 @@ def render_dev_branch():
                 dm.config.schema,
                 sample_pct,
                 target_lag.replace(" ", " "),
+                warehouse=dt_warehouse,
             )
             
             if result.success:
@@ -749,7 +757,8 @@ def render_dev_branch():
         else:
             st.warning(f"Branch '{manage_db}' not found")
     
-    # Control buttons
+    # Control buttons - Row 1: Suspend/Resume
+    st.markdown("**Control Dynamic Tables:**")
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -774,6 +783,34 @@ def render_dev_branch():
                     st.success("Branch dropped")
                 else:
                     st.error("Failed to drop branch")
+    
+    # Adjust refresh frequency
+    st.markdown("**Adjust Refresh Frequency:**")
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        new_target_lag = st.selectbox(
+            "New Target Lag",
+            ["1 MINUTE", "10 MINUTES", "15 MINUTES", "30 MINUTES", "1 HOUR", "2 HOURS", "6 HOURS"],
+            index=4,  # Default to 1 HOUR
+            key="manage_target_lag",
+            help="Change how frequently Dynamic Tables refresh from production"
+        )
+    
+    with col2:
+        st.markdown("")  # Spacing
+        st.markdown("")  # Spacing
+        if st.button("⚡ Update Refresh Rate"):
+            with st.spinner(f"Updating Dynamic Tables to {new_target_lag}..."):
+                success, message = dm.update_dev_branch_target_lag(
+                    manage_db, 
+                    dm.config.schema, 
+                    new_target_lag
+                )
+                if success:
+                    st.success(f"✅ {message}")
+                else:
+                    st.error(f"❌ {message}")
     
     # CLI equivalent
     with st.expander("💻 CLI Equivalent"):
@@ -925,63 +962,224 @@ def render_monitoring():
     
     dm = st.session_state.dm
     
-    # Auto-refresh
-    auto_refresh = st.checkbox("Auto-refresh (every 60s)")
-    
-    if auto_refresh:
-        st.markdown("🔄 Auto-refreshing...")
-        time.sleep(0.1)  # Small delay to allow UI to render
-        # Note: In production, use st.experimental_rerun() with a timer
-    
-    col1, col2 = st.columns(2)
-    
+    # Auto-refresh at top
+    col1, col2 = st.columns([3, 1])
     with col1:
-        database = st.text_input("Database", value=dm.config.database, key="mon_db")
+        auto_refresh = st.checkbox("Auto-refresh (every 60s)")
+        if auto_refresh:
+            st.caption("🔄 Auto-refreshing...")
     with col2:
-        schema = st.text_input("Schema", value=dm.config.schema, key="mon_schema")
-    
-    if st.button("🔄 Refresh"):
-        st.session_state.last_refresh = datetime.now()
-        st.rerun()
+        if st.button("🔄 Refresh Now"):
+            st.session_state.last_refresh = datetime.now()
+            st.rerun()
     
     if st.session_state.last_refresh:
         st.caption(f"Last refreshed: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
     
-    # Table row counts
-    st.subheader("📊 Table Row Counts")
+    # =========================================================================
+    # SECTION 1: Production - Incremental Generator
+    # =========================================================================
+    st.markdown("---")
+    st.header("🏭 Production Data")
+    st.caption("Monitor the incremental data generator and production table row counts")
     
-    row_counts = dm.get_table_row_counts(database, schema)
-    if row_counts:
-        df = pd.DataFrame([
+    # Production settings
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        prod_database = st.text_input(
+            "Production Database",
+            value=dm.config.database,
+            key="mon_prod_db",
+            help="Database where production data and incremental generator are deployed"
+        )
+    with col2:
+        prod_schema = st.text_input(
+            "Data Schema",
+            value=dm.config.schema,
+            key="mon_prod_schema"
+        )
+    with col3:
+        admin_schema = st.text_input(
+            "Admin Schema",
+            value="CLICKSTREAM_ADMIN",
+            key="mon_admin_schema"
+        )
+    
+    # Production row counts
+    st.subheader(f"📊 Production Row Counts")
+    
+    prod_row_counts = dm.get_table_row_counts(prod_database, prod_schema)
+    if prod_row_counts:
+        df_prod = pd.DataFrame([
             {"Table": k, "Rows": v}
-            for k, v in sorted(row_counts.items())
+            for k, v in sorted(prod_row_counts.items())
         ])
         
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.bar_chart(df.set_index("Table"))
+            st.bar_chart(df_prod.set_index("Table"))
         with col2:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df_prod, use_container_width=True, hide_index=True)
+            total_rows = sum(prod_row_counts.values())
+            st.metric("Total Rows", f"{total_rows:,}")
     else:
-        st.info("No tables found")
+        st.info(f"No tables found in {prod_database}.{prod_schema}")
+    
+    # Generation log
+    st.subheader("⏰ Incremental Generator History")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption("From GENERATION_LOG table (sorted by BATCH_TS descending)")
+    with col2:
+        gen_limit = st.selectbox(
+            "Rows",
+            options=[25, 50, 100, 250],
+            index=1,  # Default to 50
+            key="gen_history_limit",
+            help="Maximum rows to display"
+        )
+    
+    try:
+        log_df = dm.get_generation_log(prod_database, admin_schema, limit=gen_limit)
+        if not log_df.empty:
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No generation log entries. Deploy and start the incremental generator to see data here.")
+    except Exception as e:
+        st.info("Generation log not available (generator may not be deployed)")
+    
+    # Task status from ACCOUNT_USAGE (collapsed)
+    with st.expander("Task Execution History (ACCOUNT_USAGE)", expanded=False):
+        st.caption("Requires SNOWFLAKE.ACCOUNT_USAGE access - has up to 45 min latency")
+        try:
+            task_history = dm.get_task_history(prod_database, admin_schema, limit=20)
+            if not task_history.empty:
+                st.dataframe(task_history, use_container_width=True, hide_index=True)
+            else:
+                st.info("No task history from ACCOUNT_USAGE.")
+        except Exception as e:
+            st.warning(f"Cannot access ACCOUNT_USAGE: {str(e)[:80]}")
+    
+    # =========================================================================
+    # SECTION 2: Development Branch - Dynamic Tables
+    # =========================================================================
+    st.markdown("---")
+    st.header("🌿 Development Branch")
+    st.caption("Monitor Dynamic Tables in a development branch that syncs from production")
+    
+    # Dev branch settings
+    col1, col2 = st.columns(2)
+    with col1:
+        dev_database = st.text_input(
+            "Development Database",
+            value=f"{dm.config.database}_DEV01",
+            help="Enter the name of your development branch database",
+            key="mon_dev_db"
+        )
+    
+    with col2:
+        dev_schema = st.text_input(
+            "Data Schema",
+            value=dm.config.schema,
+            key="mon_dev_schema"
+        )
+    
+    # Dev branch row counts
+    st.subheader(f"📊 Development Branch Row Counts")
+    
+    dev_row_counts = dm.get_table_row_counts(dev_database, dev_schema)
+    if dev_row_counts:
+        df_dev = pd.DataFrame([
+            {"Table": k, "Rows": v}
+            for k, v in sorted(dev_row_counts.items())
+        ])
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.bar_chart(df_dev.set_index("Table"))
+        with col2:
+            st.dataframe(df_dev, use_container_width=True, hide_index=True)
+            total_dev_rows = sum(dev_row_counts.values())
+            st.metric("Total Rows", f"{total_dev_rows:,}")
+            
+            # Show comparison to production if both have data
+            if prod_row_counts:
+                total_prod = sum(prod_row_counts.values())
+                if total_prod > 0:
+                    pct = (total_dev_rows / total_prod) * 100
+                    st.caption(f"≈ {pct:.1f}% of production")
+    else:
+        st.info(f"No tables found in {dev_database}.{dev_schema}")
+        st.markdown("""
+        **To create a development branch:**
+        1. Go to **🌿 Development Branch** page
+        2. Create a new branch with your desired sample percentage
+        """)
     
     # Dynamic Table refresh history
     st.subheader("🔄 Dynamic Table Refresh History")
     
-    dt_history = dm.get_dynamic_table_refresh_history(database, schema, limit=20)
-    if not dt_history.empty:
-        st.dataframe(dt_history, use_container_width=True, hide_index=True)
-    else:
-        st.info("No refresh history available")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption("Real-time data from INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()")
+    with col2:
+        dt_limit = st.selectbox(
+            "Rows",
+            options=[25, 50, 100, 250, 500],
+            index=2,  # Default to 100
+            key="dt_history_limit",
+            help="Maximum rows to display"
+        )
     
-    # Task execution history
-    st.subheader("⏰ Task Execution History")
+    try:
+        dt_history = dm.get_dynamic_table_refresh_history(dev_database, dev_schema, limit=dt_limit)
+        if not dt_history.empty:
+            st.dataframe(dt_history, use_container_width=True, hide_index=True)
+        else:
+            st.info("No Dynamic Table refresh history available.")
+            with st.expander("Why might this be empty?"):
+                st.markdown(f"""
+                - No Dynamic Tables exist in `{dev_database}.{dev_schema}`
+                - DTs haven't refreshed yet (newly created or suspended)
+                - Missing MONITOR privilege on the Dynamic Tables
+                - Database or schema name is incorrect
+                """)
+    except Exception as e:
+        st.error(f"Error fetching DT history: {str(e)[:100]}")
     
-    task_history = dm.get_task_history(database, limit=20)
-    if not task_history.empty:
-        st.dataframe(task_history, use_container_width=True, hide_index=True)
-    else:
-        st.info("No task history available")
+    # =========================================================================
+    # Troubleshooting
+    # =========================================================================
+    st.markdown("---")
+    with st.expander("🔧 Troubleshooting"):
+        st.markdown(f"""
+        **If data isn't showing:**
+        
+        1. **Production Generator**: Check that the incremental generator is deployed and running
+           - Go to **🔄 Incremental Generator** page to deploy/start
+        
+        2. **Development Branch**: Ensure you've created a dev branch with Dynamic Tables
+           - Go to **🌿 Development Branch** page to create one
+        
+        3. **ACCOUNT_USAGE Access**: For detailed history, grant privileges:
+           ```sql
+           GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE your_role;
+           ```
+        
+        4. **Verify objects exist**:
+           ```sql
+           -- Check production tables
+           SELECT TABLE_NAME, ROW_COUNT FROM {prod_database}.INFORMATION_SCHEMA.TABLES
+           WHERE TABLE_SCHEMA = '{prod_schema}';
+           
+           -- Check Dynamic Tables in dev branch
+           SHOW DYNAMIC TABLES IN DATABASE {dev_database};
+           
+           -- Check task status
+           SHOW TASKS LIKE 'INCREMENTAL_DATA_TASK' IN SCHEMA {prod_database}.{admin_schema};
+           ```
+        """)
     
     # Auto-refresh logic
     if auto_refresh:

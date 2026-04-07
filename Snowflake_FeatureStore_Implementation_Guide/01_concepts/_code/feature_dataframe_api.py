@@ -4,7 +4,7 @@ Feature definition using Snowpark DataFrame API.
 This module demonstrates how to:
 - Define features using Snowpark DataFrame transformations
 - Use aggregations, joins, and derived columns
-- Create FeatureViews from DataFrame-defined features
+- Create Feature Views from DataFrame-defined features
 
 Tested in: tests/test_chapter_01.py::TestFeatureDefinition
 """

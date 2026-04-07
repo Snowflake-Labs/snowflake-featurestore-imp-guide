@@ -4,7 +4,7 @@
 -- Use these scripts to start, stop, configure, and monitor the generator.
 -- ============================================================================
 
-USE SCHEMA FEATURE_STORE_GUIDE.CLICKSTREAM_RAW;
+USE SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN;
 
 -- ============================================================================
 -- START GENERATION

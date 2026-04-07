@@ -4,99 +4,104 @@ Feature class examples for time-windowed aggregations.
 This module demonstrates how to:
 - Define features using the Feature class
 - Configure windows and aliases
-- Create tiled FeatureViews
+- Create tiled Feature Views
+
+Canonical environment: database FEATURE_STORE_DEMO, Feature Store schema FEATURE_STORE,
+source schema CLICKSTREAM_DATA, warehouse FS_DEV_WH.
 
 Tested in: tests/test_chapter_07.py
 
 Note: Requires snowflake-ml-python >= 1.21.0
 """
 from snowflake.snowpark import Session
-from snowflake.ml.feature_store import FeatureView, Entity
 
 try:
-    from snowflake.ml.feature_store import Feature
+    from snowflake.ml.feature_store import FeatureStore, Feature, FeatureView, Entity
+
     FEATURE_CLASS_AVAILABLE = True
 except ImportError:
+    from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+
+    Feature = None  # type: ignore[misc, assignment]
     FEATURE_CLASS_AVAILABLE = False
+
+# Canonical names (see implementation guide introduction)
+DATABASE = "FEATURE_STORE_DEMO"
+FEATURE_STORE_SCHEMA = "FEATURE_STORE"
+SOURCE_SCHEMA = "CLICKSTREAM_DATA"
+WAREHOUSE = "FS_DEV_WH"
+CANONICAL_ORDERS_TABLE = f"{DATABASE}.{SOURCE_SCHEMA}.ORDERS"
+FEATUREVIEW_VERSION_INITIAL = "V01"
 
 
 def get_purchase_features() -> list:
     """
     Define purchase-related time-windowed features.
-    
+
     Returns:
         List of Feature definitions
     """
     if not FEATURE_CLASS_AVAILABLE:
         raise ImportError("Feature class requires snowflake-ml-python >= 1.21.0")
-    
+
     return [
-        # Sum aggregations
-        Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-        Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-        
-        # Count aggregations
-        Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
-        Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
-        
-        # Average aggregations
-        Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
-        Feature.avg("AMOUNT", "30d").alias("AVG_ORDER_30D"),
-        
-        # Min/Max
-        Feature.min("AMOUNT", "30d").alias("MIN_ORDER_30D"),
-        Feature.max("AMOUNT", "30d").alias("MAX_ORDER_30D"),
+        Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+        Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+        Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+        Feature.count("ORDER_ID", "30d").alias("ORDER_ID_CNT_30D"),
+        Feature.avg("TOTAL_AMT", "7d").alias("TOTAL_AMT_AVG_7D"),
+        Feature.avg("TOTAL_AMT", "30d").alias("TOTAL_AMT_AVG_30D"),
+        Feature.min("TOTAL_AMT", "30d").alias("TOTAL_AMT_MIN_30D"),
+        Feature.max("TOTAL_AMT", "30d").alias("TOTAL_AMT_MAX_30D"),
     ]
 
 
 def get_multi_window_features() -> list:
     """
     Define features with multiple time windows for trend analysis.
-    
+
     Returns:
         List of Feature definitions
     """
     if not FEATURE_CLASS_AVAILABLE:
         raise ImportError("Feature class requires snowflake-ml-python >= 1.21.0")
-    
+
     return [
-        # Spend across multiple windows
-        Feature.sum("AMOUNT", "1d").alias("SPEND_1D"),
-        Feature.sum("AMOUNT", "7d").alias("SPEND_7D"),
-        Feature.sum("AMOUNT", "30d").alias("SPEND_30D"),
-        Feature.sum("AMOUNT", "90d").alias("SPEND_90D"),
-        
-        # Order count across multiple windows
-        Feature.count("ORDER_ID", "1d").alias("ORDERS_1D"),
-        Feature.count("ORDER_ID", "7d").alias("ORDERS_7D"),
-        Feature.count("ORDER_ID", "30d").alias("ORDERS_30D"),
+        Feature.sum("TOTAL_AMT", "1d").alias("TOTAL_AMT_SUM_1D"),
+        Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
+        Feature.sum("TOTAL_AMT", "30d").alias("TOTAL_AMT_SUM_30D"),
+        Feature.sum("TOTAL_AMT", "90d").alias("TOTAL_AMT_SUM_90D"),
+        Feature.count("ORDER_ID", "1d").alias("ORDER_ID_CNT_1D"),
+        Feature.count("ORDER_ID", "7d").alias("ORDER_ID_CNT_7D"),
+        Feature.count("ORDER_ID", "30d").alias("ORDER_ID_CNT_30D"),
     ]
 
 
 def create_aggregation_featureview(
     session: Session,
     entity: Entity,
-    source_table: str,
-    timestamp_col: str,
+    source_table: str = CANONICAL_ORDERS_TABLE,
+    timestamp_col: str = "ORDER_TS",
     tile_size: str = "1 hour",
     refresh_freq: str = "1 hour",
 ) -> FeatureView:
     """
-    Create a tiled FeatureView with time-windowed aggregations.
-    
+    Create a tiled Feature View with time-windowed aggregations.
+
     Args:
         session: Active Snowpark session
-        entity: Entity for the FeatureView
-        source_table: Source table name
+        entity: Entity for the Feature View
+        source_table: Fully qualified source table (default: canonical ORDERS)
         timestamp_col: Column containing event timestamp
         tile_size: Feature granularity (tile size)
         refresh_freq: Refresh frequency
-        
+
     Returns:
-        FeatureView (not yet registered)
+        Feature View (not yet registered). Register with version "V01", e.g.:
+        fs.register_feature_view(feature_view=fv, version="V01", block=True)
     """
     features = get_purchase_features()
-    
+
     return FeatureView(
         name="USER_PURCHASE_AGGREGATES",
         entities=[entity],
@@ -105,7 +110,7 @@ def create_aggregation_featureview(
         refresh_freq=refresh_freq,
         feature_granularity=tile_size,
         features=features,
-        desc="User purchase aggregations with multiple time windows"
+        desc="User purchase aggregations with multiple time windows",
     )
 
 

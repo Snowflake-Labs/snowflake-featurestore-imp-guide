@@ -35,9 +35,9 @@ This guide provides practical guidance for implementing Snowflake Feature Store 
 |---------|-------|-------------|
 | [00](./00_introduction/) | Introduction | Setup, prerequisites, environment configuration |
 | [01](./01_concepts/) | Concepts | Core Feature Store concepts and terminology |
-| [02](./02_design_organization/) | Design & Organization | Feature Store structure, environments, governance |
+| [02](./02_design_organization/) | Design & Organization | Feature Store structure, environments, RBAC, promotion |
 | [03](./03_entities_hierarchies/) | Entities & Hierarchies | Entity design, keys, relationships |
-| [04](./04_feature_views/) | FeatureView Basics | Creating and managing FeatureViews |
+| [04](./04_feature_views/) | Feature Views | Feature View types, versioning, ownership, and lifecycle |
 | [05](./05_feature_pipelines/) | Feature Pipelines | DBT, Dynamic Tables, Temporal API pipelines |
 | [06](./06_temporal_features/) | Temporal Features | Point-in-time correctness, windowed aggregations |
 | [07](./07_aggregations_api/) | Aggregations API | Feature class, tiled aggregations, rollups |

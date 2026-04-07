@@ -1,11 +1,11 @@
 ---
 title: "Design & Organization"
-subtitle: "Feature Store structure, environments, and governance"
+subtitle: "Feature Store structure, environments, and promotion"
 ---
 
 ## Overview
 
-This chapter covers organizational patterns for Snowflake Feature Stores, including single vs. multiple Feature Store strategies, environment management, governance, and cross-environment promotion strategies. A well-designed Feature Store organization is critical for scalability, maintainability, and compliance.
+This chapter covers organizational patterns for Snowflake Feature Stores, including single vs. multiple Feature Store strategies, environment management, role-based access control, and cross-environment promotion strategies. A well-designed Feature Store organization is critical for scalability, maintainability, and compliance.
 
 ## Learning Objectives
 
@@ -15,7 +15,6 @@ After completing this chapter, you will be able to:
 - Design environment strategies for dev/test/prod workflows
 - Implement role-based access control (RBAC) for Feature Store objects
 - Plan and execute cross-environment feature promotion
-- Apply governance patterns for compliance and auditability
 
 ---
 
@@ -27,9 +26,9 @@ Snowflake Feature Store uses native Snowflake objects for storage and metadata:
 |-----------------|------------------|-------|
 | Feature Store | Schema + Tags | Database-level |
 | Entity | Tag | Schema-level |
-| FeatureView (materialized) | Dynamic Table | Schema-level |
-| FeatureView (query-time) | View | Schema-level |
-| Online Feature Table | Hybrid Table | Schema-level |
+| Feature View (materialized) | Dynamic Table | Schema-level |
+| Feature View (query-time) | View | Schema-level |
+| Online Feature Table | Online Feature Table | Schema-level |
 | Feature metadata | Tags | Column/Object-level |
 
 ### Basic Organization: One Database, One Schema
@@ -41,7 +40,7 @@ The simplest organization uses a single database with one Feature Store schema:
 │                        SINGLE FEATURE STORE                             │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  Database: ML_PLATFORM                                                  │
+│  Database: FEATURE_STORE_DEMO                                           │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │  Schema: FEATURE_STORE                                            │  │
 │  │                                                                   │  │
@@ -66,9 +65,9 @@ from snowflake.ml.feature_store import FeatureStore, CreationMode
 # Create a single Feature Store
 fs = FeatureStore(
     session=session,
-    database="ML_PLATFORM",
+    database="FEATURE_STORE_DEMO",
     name="FEATURE_STORE",
-    default_warehouse="ML_WH",
+    default_warehouse="FS_DEV_WH",
     creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
 )
 ```
@@ -85,48 +84,48 @@ fs = FeatureStore(
 Separate schemas by domain, team, or use case within a single database:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     DOMAIN-BASED ORGANIZATION                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  Database: ML_FEATURES                                                  │
-│                                                                         │
-│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────┐  │
-│  │ Schema: MARKETING   │  │ Schema: FRAUD       │  │ Schema: SHARED  │  │
-│  │                     │  │                     │  │                 │  │
-│  │ • CAMPAIGN_FV       │  │ • TRANSACTION_FV    │  │ • USER_BASE_FV  │  │
-│  │ • SEGMENT_FV        │  │ • DEVICE_FV         │  │ • PRODUCT_FV    │  │
-│  │ • ATTRIBUTION_FV    │  │ • VELOCITY_FV       │  │ • SESSION_FV    │  │
-│  │                     │  │                     │  │                 │  │
-│  │ Team: Marketing DS  │  │ Team: Risk DS       │  │ Team: Platform  │  │
-│  └─────────────────────┘  └─────────────────────┘  └─────────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     DOMAIN-BASED ORGANIZATION                                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Database: FEATURE_STORE_DEMO                                                │
+│                                                                              │
+│  ┌────────────────────────┐  ┌───────────────────────┐  ┌─────────────────┐  │
+│  │ Schema: MARKETING      │  │ Schema: FRAUD         │  │ Schema: SHARED  │  │
+│  │                        │  │                       │  │                 │  │
+│  │ • SESSION_FV           │  │ • ORDER_VELOCITY_FV   │  │ • USER_BASE_FV  │  │
+│  │ • USER_SEGMENT_FV      │  │ • SESSION_ANOMALY_FV  │  │ • PRODUCT_FV    │  │
+│  │ • EVENT_ATTRIBUTION_FV │  │ • EVENT_VELOCITY_FV   │  │ • SESSION_FV    │  │
+│  │                        │  │                       │  │                 │  │
+│  │ Team: Marketing DS     │  │ Team: Risk DS         │  │ Team: Platform  │  │
+│  └────────────────────────┘  └───────────────────────┘  └─────────────────┘  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```python
 # Marketing team's Feature Store
 marketing_fs = FeatureStore(
     session=session,
-    database="ML_FEATURES",
+    database="FEATURE_STORE_DEMO",
     name="MARKETING",
-    default_warehouse="MARKETING_WH",
+    default_warehouse="FS_DEV_WH",
 )
 
 # Fraud team's Feature Store
 fraud_fs = FeatureStore(
     session=session,
-    database="ML_FEATURES",
+    database="FEATURE_STORE_DEMO",
     name="FRAUD",
-    default_warehouse="FRAUD_WH",
+    default_warehouse="FS_DEV_WH",
 )
 
 # Shared features accessible to all
 shared_fs = FeatureStore(
     session=session,
-    database="ML_FEATURES",
+    database="FEATURE_STORE_DEMO",
     name="SHARED",
-    default_warehouse="ML_WH",
+    default_warehouse="FS_DEV_WH",
 )
 ```
 
@@ -194,10 +193,10 @@ The recommended pattern for larger organizations combines shared and domain-spec
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                     SHARED Feature Store                          │  │
-│  │  Database: ML_PLATFORM  Schema: SHARED_FEATURES                   │  │
+│  │  Database: FEATURE_STORE_DEMO  Schema: SHARED_FEATURES            │  │
 │  │                                                                   │  │
-│  │  • Core entity features (USER, PRODUCT, LOCATION)                 │  │
-│  │  • Foundational aggregations (purchase history, session stats)    │  │
+│  │  • Core entity features (USER, PRODUCT, SESSION)                  │  │
+│  │  • Foundational aggregations (ORDERS, EVENTS, SESSIONS)           │  │
 │  │  • Governed, versioned, production-grade                          │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                              │                                          │
@@ -216,7 +215,7 @@ The recommended pattern for larger organizations combines shared and domain-spec
 
 ---
 
-## Environment Strategies
+## Environment Strategies {#sec-environments}
 
 Production ML systems require separate environments for development, testing, and production.
 
@@ -229,15 +228,15 @@ Use different schemas for each environment within the same database:
 │                    SCHEMA-BASED ENVIRONMENTS                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  Database: ML_FEATURES                                                  │
+│  Database: FEATURE_STORE_DEMO                                           │
 │                                                                         │
 │  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐    │
 │  │ Schema: DEV       │  │ Schema: TEST      │  │ Schema: PROD      │    │
 │  │                   │  │                   │  │                   │    │
 │  │ USER_FEATURES_FV  │  │ USER_FEATURES_FV  │  │ USER_FEATURES_FV  │    │
-│  │ (v1, v2, v3)      │  │ (v2-promoted)     │  │ (v2-validated)    │    │
+│  │ (V01–V03)         │  │ (V02 promoted)    │  │ (V02 validated)   │    │
 │  │                   │  │                   │  │                   │    │
-│  │ Warehouse: DEV_WH │  │ Warehouse: TEST_WH│  │ Warehouse: PROD_WH│    │
+│  │ WH: FS_DEV_WH     │  │ WH: FS_TEST_WH    │  │ WH: FS_PROD_WH    │    │
 │  └───────────────────┘  └───────────────────┘  └───────────────────┘    │
 │                                                                         │
 │  Data Flow:  DEV ──(clone)──▶ TEST ──(clone)──▶ PROD                    │
@@ -248,30 +247,33 @@ Use different schemas for each environment within the same database:
 > 📁 **Full code:** [`_code/environment_setup.py`](_code/environment_setup.py)
 
 ```python
-# Development Feature Store
-dev_fs = FeatureStore(
-    session=session,
-    database="ML_FEATURES",
-    name="DEV",
-    default_warehouse="DEV_WH",
-)
+import os
 
-# Test Feature Store
-test_fs = FeatureStore(
-    session=session,
-    database="ML_FEATURES",
-    name="TEST",
-    default_warehouse="TEST_WH",
-)
+FS_DATABASE  = os.environ.get("FS_DATABASE", "FEATURE_STORE_DEMO")
+FS_SCHEMA    = os.environ.get("FS_SCHEMA", "DEV")
+FS_WAREHOUSE = os.environ.get("FS_WAREHOUSE", "FS_DEV_WH")
 
-# Production Feature Store
-prod_fs = FeatureStore(
+fs = FeatureStore(
     session=session,
-    database="ML_FEATURES",
-    name="PROD",
-    default_warehouse="PROD_WH",
+    database=FS_DATABASE,
+    name=FS_SCHEMA,
+    default_warehouse=FS_WAREHOUSE,
 )
 ```
+
+::: {.callout-tip}
+## Environment Configuration in Practice
+
+In production codebases, **never hard-code** database, schema, or warehouse names. Instead, resolve them at execution time so the same code runs unmodified across DEV, TEST, and PROD:
+
+- **Environment variables** (shown above) -- the simplest approach, well-suited to containers, Snowflake Tasks, and CI/CD pipelines where the runner sets `FS_DATABASE`, `FS_SCHEMA`, `FS_WAREHOUSE` per stage.
+- **Configuration files** -- YAML/TOML/JSON per environment (e.g., `config/dev.yaml`, `config/prod.yaml`), loaded at startup.
+- **CI/CD parameter injection** -- GitHub Actions secrets, GitLab CI variables, or Terraform outputs substituted into deployment manifests or Jinja templates.
+- **Snowflake session context** -- use `session.get_current_database()` / `session.get_current_schema()` when the session is already connected to the correct environment (e.g., inside a Snowflake Notebook or Stored Procedure scoped to a specific role and schema).
+- **[Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview)** (Public Preview) -- a declarative, infrastructure-as-code approach native to Snowflake. You define the desired state of databases, schemas, tables, warehouses, roles, and grants in SQL definition files with Jinja templating, and Snowflake determines and applies the necessary changes via a plan-then-deploy workflow. Create a separate DCM project per environment and parameterise with `USING (env => 'PROD', wh_size => 'XLARGE')` to deploy the same definitions across DEV, TEST, and PROD without changing any source files.
+
+The pattern applies equally to source table references (`CLICKSTREAM_DATA` schema), warehouse names, and role assumptions -- anything that varies between environments should be externalised.
+:::
 
 **Advantages**:
 
@@ -290,7 +292,7 @@ Use separate databases for stronger logical isolation:
 ├───────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
 │  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐          │
-│  │ DB: ML_DEV      │   │ DB: ML_TEST     │   │ DB: ML_PROD     │          │
+│  │ DB: FS_DEMO_DEV │   │ DB: FS_DEMO_TEST│   │ DB: FS_DEMO_PROD│          │
 │  │                 │   │                 │   │                 │          │
 │  │ Schema: FS      │   │ Schema: FS      │   │ Schema: FS      │          │
 │  │                 │   │                 │   │                 │          │
@@ -336,15 +338,15 @@ Snowflake's native RBAC integrates with Feature Store objects. Design roles arou
 │               ┌─────────────────┼─────────────────┐                     │
 │               │                 │                 │                     │
 │               ▼                 ▼                 ▼                     │
-│  ┌────────────────────┐ ┌────────────────┐ ┌────────────────┐           │
-│  │ FS_ADMIN           │ │ FS_DEVELOPER   │ │ FS_CONSUMER    │           │
-│  │                    │ │                │ │                │           │
-│  │ • Create schemas   │ │ • Create FVs   │ │ • Read FVs     │           │
-│  │ • Manage entities  │ │ • Register FVs │ │ • Generate     │           │
-│  │ • Grant access     │ │ • Update FVs   │ │   training sets│           │
-│  │ • Audit & monitor  │ │ • Test in DEV  │ │ • Retrieve     │           │
-│  │                    │ │                │ │   features     │           │
-│  └────────────────────┘ └────────────────┘ └────────────────┘           │
+│  ┌────────────────────┐ ┌────────────────┐ ┌─────────────────┐          │
+│  │ FS_ADMIN_ROLE      │ │ FS_DEV_ROLE    │ │ FS_CONSUMER_ROLE│          │
+│  │                    │ │                │ │                 │          │
+│  │ • Create schemas   │ │ • Create FVs   │ │ • Read FVs      │          │
+│  │ • Manage entities  │ │ • Register FVs │ │ • Generate      │          │
+│  │ • Grant access     │ │ • Update FVs   │ │   training sets │          │
+│  │ • Audit & monitor  │ │ • Test in DEV  │ │ • Retrieve      │          │
+│  │                    │ │                │ │   features      │          │
+│  └────────────────────┘ └────────────────┘ └─────────────────┘          │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -355,43 +357,43 @@ Snowflake's native RBAC integrates with Feature Store objects. Design roles arou
 
 ```sql
 -- Create Feature Store roles
-CREATE ROLE IF NOT EXISTS FS_ADMIN;
-CREATE ROLE IF NOT EXISTS FS_DEVELOPER;
-CREATE ROLE IF NOT EXISTS FS_CONSUMER;
+CREATE ROLE IF NOT EXISTS FS_ADMIN_ROLE;
+CREATE ROLE IF NOT EXISTS FS_DEV_ROLE;
+CREATE ROLE IF NOT EXISTS FS_CONSUMER_ROLE;
 
 -- Grant schema privileges to admin
-GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_ADMIN;
-GRANT ALL PRIVILEGES ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
-GRANT CREATE DYNAMIC TABLE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
-GRANT CREATE VIEW ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_ADMIN;
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO ROLE FS_ADMIN_ROLE;
+GRANT ALL PRIVILEGES ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_ADMIN_ROLE;
+GRANT CREATE DYNAMIC TABLE ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_ADMIN_ROLE;
+GRANT CREATE VIEW ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_ADMIN_ROLE;
 
 -- Grant developer privileges (create and modify)
-GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_DEVELOPER;
-GRANT USAGE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
-GRANT CREATE DYNAMIC TABLE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
-GRANT CREATE VIEW ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_DEVELOPER;
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO ROLE FS_DEV_ROLE;
+GRANT USAGE ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_DEV_ROLE;
+GRANT CREATE DYNAMIC TABLE ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_DEV_ROLE;
+GRANT CREATE VIEW ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_DEV_ROLE;
 
 -- Grant consumer privileges (read-only)
-GRANT USAGE ON DATABASE ML_FEATURES TO ROLE FS_CONSUMER;
-GRANT USAGE ON SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
-GRANT SELECT ON ALL DYNAMIC TABLES IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
-GRANT SELECT ON ALL VIEWS IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO ROLE FS_CONSUMER_ROLE;
+GRANT USAGE ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_CONSUMER_ROLE;
+GRANT SELECT ON ALL DYNAMIC TABLES IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_CONSUMER_ROLE;
+GRANT SELECT ON ALL VIEWS IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_CONSUMER_ROLE;
 
 -- Future grants for new objects
-GRANT SELECT ON FUTURE DYNAMIC TABLES IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
-GRANT SELECT ON FUTURE VIEWS IN SCHEMA ML_FEATURES.FEATURE_STORE TO ROLE FS_CONSUMER;
+GRANT SELECT ON FUTURE DYNAMIC TABLES IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_CONSUMER_ROLE;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO ROLE FS_CONSUMER_ROLE;
 
 -- Role hierarchy
-GRANT ROLE FS_CONSUMER TO ROLE FS_DEVELOPER;
-GRANT ROLE FS_DEVELOPER TO ROLE FS_ADMIN;
-GRANT ROLE FS_ADMIN TO ROLE SYSADMIN;
+GRANT ROLE FS_CONSUMER_ROLE TO ROLE FS_DEV_ROLE;
+GRANT ROLE FS_DEV_ROLE TO ROLE FS_ADMIN_ROLE;
+GRANT ROLE FS_ADMIN_ROLE TO ROLE SYSADMIN;
 ```
 
 ---
 
 ## Cross-Environment Promotion {#sec-promotion}
 
-Moving features from development to production requires a controlled promotion process.
+Moving features from development to production requires a controlled promotion process. For the Feature View version lifecycle that underpins promotion (V01 → V02 → deprecation), see [Chapter 04: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
 ### Promotion Workflow
 
@@ -414,176 +416,86 @@ Moving features from development to production requires a controlled promotion p
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Method 1: Object Cloning
+### Method 1: Re-register via CI/CD (Recommended)
 
-Snowflake's zero-copy cloning efficiently promotes FeatureViews:
+The most robust promotion strategy is to **re-register the Feature View in the target environment using the same parameterised code** that created it in DEV. Because the `FeatureStore` connection, source table references, and warehouse are all resolved from environment configuration (see the callout above), the same Python module produces the correct objects in each environment:
+
+```python
+# Same code runs in every environment -- only the config changes
+fs = FeatureStore(
+    session=session,
+    database=os.environ["FS_DATABASE"],
+    name=os.environ["FS_SCHEMA"],
+    default_warehouse=os.environ["FS_WAREHOUSE"],
+)
+
+source_table = f"{os.environ['FS_DATABASE']}.{os.environ['SOURCE_SCHEMA']}.ORDERS"
+
+feature_df = (
+    session.table(source_table)
+    .group_by("USER_ID")
+    .agg(F.sum("TOTAL_AMT").alias("TOTAL_SPEND"))
+)
+
+fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=feature_df,
+    refresh_freq="1 hour",
+)
+fs.register_feature_view(feature_view=fv, version="V01")
+```
+
+This ensures the Dynamic Table in each environment reads from that environment's source data, uses the appropriate warehouse, and runs a full initial refresh against the correct dataset. View-based Feature Views work identically -- the view definition is created fresh in the target schema.
+
+### Method 2: Object Cloning (Snapshot Only)
+
+Snowflake's zero-copy cloning can be useful for creating a **point-in-time snapshot** of a Feature Store schema -- for example, to stand up a quick test environment with realistic data, or to preserve a known-good state before a migration.
 
 ```sql
--- Clone entire Feature Store schema from DEV to TEST
-CREATE SCHEMA ML_FEATURES.TEST CLONE ML_FEATURES.DEV;
-
--- Or clone specific FeatureViews
-CREATE DYNAMIC TABLE ML_FEATURES.TEST.USER_FEATURES_FV 
-CLONE ML_FEATURES.DEV.USER_FEATURES_FV;
-
--- Validate in TEST, then promote to PROD
-CREATE DYNAMIC TABLE ML_FEATURES.PROD.USER_FEATURES_FV 
-CLONE ML_FEATURES.TEST.USER_FEATURES_FV;
+-- Clone entire Feature Store schema
+CREATE SCHEMA <TARGET_DB>.<TARGET_SCHEMA> CLONE <SOURCE_DB>.<SOURCE_SCHEMA>;
 ```
+
+::: {.callout-warning}
+## Cloning Limitations for Promotion
+
+Cloning copies both the **object definition and the data** at a point in time. For Dynamic Table-backed Feature Views, the cloned DT retains the original fully-qualified source table references in its SQL definition -- it does not automatically redirect to the target environment's data. If DEV and PROD use different source schemas or different data subsets, the cloned DT will still read from the DEV source on its next refresh.
+
+View-based Feature Views have the same issue: the cloned view's SQL still references the original source tables.
+
+For this reason, cloning is best suited for **testing and snapshotting**, not for production promotion across environments with distinct data. Use Method 1 (re-registration via CI/CD) for true environment promotion.
+:::
+
+### Method 3: Snowflake DCM Projects
+
+[DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) (Public Preview) provide a declarative, infrastructure-as-code approach to promotion. Define Feature Store objects in SQL definition files with Jinja templating, create a DCM project per environment, and deploy with environment-specific parameters:
+
+```sql
+EXECUTE DCM PROJECT FEATURE_STORE_PROD DEPLOY
+  USING (env => 'PROD', source_schema => 'CLICKSTREAM_DATA', wh_size => 'XLARGE')
+FROM @my_stage/feature_store_definitions/;
+```
+
+This gives you a plan-then-deploy workflow with full audit trail, and Snowflake determines the DDL changes needed to reach the desired state.
+
+**DCM support for Dynamic Tables.** Dynamic Tables are a [supported object type](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-supported-entities) in DCM Projects. The change behaviour depends on what you modify:
+
+| Change | Behaviour |
+|--------|-----------|
+| Warehouse, target-lag | Applied without full refresh |
+| Body changes (add/drop columns, new logic) | Re-initialisation or full refresh of the DT |
+| Refresh mode | Re-initialisation or full refresh |
+| Rename or reorder columns | Not supported (requires drop + recreate) |
+
+When a Dynamic Table is re-initialised due to a body change, any **downstream** Dynamic Tables that depend on it will also need to refresh to pick up the schema/data changes -- this follows the standard DT dependency chain behaviour.
+
+DCM Projects also provide pipeline-aware commands: `REFRESH ALL` bulk-refreshes all Dynamic Tables managed by the project (plus required upstream DTs), and `TEST ALL` runs attached data quality expectations. A typical CI/CD promotion flow is: `PLAN` → `DEPLOY` → `REFRESH ALL` → `TEST ALL` on staging, then repeat `PLAN` → `DEPLOY` on production.
 
 ::: {.callout-note}
-Cloning copies the object definition and data at a point in time. The clone becomes independent of the source.
+## DCM Projects: Preview status and limitations
+DCM Projects is in Public Preview (March 2026) and is still a relatively new capability within Snowflake. Not all object types or operations are supported yet -- for example, some object properties are immutable after creation (requiring drop + recreate), and column rename/reorder on Dynamic Tables is not supported. Feature Store-specific objects (Entities, Feature Views as logical constructs) are not directly managed by DCM -- you would define the underlying Dynamic Tables, Views, Tags, and grants in DCM definition files, and use the Feature Store Python API for the logical registration layer. Check the [supported object types and limitations](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-supported-entities) page for current coverage and constraints.
 :::
-
-### Method 2: Python-Based Promotion
-
-> 📁 **Full code:** [`_code/promotion_utils.py`](_code/promotion_utils.py)
-
-```python
-def promote_feature_view(
-    source_fs: FeatureStore,
-    target_fs: FeatureStore,
-    fv_name: str,
-    version: str
-) -> None:
-    """Promote a FeatureView from source to target Feature Store."""
-    
-    # Get the FeatureView from source
-    source_fv = source_fs.get_feature_view(name=fv_name, version=version)
-    
-    # Recreate in target (adjusting source table references if needed)
-    target_fv = FeatureView(
-        name=source_fv.name,
-        entities=source_fv.entities,  # Entities must exist in target
-        feature_df=source_fv.feature_df,
-        timestamp_col=source_fv.timestamp_col,
-        refresh_freq=source_fv.refresh_freq,
-        desc=source_fv.desc,
-    )
-    
-    # Register with same version
-    target_fs.register_feature_view(
-        feature_view=target_fv,
-        version=version,
-    )
-```
-
----
-
-## Governance Considerations {#sec-governance}
-
-### Avoiding Duplicate Features
-
-A recurring challenge in fast-moving teams is **accidentally re-creating features** that already exist.
-
-**Recommended Practices**:
-
-1. **Establish team-wide naming standards**
-2. **Require meaningful descriptions and tags**
-3. **Query existing features before creating new ones**
-
-> 📁 **Full code:** [`_code/feature_discovery.sql`](_code/feature_discovery.sql)
-
-```sql
--- Search for existing features by name pattern
-SELECT 
-    TABLE_NAME AS FEATURE_VIEW,
-    COLUMN_NAME AS FEATURE_NAME,
-    COMMENT AS DESCRIPTION
-FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA = 'FEATURE_STORE'
-  AND (COLUMN_NAME LIKE '%SPEND%' OR COMMENT LIKE '%purchase%')
-ORDER BY TABLE_NAME, COLUMN_NAME;
-```
-
-::: {.callout-tip}
-## Field Tip
-This is particularly important when multiple squads work on the same entity (e.g., multiple "customer" feature pipelines) or when onboarding new teams unfamiliar with existing feature catalogs.
-:::
-
-### Feature Versioning {#sec-versioning}
-
-Version FeatureViews to enable safe updates and rollbacks.
-
-::: {.callout-important}
-## Key Insight
-Versioning happens at the **FeatureView level, not per individual feature**. A FV version is treated as an immutable bundle of features. When you change feature definitions, create a new FV version—the system does not automatically track per-feature deltas between versions.
-:::
-
-#### Recommended Version Naming
-
-Use **zero-padded, sequential version identifiers** so lexicographic order matches creation order:
-
-```python
-# RECOMMENDED: Zero-padded sequential versions
-fs.register_feature_view(fv, version="V01")
-fs.register_feature_view(fv, version="V02")
-fs.register_feature_view(fv, version="V10")  # Sorts correctly after V09
-
-# ALSO ACCEPTABLE: Environment-prefixed versions
-fs.register_feature_view(fv, version="DEV_V01")
-fs.register_feature_view(fv, version="PROD_V03")
-```
-
-#### Getting the "Latest" Version
-
-Feature Store is intentionally not opinionated on version semantics—there's **no built-in "latest version" alias**. Create a helper utility:
-
-> 📁 **Full code:** [`_code/version_utils.py`](_code/version_utils.py)
-
-```python
-def get_latest_feature_view(
-    fs: FeatureStore,
-    feature_view_name: str,
-) -> FeatureView:
-    """Get the most recent version of a FeatureView."""
-    versions = fs.list_feature_views(feature_view_name=feature_view_name)
-    
-    # Sort by version string (works with zero-padded versions)
-    versions_sorted = sorted(versions, key=lambda fv: fv.version, reverse=True)
-    
-    return versions_sorted[0] if versions_sorted else None
-```
-
-### Feature Store Ownership & SLAs
-
-Define clear ownership for each Feature Store or domain:
-
-```yaml
-# feature_manifest.yaml
-feature_views:
-  - name: USER_PURCHASE_AGGREGATES
-    owner: marketing-ds@company.com
-    team: Marketing Data Science
-    description: Core user purchase behavior features
-    consumers:
-      - churn-model
-      - ltv-model
-    sla:
-      refresh_frequency: "1 hour"
-      max_latency_minutes: 90
-```
-
-### Feature Discovery & Search
-
-Use metadata queries to find features across the organization:
-
-```python
-def search_features(fs: FeatureStore, search_term: str) -> list:
-    """Search for features by name or description."""
-    all_fvs = fs.list_feature_views()
-    results = []
-    
-    for fv_info in all_fvs.collect():
-        fv = fs.get_feature_view(name=fv_info.name, version=fv_info.version)
-        # Check name and description
-        if search_term.lower() in fv.name.lower():
-            results.append(fv)
-        elif fv.desc and search_term.lower() in fv.desc.lower():
-            results.append(fv)
-    
-    return results
-```
 
 ---
 
@@ -593,9 +505,9 @@ def search_features(fs: FeatureStore, search_term: str) -> list:
 
 ```
 Start with:
-├── Single database
+├── Single database (`FEATURE_STORE_DEMO`)
 ├── Schema-based environments (DEV/TEST/PROD)
-├── Basic RBAC (Admin/Developer/Consumer)
+├── Basic RBAC (`FS_ADMIN_ROLE` / `FS_DEV_ROLE` / `FS_CONSUMER_ROLE`)
 └── Manual promotion
 
 Scale to:
@@ -609,38 +521,36 @@ Scale to:
 
 | Object Type | Convention | Example |
 |-------------|------------|---------|
-| Database | `ML_<purpose>` | `ML_PLATFORM`, `ML_FEATURES` |
+| Database | `FEATURE_STORE_DEMO` (guide) | `FEATURE_STORE_DEMO` |
+| Source data schema | `CLICKSTREAM_DATA` | Raw `USERS`, `EVENTS`, `ORDERS`, … |
 | Schema (env) | `<ENV>` | `DEV`, `TEST`, `PROD` |
-| Schema (domain) | `<DOMAIN>_FEATURES` | `MARKETING_FEATURES` |
-| FeatureView | `<ENTITY>_<DOMAIN>_FV` | `USER_PURCHASE_FV` |
-| Entity | `<BUSINESS_OBJECT>` | `USER`, `PRODUCT`, `SESSION` |
+| Schema (domain) | `<DOMAIN>` or `<DOMAIN>_FEATURES` | `MARKETING`, `SHARED_FEATURES` |
+| Feature View | `<ENTITY>_<DOMAIN>_FV` | `USER_ORDER_FV`, `SESSION_EVENT_FV` |
+| Entity | SCREAMING_SNAKE singular | `USER`, `PRODUCT`, `SESSION`, `ORDER` |
+
+For detailed versioning conventions, `$`-delimited object naming, and programmatic version helpers, see [Chapter 04: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
 ### 3. Separate Compute by Environment
 
 ```sql
 -- Environment-specific warehouses with appropriate sizing
-CREATE WAREHOUSE DEV_WH     WITH WAREHOUSE_SIZE = 'XSMALL' AUTO_SUSPEND = 60;
-CREATE WAREHOUSE TEST_WH    WITH WAREHOUSE_SIZE = 'SMALL'  AUTO_SUSPEND = 120;
-CREATE WAREHOUSE PROD_WH    WITH WAREHOUSE_SIZE = 'MEDIUM' AUTO_SUSPEND = 300;
-CREATE WAREHOUSE PROD_OFT_WH WITH WAREHOUSE_SIZE = 'SMALL' AUTO_SUSPEND = 60;
+CREATE WAREHOUSE FS_DEV_WH      WITH WAREHOUSE_SIZE = 'XSMALL' AUTO_SUSPEND = 60;
+CREATE WAREHOUSE FS_TEST_WH     WITH WAREHOUSE_SIZE = 'SMALL'  AUTO_SUSPEND = 120;
+CREATE WAREHOUSE FS_PROD_WH     WITH WAREHOUSE_SIZE = 'MEDIUM' AUTO_SUSPEND = 300;
+CREATE WAREHOUSE FS_PROD_OFT_WH WITH WAREHOUSE_SIZE = 'SMALL' AUTO_SUSPEND = 60;
 ```
 
-### 4. Feature Store Health Monitoring
-
-Monitor Feature Store health using Snowflake views:
+::: {.callout-tip}
+## Dual warehouse for Dynamic Tables
+Dynamic Tables support specifying an `INITIALIZATION_WAREHOUSE` separate from the regular `WAREHOUSE`. The initialisation warehouse is used for the first full refresh (and any subsequent re-initialisations), which typically scans all source data, while the regular warehouse handles lighter incremental refreshes. This lets you assign a larger warehouse for the heavy initial build without over-provisioning ongoing incremental compute:
 
 ```sql
--- Check Dynamic Table refresh status
-SELECT 
-    NAME,
-    REFRESH_MODE,
-    SCHEDULING_STATE,
-    LAST_COMPLETED_REFRESH_START_TIME,
-    LAST_REFRESH_TRIGGER
-FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
-WHERE SCHEMA_NAME = 'FEATURE_STORE'
-ORDER BY LAST_COMPLETED_REFRESH_START_TIME DESC;
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  SET INITIALIZATION_WAREHOUSE = FS_PROD_INIT_WH;
 ```
+
+This is not yet exposed through the Feature Store Python API's `FeatureView` constructor -- use `ALTER DYNAMIC TABLE` after registration. See the [DT warehouse documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables-warehouses) for details.
+:::
 
 ---
 
@@ -656,7 +566,7 @@ ORDER BY LAST_COMPLETED_REFRESH_START_TIME DESC;
 
 **Problem**: Multiple teams create similar features independently.
 
-**Solution**: Implement a shared Feature Store for common entities. Require feature review before creation.
+**Solution**: Implement a shared Feature Store for common entities. Require feature review before creation. Use [feature discovery tools](../11_operations/index.qmd) to search existing features before creating new ones.
 
 ### ❌ Pitfall 3: No Promotion Process
 

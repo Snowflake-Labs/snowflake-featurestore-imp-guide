@@ -1,5 +1,6 @@
 """
-Chapter 11: Operations - Code Examples
+Chapter 11: Operations — code examples
 
-Monitoring, data quality, lineage, and operational management.
+- discovery.py — health-check query strings, safe column search (Snowpark)
+- monitoring.sql — Dynamic Table / OFT monitoring and ACCOUNT_USAGE pointers
 """

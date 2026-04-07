@@ -5,17 +5,21 @@ subtitle: "Model-dependent transformations, encoding, and scaling"
 
 ## Overview
 
-Model-Dependent Transformations (MDT) are preprocessing steps that depend on training data statistics or are specific to particular models. Unlike Model-Independent Transformations (MIT) stored in FeatureViews, MDTs are stored with the model and applied consistently during training and inference.
+Model-Dependent Transformations (MDT) are preprocessing steps that depend on training data statistics or are specific to particular models. Unlike Model-Independent Transformations (MIT) stored in Feature Views, MDTs are stored with the model and applied consistently during training and inference.
+
+Examples in this chapter use the **clickstream** sample context: database `FEATURE_STORE_DEMO`, schema `FEATURE_STORE`, source `CLICKSTREAM_DATA`, warehouse `FS_DEV_WH`. Training features often come from a Feature View whose version label follows **`V01`** (not `v1`).
 
 ## Learning Objectives
 
 After completing this chapter, you will be able to:
 
 - Distinguish between MIT and MDT transformations
-- Apply encoding techniques (one-hot, ordinal)
-- Implement scaling (standard, min-max)
-- Use Snowflake ML preprocessing functions
-- Store and apply transformations consistently
+- Choose between **`sklearn.pipeline.Pipeline`** and **`snowflake.ml.modeling.pipeline.Pipeline`**, and understand when each is appropriate (N→N vs N→M performance characteristics)
+- Apply encoding techniques (one-hot, ordinal) on clickstream categoricals, and evaluate trade-offs of pre-encoding in Feature Views vs. at model time
+- Apply scaling (standard, min-max, robust, and others) to numeric session/order fields
+- Use cross-validation correctly with preprocessing inside the CV loop
+- Apply sampling strategies (SQL push-down, spine sampling, indicator columns, stratified) to manage large Feature Store datasets
+- Log a fitted estimator or full sklearn pipeline with `Registry.log_model()` so training and serving stay aligned
 
 ---
 
@@ -23,7 +27,7 @@ After completing this chapter, you will be able to:
 
 | Type | Location | Stored In | Examples |
 |------|----------|-----------|----------|
-| **MIT** | Feature Pipeline | FeatureView | Aggregations, joins, derived columns |
+| **MIT** | Feature Pipeline | Feature View | Aggregations, joins, derived columns |
 | **MDT** | Training Pipeline | Model Registry | Scaling, encoding, imputation |
 | **ODT** | Inference Time | Not stored | Request-time calculations |
 
@@ -31,7 +35,7 @@ After completing this chapter, you will be able to:
 
 ```
 Is the transformation reusable across multiple models?
-├── YES → MIT (store in FeatureView)
+├── YES → MIT (store in Feature View)
 └── NO  → Does it depend on training data statistics?
           ├── YES → MDT (store with model)
           └── NO  → ODT (compute at inference)
@@ -39,153 +43,514 @@ Is the transformation reusable across multiple models?
 
 ---
 
+## Pipeline Classes: scikit-learn vs Snowflake ML
+
+Two different classes are both named `Pipeline`; they are **not** interchangeable.
+
+| Class | Module | Execution model |
+|-------|--------|-----------------|
+| **`sklearn.pipeline.Pipeline`** | scikit-learn | Local / single-node. Fit on pandas DataFrames or in-memory arrays. Log the fitted pipeline to Model Registry. |
+| **`snowflake.ml.modeling.pipeline.Pipeline`** | Snowflake ML | Distributed. Fit and transform push down to Snowflake warehouse compute via Snowpark DataFrames. |
+
+### When to Use Each
+
+**`sklearn.pipeline.Pipeline`** is the standard choice when your training data fits in memory (or after sampling to a manageable size). You build a standard sklearn pipeline (preprocessing + estimator), fit it locally, then persist the entire fitted object to the Snowflake Model Registry with `Registry.log_model()`. This keeps preprocessing and model versioned together, avoiding training/serving skew.
+
+**`snowflake.ml.modeling.pipeline.Pipeline`** is appropriate when your data is too large for local fitting and you need distributed preprocessing inside the Snowflake warehouse. Non-categorical (N→N) transforms such as scaling perform well at scale in this mode. Categorical encoders (N→M transforms like one-hot encoding) can be more expensive depending on cardinality, since the column expansion executes within the warehouse:
+
+| Transform type | Example | Distributed performance |
+|----------------|---------|------------------------|
+| **N→N** (same column count) | StandardScaler, MinMaxScaler, RobustScaler | Scales well -- arithmetic per row |
+| **N→M** (column expansion) | OneHotEncoder, get_dummies | Depends on cardinality -- high-cardinality categoricals can be expensive |
+
+Both paths produce a fitted pipeline that can be logged to the Model Registry. The choice comes down to data volume and whether you need distributed execution for the fit step.
+
+---
+
 ## Encoding Techniques
 
 ### One-Hot Encoding
 
+Nominal columns from clickstream entities (no natural order): **`EVENT_TYPE`** (from `EVENTS`), **`PAYMENT_METHOD`** (from `ORDERS`), **`DEVICE_TYPE`** (from `USERS` or `SESSIONS`). Expanded binary columns should follow your naming standard; this guide uses the **`_OHE`** suffix for one-hot outputs (for example `EVENT_TYPE_click_OHE` after you align names with `get_feature_names_out()` or your own prefix rules).
+
 > 📁 **Full code:** [`_code/encoding.py`](_code/encoding.py)
 
 ```python
-from snowflake.ml.modeling.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder
 
-# Create encoder
 encoder = OneHotEncoder(
-    input_cols=["CATEGORY"],
-    output_cols=["CATEGORY_ENCODED"],
     drop="first",  # Avoid multicollinearity
+    sparse_output=False,
+    handle_unknown="ignore",
 )
 
-# Fit on training data
-encoder.fit(train_df)
+# Fit on training data only — columns e.g. EVENT_TYPE, PAYMENT_METHOD, DEVICE_TYPE
+encoder.fit(train_df[["EVENT_TYPE", "PAYMENT_METHOD", "DEVICE_TYPE"]])
 
-# Transform
-train_encoded = encoder.transform(train_df)
-inference_encoded = encoder.transform(inference_df)
+train_ohe = encoder.transform(train_df[["EVENT_TYPE", "PAYMENT_METHOD", "DEVICE_TYPE"]])
+inference_ohe = encoder.transform(inference_df[["EVENT_TYPE", "PAYMENT_METHOD", "DEVICE_TYPE"]])
 ```
 
 ### Ordinal Encoding
 
-```python
-from snowflake.ml.modeling.preprocessing import OrdinalEncoder
+Use when categories have a **fixed order**. Clickstream examples:
 
-# For ordered categories
+- **`SUBSCRIPTION_STATUS`** (`USERS`): `none` &lt; `basic` &lt; `premium`
+- **`INCOME_BRACKET`** (when present on user or profile features): `low` &lt; `medium` &lt; `high` &lt; `premium`
+
+Store integer outputs with the **`_ENCODED`** suffix (for example `SUBSCRIPTION_STATUS_ENCODED`).
+
+```python
+from sklearn.preprocessing import OrdinalEncoder
+
 encoder = OrdinalEncoder(
-    input_cols=["SIZE"],
-    output_cols=["SIZE_ENCODED"],
-    categories=[["S", "M", "L", "XL"]],  # Explicit order
+    categories=[
+        ["none", "basic", "premium"],
+        ["low", "medium", "high", "premium"],
+    ],
 )
 
-encoder.fit(train_df)
+encoder.fit(
+    train_df[["SUBSCRIPTION_STATUS", "INCOME_BRACKET"]]
+)
 ```
+
+### Pre-Encoding Categoricals in the Feature Store
+
+One-hot encoding is typically a model-dependent transform (MDT) applied at training time. However, some teams choose to store pre-encoded columns directly in a Feature View so that multiple models can reuse them without re-encoding.
+
+**Trade-offs:**
+
+| Factor | Pre-encode in Feature View | Encode at model time |
+|--------|---------------------------|---------------------|
+| **Column count** | Expands significantly with cardinality (e.g. 50 payment types → 50 columns) | Feature View stays compact |
+| **Category drift** | New categories require a new Feature View version and schema change | Encoder handles unknown categories via `handle_unknown="ignore"` |
+| **Multi-model reuse** | All consumers share the same encoding | Each model can use its own encoding strategy |
+| **Storage cost** | Higher -- many sparse binary columns | Lower -- single categorical column |
+
+**When pre-encoding can work:** low, stable cardinality (e.g. `DEVICE_TYPE` with 3--5 values that rarely change).
+
+**When to avoid:** high or evolving cardinality (e.g. `PRODUCT_CATEGORY` with hundreds of values that grow over time).
+
+**OBJECT column alternative.** To avoid column expansion while still pre-computing encodings, store the encoded vector as a single `OBJECT` (or `ARRAY`) column in the Feature View. The encoding is computed in the Feature View SQL, but the result occupies one column regardless of cardinality. Unpack in Python after retrieval:
+
+```sql
+-- In the Feature View SQL: pack OHE into a single OBJECT column
+SELECT
+    USER_ID,
+    OBJECT_CONSTRUCT_KEEP_NULL(
+        'click',  IFF(EVENT_TYPE = 'click',  1, 0),
+        'search', IFF(EVENT_TYPE = 'search', 1, 0),
+        'view',   IFF(EVENT_TYPE = 'view',   1, 0)
+    ) AS EVENT_TYPE_OHE
+FROM EVENTS
+```
+
+::: {.callout-warning}
+**Hard-coded categories**: The `OBJECT_CONSTRUCT_KEEP_NULL` example above embeds category values directly in the SQL. If this SQL backs a Dynamic Table Feature View, adding a new category requires a new Feature View version and a full re-compute.
+
+**Dynamic alternative -- `OBJECT_AGG`**: Build the object from whatever categories exist in the data so the SQL never needs updating:
+
+```sql
+SELECT
+    USER_ID,
+    OBJECT_AGG(EVENT_TYPE, 1::VARIANT) AS EVENT_TYPE_OHE
+FROM EVENTS
+GROUP BY USER_ID
+```
+
+`OBJECT_AGG` produces an object whose keys are the distinct `EVENT_TYPE` values present for each user (e.g., `{"click":1, "view":1}`). Categories absent for a given user are simply missing keys; handle this in Python when unpacking:
+
+```python
+ohe_df = pd.json_normalize(df["EVENT_TYPE_OHE"].apply(json.loads)).fillna(0).astype(int)
+```
+
+For full-width one-hot columns (every category present as 0 or 1), Snowflake's **dynamic PIVOT** is another option:
+
+```sql
+SELECT *
+FROM (
+    SELECT USER_ID, EVENT_TYPE, 1 AS FLAG
+    FROM EVENTS
+)
+PIVOT (MAX(FLAG) FOR EVENT_TYPE IN (ANY ORDER BY EVENT_TYPE)
+       DEFAULT ON NULL (0));
+```
+
+`PIVOT ... IN (ANY)` automatically discovers all distinct values -- no hard-coding required.
+:::
+
+```python
+import json
+import pandas as pd
+
+df = training_data.to_pandas()
+ohe_df = pd.json_normalize(df["EVENT_TYPE_OHE"].apply(json.loads))
+df = pd.concat([df.drop(columns=["EVENT_TYPE_OHE"]), ohe_df], axis=1)
+```
+
+**Sparsity compression.** OHE columns are inherently sparse (only one category is 1 per row, the rest are 0). When packing into an OBJECT, use `NULLIF` to convert zeros to NULLs before packing with `OBJECT_CONSTRUCT` (which drops NULL keys). This stores only the active category, dramatically reducing OBJECT size for high-cardinality features:
+
+```sql
+OBJECT_CONSTRUCT(
+    'click',  NULLIF(IFF(EVENT_TYPE = 'click',  1, 0), 0),
+    'search', NULLIF(IFF(EVENT_TYPE = 'search', 1, 0), 0),
+    'view',   NULLIF(IFF(EVENT_TYPE = 'view',   1, 0), 0)
+) AS EVENT_TYPE_OHE
+```
+
+The result is an OBJECT containing only the active key (e.g., `{"click": 1}`). Reconstitute in the expansion View or Python with `COALESCE(..., 0)`. For wider strategies (100+ feature columns), see [Chapter 12: Advanced Patterns -- Wide & Sparse Data](../12_advanced_patterns/index.qmd#sec-wide-sparse).
 
 ---
 
-## Scaling Techniques
+## Scaling and Numeric Transforms
+
+Both `sklearn.preprocessing` and `snowflake.ml.modeling.preprocessing` provide equivalent classes for the transforms below. The following are available in the Snowflake ML distributed API (all mirror their scikit-learn counterparts):
+
+| Class | What it does | Typical use |
+|-------|-------------|-------------|
+| **`StandardScaler`** | Zero mean, unit variance (Z-score) | Linear models, SVM, neural networks |
+| **`MinMaxScaler`** | Scale to a fixed range (default [0, 1]) | Neural networks, KNN, bounded inputs |
+| **`RobustScaler`** | Scale using median and IQR; robust to outliers | Data with significant outliers |
+| **`MaxAbsScaler`** | Scale by maximum absolute value; preserves sparsity | Sparse data, range [-1, 1] |
+| **`Normalizer`** | Scale each **row** to unit norm (L1, L2, or max) | Text/TF-IDF vectors, distance-based models |
+| **`Binarizer`** | Threshold numeric values to 0 / 1 | Binary feature flags from continuous values |
+| **`KBinsDiscretizer`** | Bin continuous features into discrete intervals | Decision-tree-style bucketing of numeric features |
+| **`PolynomialFeatures`** | Generate polynomial and interaction terms | Adding non-linear terms for linear models |
+
+> Tree-based models (XGBoost, Random Forest, LightGBM) generally do **not** require scaling.
 
 ### Standard Scaling (Z-score)
 
+Scale numeric fields such as **`TOTAL_AMT`** (orders), **`DURATION_SEC`** (sessions), and **`ITEM_CNT`** (baskets or line items):
+
 ```python
-from snowflake.ml.modeling.preprocessing import StandardScaler
+# sklearn (local)
+from sklearn.preprocessing import StandardScaler
 
-# Standardize features (mean=0, std=1)
-scaler = StandardScaler(
-    input_cols=["AMOUNT", "QUANTITY"],
-    output_cols=["AMOUNT_SCALED", "QUANTITY_SCALED"],
+scaler = StandardScaler()
+scaler.fit(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
+train_scaled = scaler.transform(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
+```
+
+```python
+# Snowflake ML (distributed — runs on warehouse compute)
+from snowflake.ml.modeling.preprocessing import StandardScaler as SFStandardScaler
+
+scaler = SFStandardScaler(
+    input_cols=["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"],
+    output_cols=["TOTAL_AMT_SCALED", "DURATION_SEC_SCALED", "ITEM_CNT_SCALED"],
 )
-
-scaler.fit(train_df)
-train_scaled = scaler.transform(train_df)
+scaler.fit(train_snowpark_df)
+train_scaled_sf = scaler.transform(train_snowpark_df)
 ```
 
 ### Min-Max Scaling
 
 ```python
-from snowflake.ml.modeling.preprocessing import MinMaxScaler
+# sklearn (local)
+from sklearn.preprocessing import MinMaxScaler
 
-# Scale to [0, 1] range
-scaler = MinMaxScaler(
-    input_cols=["PRICE"],
-    output_cols=["PRICE_SCALED"],
-)
-
-scaler.fit(train_df)
+scaler = MinMaxScaler()
+scaler.fit(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
 ```
 
-### When to Use Each
+```python
+# Snowflake ML (distributed)
+from snowflake.ml.modeling.preprocessing import MinMaxScaler as SFMinMaxScaler
 
-| Technique | Use When | Models |
-|-----------|----------|--------|
-| **Standard** | Features are normally distributed | Linear, SVM, Neural Networks |
-| **Min-Max** | Need bounded range [0,1] | Neural Networks, KNN |
-| **None** | Tree-based models | XGBoost, Random Forest |
+scaler = SFMinMaxScaler(
+    input_cols=["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"],
+    output_cols=["TOTAL_AMT_SCALED", "DURATION_SEC_SCALED", "ITEM_CNT_SCALED"],
+)
+scaler.fit(train_snowpark_df)
+```
+
+### Robust Scaling
+
+Preferred when features contain outliers -- uses median and interquartile range instead of mean and standard deviation:
+
+```python
+# sklearn (local)
+from sklearn.preprocessing import RobustScaler
+
+scaler = RobustScaler()
+scaler.fit(train_df[["TOTAL_AMT", "DURATION_SEC"]])
+```
+
+```python
+# Snowflake ML (distributed)
+from snowflake.ml.modeling.preprocessing import RobustScaler as SFRobustScaler
+
+scaler = SFRobustScaler(
+    input_cols=["TOTAL_AMT", "DURATION_SEC"],
+    output_cols=["TOTAL_AMT_SCALED", "DURATION_SEC_SCALED"],
+)
+scaler.fit(train_snowpark_df)
+```
 
 ---
 
 ## Preprocessing Pipeline
 
-### Building a Pipeline
+### Building a Pipeline (recommended: sklearn)
 
 > 📁 **Full code:** [`_code/preprocessing_pipeline.py`](_code/preprocessing_pipeline.py)
 
+Combine one-hot, ordinal, and numeric scaling with **`sklearn.compose.ColumnTransformer`** and wrap the result in **`sklearn.pipeline.Pipeline`** together with your estimator. Log **that** object with the registry so inference replays the same steps.
+
 ```python
-from snowflake.ml.modeling.pipeline import Pipeline
-from snowflake.ml.modeling.preprocessing import (
-    StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+onehot_cols = ["EVENT_TYPE", "PAYMENT_METHOD", "DEVICE_TYPE"]
+ordinal_cols = ["SUBSCRIPTION_STATUS", "INCOME_BRACKET"]
+numeric_cols = ["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]
+
+preprocess = ColumnTransformer(
+    transformers=[
+        (
+            "ohe",
+            OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+            onehot_cols,
+        ),
+        (
+            "ord",
+            OrdinalEncoder(
+                categories=[
+                    ["none", "basic", "premium"],
+                    ["low", "medium", "high", "premium"],
+                ]
+            ),
+            ordinal_cols,
+        ),
+        ("scale", StandardScaler(), numeric_cols),
+    ],
 )
 
-# Build preprocessing pipeline
-preprocessing = Pipeline(steps=[
-    ("encoder", OneHotEncoder(
-        input_cols=["CATEGORY"],
-        output_cols=["CATEGORY_ENCODED"],
-    )),
-    ("scaler", StandardScaler(
-        input_cols=["AMOUNT"],
-        output_cols=["AMOUNT_SCALED"],
-    )),
-])
+full_pipeline = Pipeline(
+    steps=[
+        ("preprocess", preprocess),
+        ("clf", LogisticRegression(max_iter=1000)),
+    ]
+)
 
-# Fit and transform
-preprocessing.fit(train_df)
-train_preprocessed = preprocessing.transform(train_df)
+full_pipeline.fit(train_df, train_df["IS_CONVERTED"])
 ```
 
-### Saving with Model
+### Snowflake ML `Pipeline` (distributed alternative)
+
+If your data is too large for local fitting, use **`snowflake.ml.modeling.pipeline.Pipeline`** with the distributed Snowflake ML preprocessors shown above. Do **not** assume it behaves identically to sklearn's `Pipeline` -- the API surface and serialisation format differ.
+
+```python
+from snowflake.ml.modeling.pipeline import Pipeline as SFPipeline
+from snowflake.ml.modeling.preprocessing import (
+    OneHotEncoder as SFOneHotEncoder,
+    OrdinalEncoder as SFOrdinalEncoder,
+    StandardScaler as SFStandardScaler,
+)
+from snowflake.ml.modeling.linear_model import LogisticRegression as SFLogisticRegression
+
+sf_pipeline = SFPipeline(
+    steps=[
+        (
+            "ohe",
+            SFOneHotEncoder(
+                input_cols=["EVENT_TYPE", "PAYMENT_METHOD", "DEVICE_TYPE"],
+                output_cols=["EVENT_TYPE_OHE", "PAYMENT_METHOD_OHE", "DEVICE_TYPE_OHE"],
+                drop_input_cols=True,
+            ),
+        ),
+        (
+            "ord",
+            SFOrdinalEncoder(
+                input_cols=["SUBSCRIPTION_STATUS", "INCOME_BRACKET"],
+                output_cols=["SUBSCRIPTION_STATUS_ORD", "INCOME_BRACKET_ORD"],
+            ),
+        ),
+        (
+            "scale",
+            SFStandardScaler(
+                input_cols=["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"],
+                output_cols=["TOTAL_AMT_SCALED", "DURATION_SEC_SCALED", "ITEM_CNT_SCALED"],
+            ),
+        ),
+        (
+            "clf",
+            SFLogisticRegression(
+                input_cols=["EVENT_TYPE_OHE", "PAYMENT_METHOD_OHE", "DEVICE_TYPE_OHE",
+                            "SUBSCRIPTION_STATUS_ORD", "INCOME_BRACKET_ORD",
+                            "TOTAL_AMT_SCALED", "DURATION_SEC_SCALED", "ITEM_CNT_SCALED"],
+                label_cols=["IS_CONVERTED"],
+                max_iter=1000,
+            ),
+        ),
+    ]
+)
+
+sf_pipeline.fit(train_snowpark_df)
+```
+
+### Saving with Model Registry
 
 ```python
 from snowflake.ml.registry import Registry
 
-# Register model with preprocessing
 registry = Registry(session=session)
 
-# The model includes preprocessing transformations
+# Log the full sklearn pipeline (preprocessing + model) or the fitted estimator
 registry.log_model(
-    model=model,
-    model_name="churn_model",
-    version_name="v1",
-    # Preprocessing is embedded in model
+    model=full_pipeline,
+    model_name="session_conversion_model",
+    version_name="V01",
+    comment="Clickstream FEATURE_STORE_DEMO.FEATURE_STORE; sklearn preprocessing + classifier",
 )
 ```
 
 ---
 
-## Preprocessing Ownership & SLAs
+## Preprocessing Ownership & Tracking
 
-Define ownership for preprocessing transformations:
+Preprocessing transforms are persisted **inside** the logged model artifact (the sklearn pipeline or Snowflake ML pipeline). This means the Model Registry entry is the authoritative record of which transforms were applied and with which fitted parameters.
+
+If your team maintains a **YAML manifest** for Feature View ownership and SLAs (see [Chapter 04: Feature Views -- Ownership & SLAs](../04_feature_views/index.qmd#sec-ownership)), you can extend the same manifest to record which model consumes which Feature Views and what preprocessing is applied. This is purely a team convention for documentation and CI/CD -- Snowflake does not create or consume the file:
 
 ```yaml
-# preprocessing_manifest.yaml
-preprocessing:
-  - model: churn_model_v1
+# feature_manifest.yaml (extended with model preprocessing metadata)
+models:
+  - name: session_conversion_model
+    version: V01
     owner: ds-team@company.com
-    transformations:
+    source_feature_views:
+      - USER_ORDER_FV$V01
+      - USER_SESSION_DAILY_FV$V01
+    preprocessing:
       - type: OneHotEncoder
-        columns: [CATEGORY, REGION]
+        columns: [EVENT_TYPE, PAYMENT_METHOD, DEVICE_TYPE]
+      - type: OrdinalEncoder
+        columns: [SUBSCRIPTION_STATUS, INCOME_BRACKET]
       - type: StandardScaler
-        columns: [AMOUNT, QUANTITY]
-    validation:
-      - check: no_nulls_after_encoding
-      - check: scaled_values_bounded
+        columns: [TOTAL_AMT, DURATION_SEC, ITEM_CNT]
+```
+
+The actual fitted transform parameters (means, categories, etc.) live in the Model Registry artifact -- the manifest above is a human-readable summary for code review and deployment tracking.
+
+---
+
+## Cross-Validation with Preprocessing
+
+When using cross-validation, preprocessing must be fitted **only on the training fold** of each split to avoid data leakage. Wrapping preprocessing inside an sklearn `Pipeline` ensures this automatically -- `cross_val_score` and `GridSearchCV` call `fit` on each training fold and `transform` on each validation fold:
+
+```python
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.linear_model import LogisticRegression
+
+preprocess = ColumnTransformer([
+    ("scale", StandardScaler(), ["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]),
+    ("ohe", OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+     ["EVENT_TYPE", "PAYMENT_METHOD"]),
+])
+
+pipeline = Pipeline([
+    ("preprocess", preprocess),
+    ("clf", LogisticRegression(max_iter=1000)),
+])
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring="roc_auc")
+```
+
+### Cross-Validation Strategies
+
+| Strategy | `sklearn` class | When to use |
+|----------|----------------|-------------|
+| **K-Fold** | `KFold(n_splits=5)` | General purpose; good balance of bias and variance |
+| **Stratified K-Fold** | `StratifiedKFold(n_splits=5)` | Imbalanced classification (preserves class ratios) |
+| **Leave-One-Out (LOO)** | `LeaveOneOut()` | Very small datasets; expensive on large data |
+| **Group K-Fold** | `GroupKFold(n_splits=5)` | When rows share a group key (e.g. same `USER_ID`) that should not span train/validation |
+| **Time-Series Split** | `TimeSeriesSplit(n_splits=5)` | Ordered data where future must not leak into past |
+
+::: {.callout-important}
+**Never fit preprocessing outside the CV loop.** If you call `scaler.fit(X_all)` before splitting, every fold's validation set has already influenced the fitted parameters -- this inflates metrics and misrepresents generalisation performance. Always use `Pipeline` to keep fit and transform inside the loop.
+:::
+
+---
+
+## Sampling Strategies
+
+Feature Store datasets can be large. Efficient sampling reduces training time and cost while preserving statistical properties.
+
+### SQL Push-Down Sampling
+
+Push sampling into the SQL that retrieves data from the Feature Store. This avoids transferring the full dataset:
+
+```sql
+-- Random sample: ~10% of rows
+SELECT * FROM FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  SAMPLE (10);
+
+-- Deterministic sample using TABLESAMPLE with a seed
+SELECT * FROM FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  TABLESAMPLE BERNOULLI (10) SEED (42);
+```
+
+### Spine-Based Sampling
+
+When using `generate_dataset()` / `generate_training_set()`, the **spine** controls which entity-time combinations are included. Sampling the spine before passing it to `generate_dataset()` is the most natural way to limit training data, and has the added advantage of reducing the size of the ASOF join required to materialise the training dataset:
+
+```python
+spine_df = session.table("PREDICTION_SPINE")
+
+sampled_spine = spine_df.sample(frac=0.1, random_state=42)
+
+training_data = fs.generate_training_set(
+    spine_df=sampled_spine,
+    features=[user_order_fv, user_session_fv],
+    spine_timestamp_col="PREDICTION_TS",
+)
+```
+
+### Indicator Column Sampling
+
+Add a deterministic indicator column derived from an existing key so that downstream consumers can reproducibly select the same subset:
+
+```sql
+ALTER TABLE PREDICTION_SPINE ADD COLUMN SAMPLE_BUCKET INT
+  DEFAULT MOD(ABS(HASH(USER_ID)), 100);
+
+-- Training: buckets 0-79 (80%), Validation: 80-89, Test: 90-99
+SELECT * FROM PREDICTION_SPINE WHERE SAMPLE_BUCKET < 80;
+```
+
+This approach is reproducible, requires no random seed management, and works across SQL and Python consumers.
+
+### Stratified Sampling
+
+For imbalanced targets (e.g. low conversion rates in clickstream data), use stratified sampling to preserve class ratios:
+
+```python
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    features_df, labels, test_size=0.2, stratify=labels, random_state=42
+)
+```
+
+For stratified sampling in SQL, partition by the target and sample within each stratum:
+
+```sql
+SELECT * FROM (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY IS_CONVERTED ORDER BY RANDOM(42)) AS RN,
+           COUNT(*) OVER (PARTITION BY IS_CONVERTED) AS STRATUM_SIZE
+    FROM TRAINING_DATA
+)
+WHERE RN <= STRATUM_SIZE * 0.1;
 ```
 
 ---
@@ -195,29 +560,18 @@ preprocessing:
 ### 1. Fit on Training Data Only
 
 ```python
-# ✅ GOOD: Fit on training, transform both
-scaler.fit(train_df)
-train_scaled = scaler.transform(train_df)
-test_scaled = scaler.transform(test_df)
-
-# ❌ BAD: Fitting on test data (data leakage)
-scaler.fit(test_df)
+scaler.fit(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
+train_scaled = scaler.transform(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
+test_scaled = scaler.transform(test_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
 ```
 
 ### 2. Store Transformations with Model
 
-```python
-# Preprocessing becomes part of model artifact
-# Ensures consistency between training and inference
-```
+Log the full sklearn `Pipeline` (preprocessing + estimator) with `Registry.log_model()` so that the same fitted transforms are replayed at inference time automatically.
 
-### 3. Choose Right Transformation for Model
+### 3. Match Transformation to Model Requirements
 
-```python
-# Tree models: no scaling needed
-# Linear models: scaling important
-# Neural networks: both encoding and scaling
-```
+Tree-based models (XGBoost, Random Forest, LightGBM) do not require scaling. Linear models, SVMs, and neural networks benefit from normalised inputs. Choose accordingly to avoid unnecessary compute.
 
 ---
 
@@ -227,7 +581,7 @@ scaler.fit(test_df)
 
 **Problem**: Different preprocessing in training vs. inference.
 
-**Solution**: Use Pipeline and store with model.
+**Solution**: Use one sklearn `Pipeline` (or equivalent) and log it with `Registry.log_model()`.
 
 ### ❌ Pitfall 2: Fitting on Test Data
 
@@ -241,16 +595,29 @@ scaler.fit(test_df)
 
 **Solution**: Match transformation to model requirements.
 
+### ❌ Pitfall 4: Confusing the two `Pipeline` classes
+
+**Problem**: Importing or serializing the wrong `Pipeline` so steps or `fit` behavior do not match expectations.
+
+**Solution**: Know which `Pipeline` you are importing. `sklearn.pipeline.Pipeline` is local/single-node; `snowflake.ml.modeling.pipeline.Pipeline` is distributed/warehouse-executed. They have different APIs and serialisation formats.
+
 ---
 
 ## Summary
 
 | Transformation | Purpose | Store Location |
 |---------------|---------|----------------|
-| **OneHotEncoder** | Categorical → Binary | Model Registry |
-| **OrdinalEncoder** | Categorical → Integer | Model Registry |
-| **StandardScaler** | Normalize (z-score) | Model Registry |
-| **MinMaxScaler** | Scale to [0,1] | Model Registry |
+| **OneHotEncoder** | Categorical → binary columns (`_OHE`) | Model Registry (via logged sklearn pipeline) |
+| **OrdinalEncoder** | Ordered categorical → integer (`_ENCODED`) | Model Registry |
+| **LabelEncoder** | Target / single-column categorical → integer | Model Registry |
+| **StandardScaler** | Z-score normalisation (zero mean, unit variance) | Model Registry |
+| **MinMaxScaler** | Scale to [0, 1] (or custom range) | Model Registry |
+| **RobustScaler** | Median / IQR scaling (outlier-robust) | Model Registry |
+| **MaxAbsScaler** | Scale by max absolute value (preserves sparsity) | Model Registry |
+| **Normalizer** | Row-wise unit-norm scaling | Model Registry |
+| **Binarizer** | Threshold to 0 / 1 | Model Registry |
+| **KBinsDiscretizer** | Bin continuous → discrete intervals | Model Registry |
+| **PolynomialFeatures** | Polynomial and interaction terms | Model Registry |
 
 ---
 

@@ -5,80 +5,149 @@ subtitle: "Online Feature Tables for real-time serving"
 
 ## Overview
 
-Online Feature Tables (OFTs) enable low-latency feature serving for real-time ML inference. They sync the latest feature values from FeatureViews to Hybrid Tables optimized for point lookups.
+Online Feature Tables (OFTs) enable low-latency feature serving for real-time ML inference. Snowflake treats an OFT as a **first-class object**: internally, it combines a **Hybrid Table** for key-value lookups with **incremental refresh** driven by a **Stream** on the offline Feature View source and a **Task** that runs **MERGE** SQL into the Hybrid Table on a schedule controlled by **TARGET_LAG**.
+
+This chapter uses the **clickstream** sample model: database `FEATURE_STORE_DEMO`, source schema `CLICKSTREAM_DATA` (for example `ORDERS`, `USERS`, `SESSIONS`), Feature Store schema `FEATURE_STORE`, warehouse `FS_DEV_WH`. Feature View registrations use version strings in **`V01` format** (for example `version="V01"`).
+
+Official references: [CREATE ONLINE FEATURE TABLE](https://docs.snowflake.com/en/sql-reference/sql/create-online-feature-table), [Create and serve online features (Python)](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python).
 
 ## Learning Objectives
 
 After completing this chapter, you will be able to:
 
-- Create and configure Online Feature Tables
-- Serve features for real-time inference
-- Optimize OFT performance and costs
-- Integrate with external inference services
+- Explain how Stream, Task, Hybrid Table, and TARGET_LAG fit together in the OFT architecture
+- Enable online serving with `online_config` on a Feature View
+- Tune `target_lag` and reason about storage and compute costs
+- Handle multi-Feature-View online reads via pre-joined Feature Views or parallel retrieval
+- Plan latency budgets and troubleshoot latency volatility
+- Benchmark OFT performance correctly: warm-up, steady-state measurement, concurrent connections, and per-minute aggregates
+- Retrieve online features via the Feature Store Python API and integrate with serving layers
+- Evaluate when an external serving store is appropriate and understand the trade-offs
 
 ---
 
 ## What is an Online Feature Table?
 
-An Online Feature Table is a **Hybrid Table** that stores the **current (latest) values** for each entity, optimized for low-latency retrieval.
+An Online Feature Table is a managed object that exposes the **current (latest) values** per entity for low-latency retrieval. Physically, online serving uses a **Hybrid Table** keyed by your entity columns. Freshness from the **offline** Feature View (Dynamic Table or View) is maintained by:
+
+1. A **Stream** on that offline object, capturing new and changed rows.
+2. A **Task** that runs on an interval derived from **TARGET_LAG** (minimum **10 seconds**, maximum **8 days**).
+3. **MERGE** (or equivalent incremental logic) into the Hybrid Table so only deltas are applied when the Stream has data; when the Stream is empty, the Task can finish quickly with **minimal compute**.
 
 ::: {.callout-important}
 ## Key Concept
-OFTs store only the **latest feature values** - they do not retain historical values. For point-in-time historical retrieval, use standard FeatureViews.
+OFTs store only the **latest feature values** — they do not retain historical values. For point-in-time historical retrieval, use the offline Feature View and training APIs.
+:::
+
+::: {.callout-note}
+## TARGET_LAG vs offline `refresh_freq`
+`refresh_freq` on the Feature View controls how often the **offline** Dynamic Table (or related materialization) refreshes. `OnlineConfig.target_lag` controls how often the **online** sync Task runs. They are **independent**; end-to-end staleness is roughly the sum of both paths. See the [Python online features](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python) documentation.
 :::
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    ONLINE FEATURE TABLE ARCHITECTURE                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  FeatureView (Dynamic Table)          Online Feature Table              │
-│  ┌─────────────────────────┐          ┌─────────────────────────┐       │
-│  │ Historical Data         │          │ Current Values Only     │       │
-│  │ ───────────────────     │   SYNC   │ ────────────────────    │       │
-│  │ USER_ID │ TS      │ ... │ ───────▶ │ USER_ID │ LATEST_VALUE  │       │
-│  │ u001    │ Jan 10  │ 100 │          │ u001    │ 300           │       │
-│  │ u001    │ Jan 15  │ 200 │          │ u002    │ 150           │       │
-│  │ u001    │ Jan 20  │ 300 │          │ ...     │ ...           │       │
-│  │ u002    │ Jan 12  │ 50  │          └─────────────────────────┘       │
-│  │ u002    │ Jan 18  │ 150 │                                            │
-│  └─────────────────────────┘          Low-latency reads (Hybrid Table)  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                 ONLINE FEATURE TABLE (OFT) — INTERNAL VIEW                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│   Offline Feature View              Stream  +  Task (TARGET_LAG)           │
+│   (Dynamic Table or View)      ──────────▶  MERGE into Hybrid Table        │
+│   ┌─────────────────────────┐         │                                    │
+│   │ e.g. USER order stats   │         └──▶ ┌──────────────────────────┐    │
+│   │ from CLICKSTREAM_DATA   │              │ Hybrid Table             │    │
+│   │ .ORDERS                 │              │ (latest row per key)     │    │
+│   └─────────────────────────┘              │ USER_ID │ features…      │    │
+│                                            └──────────────────────────┘    │
+│                                            Low-latency reads               │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Creating Online Feature Tables
 
-### Enable Online Serving for a FeatureView
+### Enable online serving with `online_config`
+
+Enable online features on the **Feature View** using `online_config`. Earlier API versions used helpers such as `with_online_enabled()`, which are now **deprecated** — use `OnlineConfig` instead.
 
 > 📁 **Full code:** [`_code/online_feature_tables.py`](_code/online_feature_tables.py)
 
 ```python
-from snowflake.ml.feature_store import FeatureStore, FeatureView
+from snowflake.snowpark import Session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+from snowflake.ml.feature_store import feature_view
 
-# Register FeatureView with online serving enabled
-fv = fs.register_feature_view(
-    feature_view=user_purchase_fv,
-    version="V1",
+session = Session.builder.configs(...).create()
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    schema="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
 )
 
-# Create Online Feature Table from FeatureView
-fs.create_online_feature_table(
-    feature_view=fv,
-    warehouse="OFT_REFRESH_WH",
+user_entity = Entity(name="USER", join_keys=["USER_ID"])
+
+feature_df = session.sql("""
+    SELECT
+        USER_ID,
+        SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) AS ORDER_CNT,
+        AVG(TOTAL_AMT) AS ORDER_TOTAL_AMT_AVG,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID
+""")
+
+online_config = feature_view.OnlineConfig(
+    enable=True,
+    target_lag="1 minute",
 )
+
+fv = FeatureView(
+    name="USER_ORDER_ONLINE_FV",
+    entities=[user_entity],
+    feature_df=feature_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 minute",
+    refresh_mode="AUTO",
+    desc="USER order aggregates from CLICKSTREAM_DATA.ORDERS; online + offline",
+    online_config=online_config,
+)
+
+fv = fs.register_feature_view(feature_view=fv, version="V01")
 ```
 
-### Configure Refresh Frequency
+Snowflake creates and wires the OFT infrastructure (Hybrid Table, Stream, Task) as part of serving enablement; **TARGET_LAG** in SQL corresponds to **`OnlineConfig.target_lag`** in Python.
+
+::: {.callout-note}
+**Initial OFT population**: When online serving is first enabled the OFT must be **fully populated** -- one row per entity key present in the source table. This initial load may take noticeably longer than subsequent refreshes, especially for large entity cardinalities. Once the initial population completes, incremental refreshes process only changed rows and should be fast, though throughput still depends on the update frequency and rate of feature-value changes in the source.
+:::
+
+### SQL equivalent (illustrative)
+
+For visibility into the object model, the SQL shape mirrors [CREATE ONLINE FEATURE TABLE](https://docs.snowflake.com/en/sql-reference/sql/create-online-feature-table):
+
+```sql
+CREATE OR REPLACE ONLINE FEATURE TABLE FEATURE_STORE_DEMO.FEATURE_STORE.USER_ORDER_ONLINE_OFT
+  PRIMARY KEY (USER_ID)
+  TIMESTAMP_COLUMN = LAST_ORDER_TS
+  TARGET_LAG = '1 minute'
+  WAREHOUSE = FS_DEV_WH
+  REFRESH_MODE = AUTO
+FROM FEATURE_STORE_DEMO.FEATURE_STORE.<your_offline_dynamic_table_or_view>;
+```
+
+(The Python API typically manages object names and wiring when you register the Feature View with `online_config`.)
+
+### Adding online serving to an existing Feature View
+
+If a Feature View was originally registered **without** online serving, you can enable it after the fact. The Feature Store will create the OFT infrastructure (Hybrid Table, Stream, Task) for the existing offline Feature View:
 
 ```python
-# Configure how often OFT syncs from FeatureView
-fs.create_online_feature_table(
-    feature_view=fv,
-    warehouse="OFT_REFRESH_WH",
-    refresh_freq="5 minutes",  # Sync every 5 minutes
+fs.update_feature_view(
+    name="USER_ORDER_ONLINE_FV",
+    version="V01",
+    online_config=feature_view.OnlineConfig(enable=True, target_lag="30 seconds"),
 )
 ```
 
@@ -86,141 +155,396 @@ fs.create_online_feature_table(
 
 ## Retrieving Online Features
 
-### Single Entity Lookup
+Use `read_feature_view` with `store_type=StoreType.ONLINE` and explicit feature names. Keys are provided as a list of key tuples (one per lookup row).
 
 ```python
-# Get features for a single entity
-features = fs.get_online_features(
+from snowflake.ml.feature_store import StoreType
+
+features = fs.read_feature_view(
     feature_view=fv,
-    entity_rows=[{"USER_ID": "usr_001"}],
-)
-
-# Returns DataFrame with latest feature values
-print(features.to_pandas())
-```
-
-### Batch Online Lookup
-
-```python
-# Get features for multiple entities
-entity_rows = [
-    {"USER_ID": "usr_001"},
-    {"USER_ID": "usr_002"},
-    {"USER_ID": "usr_003"},
-]
-
-features = fs.get_online_features(
-    feature_view=fv,
-    entity_rows=entity_rows,
+    keys=[["user_001"], ["user_002"]],
+    feature_names=[
+        "ORDER_TOTAL_AMT_SUM",
+        "ORDER_CNT",
+        "ORDER_TOTAL_AMT_AVG",
+        "LAST_ORDER_TS",
+    ],
+    store_type=StoreType.ONLINE,
 )
 ```
 
+For a single entity, pass one inner list, for example `keys=[["user_001"]]`.
+
 ---
 
-## Performance Tuning
+## Cost estimation (qualitative)
 
-### Optimize `get_online_features`
+Online Feature Tables draw cost from **storage**, **refresh compute**, and **serving compute**. Treat the following as planning heuristics; use [account usage views](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python) and your warehouse size for real numbers.
+
+| Area | Driver | Qualitative notes |
+|------|--------|-------------------|
+| **Hybrid Table storage** | Entity count × feature columns × row width | Scales with distinct keys you serve and column footprint; Hybrid Table storage is priced per GB (higher than standard table storage). |
+| **Refresh compute** | `target_lag` cadence × MERGE work | The Task runs on the TARGET_LAG schedule; **incremental** refresh (Stream with new rows) is usually cheap. If the Stream has **no** pending data, runs can be very light. |
+| **Offline refresh** | Feature View `refresh_freq` | Separate from online `target_lag`; both contribute to how stale features can be. |
+| **Online reads** | Lookup volume × warehouse | Each `read_feature_view(..., ONLINE)` uses warehouse resources; larger warehouses cost more per time. (Check current Snowflake pricing notes for Hybrid Table request metering.) |
+
+**Tips:** Prefer **AUTO** or **INCREMENTAL** refresh where supported, right-size **TARGET_LAG** to the business SLA, and avoid setting online sync tighter than your offline Feature View can actually refresh.
+
+---
+
+## Multi-Feature-View Online Reads {#sec-multi-fv-online}
+
+### The limitation
+
+Offline APIs (`generate_dataset`, `generate_training_set`, `retrieve_feature_values`) accept a **list** of Feature Views and join them automatically. The online API -- `read_feature_view(..., StoreType.ONLINE)` -- currently accepts **one Feature View per call**. Real-time use cases such as recommenders often need features from multiple entities (e.g., user, item, user-item interaction) in a single request.
+
+### Solution A: Pre-joined Feature View (preferred)
+
+If the entity keys allow it, create a **combined Dynamic Table** that pre-joins the required Feature Views into a single record, then derive the OFT from that combined Feature View. This pushes the join into the materialisation layer so the online read is a single point lookup:
 
 ```python
-# Use batch lookups instead of individual calls
-# ❌ BAD: Multiple individual calls
-for user_id in user_ids:
-    fs.get_online_features(fv, [{"USER_ID": user_id}])
+combined_df = session.sql("""
+    SELECT
+        ui.USER_ID,
+        ui.LISTING_ID,
+        u.ORDER_TOTAL_AMT_SUM,
+        u.ORDER_CNT,
+        l.LISTING_PRICE,
+        l.LISTING_AGE_DAYS,
+        ui.VIEW_CNT,
+        ui.LAST_INTERACTION_TS AS FV_TS
+    FROM FEATURE_STORE_DEMO.FEATURE_STORE."USER_LISTING_INTERACTION_FV$V01" ui
+    JOIN FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"              u  ON u.USER_ID = ui.USER_ID
+    JOIN FEATURE_STORE_DEMO.FEATURE_STORE."LISTING_FV$V01"                 l  ON l.LISTING_ID = ui.LISTING_ID
+""")
 
-# ✅ GOOD: Single batch call
-fs.get_online_features(fv, [{"USER_ID": uid} for uid in user_ids])
+user_listing_entity = Entity(
+    name="USER_LISTING", join_keys=["USER_ID", "LISTING_ID"],
+)
+
+combined_fv = FeatureView(
+    name="RECO_COMBINED_ONLINE_FV",
+    entities=[user_listing_entity],
+    feature_df=combined_df,
+    timestamp_col="FV_TS",
+    refresh_freq="1 minute",
+    online_config=feature_view.OnlineConfig(enable=True, target_lag="1 minute"),
+    desc="Pre-joined user + listing + interaction features for online recommender scoring",
+)
+combined_fv = fs.register_feature_view(feature_view=combined_fv, version="V01")
 ```
 
-### `refresh_freq` Considerations
+A single `read_feature_view` call now returns all features:
 
-| refresh_freq | Latency | Cost | Use Case |
-|--------------|---------|------|----------|
-| `1 minute` | Very low | High | Real-time fraud |
-| `5 minutes` | Low | Medium | Recommendations |
-| `15 minutes` | Moderate | Low | Personalization |
-| `1 hour` | Higher | Minimal | Batch-like serving |
+```python
+features = fs.read_feature_view(
+    feature_view=combined_fv,
+    keys=[["user_001", "listing_042"]],
+    feature_names=[...],
+    store_type=StoreType.ONLINE,
+)
+```
+
+::: {.callout-warning}
+**Cardinality trade-off**: Pre-joining inflates the OFT to the cardinality of the most granular key combination (e.g., user × listing). For high-cardinality interaction pairs (tens of millions of rows) this increases Hybrid Table storage, initial population time, and MERGE refresh cost. Evaluate whether the cardinality is manageable before choosing this approach -- see [High-cardinality OFTs](#sec-high-cardinality) below.
+:::
+
+### Solution B: Parallel reads with merging (fallback)
+
+When pre-joining is not feasible (e.g., cardinality is too high, or the Feature Views have incompatible refresh cadences), issue reads in parallel and merge in the application layer:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+import pandas as pd
+
+def read_online(fv, keys, feature_names):
+    return fs.read_feature_view(
+        feature_view=fv, keys=keys,
+        feature_names=feature_names, store_type=StoreType.ONLINE,
+    ).to_pandas()
+
+with ThreadPoolExecutor(max_workers=3) as pool:
+    fut_user    = pool.submit(read_online, user_fv,        [["user_001"]], USER_FEATURES)
+    fut_listing = pool.submit(read_online, listing_fv,     [["listing_042"]], LISTING_FEATURES)
+    fut_inter   = pool.submit(read_online, interaction_fv, [["user_001", "listing_042"]], INTER_FEATURES)
+
+user_df    = fut_user.result()
+listing_df = fut_listing.result()
+inter_df   = fut_inter.result()
+
+merged = pd.concat([user_df, listing_df, inter_df], axis=1)
+```
+
+Wall-clock latency is dominated by the **slowest** of the parallel calls rather than the sum. This approach avoids the cardinality explosion of Solution A but adds application-side complexity and requires manual result alignment.
 
 ---
 
-## Integration with External Services
+## Latency Budget Planning {#sec-latency-budget}
 
-### FastAPI Example
+Before deploying online features, establish a **latency budget** that allocates time across every component of the inference endpoint. Work backwards from the user-facing SLA:
+
+| Component | Typical range | Notes |
+|-----------|--------------|-------|
+| **Network (client → Snowflake)** | 5-30 ms | Dominated by region distance; co-locate where possible |
+| **Feature serving (OFT read)** | 10-50 ms (warm, low QPS) | Varies with row width, key count, and warehouse state |
+| **Model inference** | 5-50 ms | Depends on model complexity and serving framework |
+| **Application overhead** | 5-20 ms | Serialisation, result merging, logging |
+| **Total endpoint** | 25-150 ms | Sum of the above |
+
+**Worked example**: A recommender has a 100 ms end-to-end budget. Model inference takes 30 ms and application overhead is 10 ms, leaving **60 ms for feature serving + network**. If network round-trip is 15 ms, the OFT read must complete in under **45 ms** -- achievable for a single batched lookup on a warm warehouse, but tight if multiple sequential FV reads are required (prefer the pre-joined pattern above).
+
+::: {.callout-tip}
+If the latency budget leaves less than ~30 ms for feature serving, consider the [pre-joined Feature View](#sec-multi-fv-online) pattern to reduce the number of round trips, or the [external serving store](#sec-external-serving) pattern for sub-10 ms requirements.
+:::
+
+---
+
+## Performance Tuning and Benchmarking
+
+### Warm-Up Behaviour
+
+OFTs (backed by Hybrid Tables) require a number of queries to **warm up** before reaching steady-state optimal response times. The initial queries populate internal caches (data pages, metadata, connection pools) and will show higher latency than the system achieves once warmed.
+
+::: {.callout-important}
+## Always warm up before measuring
+
+Do not draw conclusions from the first few hundred queries. Run at least several minutes of sustained traffic at your expected QPS before recording latency measurements. Early cold-start results are not representative of production performance.
+:::
+
+### Benchmarking Guidelines
+
+| Guideline | Detail |
+|-----------|--------|
+| **Run duration** | Sustain the test for long enough to reach steady state (minimum 5-10 minutes at target QPS). Short bursts capture warm-up noise, not true throughput. |
+| **Measure per-minute aggregates** | Report P50, P95, P99 latency aggregated per minute. Avoid reporting single-query or first-query latencies as representative. |
+| **Use concurrent connections** | A single serial connection under-utilises the warehouse. Launch multiple concurrent client connections (threads / async) to saturate the target QPS. |
+| **Match expected workload** | Set QPS, key batch sizes, and feature column counts to match your production profile. Results from a 1 QPS test do not predict 1000 QPS behaviour. |
+| **Account for network latency** | Measure round-trip time from the client to your Snowflake account region. If the client is in a different region or on-premises, network latency dominates at low query times. Co-locate clients with the Snowflake account where possible. |
+
+### Batch Key Lookups
+
+Pre-batching entity keys into a single request reduces round trips and amortises connection overhead:
+
+```python
+# ❌ BAD: one round-trip per user — N queries for N users
+for uid in user_ids:
+    fs.read_feature_view(
+        feature_view=fv,
+        keys=[[uid]],
+        feature_names=FEATURE_NAMES,
+        store_type=StoreType.ONLINE,
+    )
+
+# ✅ GOOD: one batched call — 1 query for N users
+fs.read_feature_view(
+    feature_view=fv,
+    keys=[[uid] for uid in user_ids],
+    feature_names=FEATURE_NAMES,
+    store_type=StoreType.ONLINE,
+)
+```
+
+::: {.callout-tip}
+**Large key sets**: OFTs are optimised for serving a modest number of key-based lookups (tens to low hundreds per call). If you need to look up thousands of entity keys at once (e.g., for batch scoring), it is typically faster to query the **offline** Feature View directly -- the columnar scan of a Dynamic Table handles large result sets more efficiently than many point lookups against a Hybrid Table.
+:::
+
+### Parameter Binding
+
+When issuing online lookups via raw SQL (outside the Feature Store API), use **bind variables** rather than string interpolation. This enables Snowflake to cache and reuse query plans, improving throughput under high QPS:
+
+```python
+# ✅ GOOD: parameterised query — plan reuse
+session.sql(
+    "SELECT * FROM FEATURE_STORE.USER_ORDER_ONLINE_OFT WHERE USER_ID = ?",
+    params=["user_001"],
+).collect()
+
+# ❌ BAD: string interpolation — new plan per unique value
+session.sql(
+    f"SELECT * FROM FEATURE_STORE.USER_ORDER_ONLINE_OFT WHERE USER_ID = 'user_001'"
+).collect()
+```
+
+### Warehouse Sizing and Multi-Cluster
+
+For single-user or low-QPS testing, an **XS** warehouse is sufficient. For production workloads with high concurrency:
+
+- Use **Standard** warehouse type. **Snowpark-optimized** warehouses provide extra memory for UDF/UDTF workloads but add no benefit for Hybrid Table point lookups -- they cost more per credit and can exhibit higher latency variance for OFT reads.
+- **Multi-cluster warehouses** (auto-scaling) allow Snowflake to spin up additional clusters to handle concurrent query load. Set `MIN_CLUSTER_COUNT` and `MAX_CLUSTER_COUNT` based on your **typical and peak QPS**.
+- Scale using multiples of **XS warehouses** -- an XS cluster handles a bounded number of concurrent queries efficiently. Adding more clusters is generally more cost-effective than scaling up to a larger warehouse size; if P99 latency rises under load, add clusters first.
+- The **refresh Task** (MERGE into the Hybrid Table) and **online reads** share the warehouse. If refresh compute contends with read latency, consider separate warehouses for refresh vs. serving.
+
+### `target_lag` Trade-Offs (Online Sync)
+
+| `target_lag` (examples) | Freshness | Relative refresh cost | Typical use |
+|-------------------------|-----------|------------------------|-------------|
+| `10 seconds` … `1 minute` | Tightest | Higher Task frequency | Fraud, real-time guards |
+| `1 minute` … `5 minutes` | Low | Moderate | Recommendations, ranking |
+| `15 minutes` … `1 hour` | Relaxed | Lower | Marketing, less critical paths |
+
+Match **offline** `refresh_freq` to upstream **CLICKSTREAM_DATA** landing latency so online sync is not chasing data that does not exist yet.
+
+### High-Cardinality OFTs {#sec-high-cardinality}
+
+OFT row count directly affects **initial population time**, **MERGE refresh cost**, and **Hybrid Table storage**. Guidelines:
+
+| Entity cardinality | Expected behaviour |
+|---|---|
+| **< 1 M rows** | Fast initial load, lightweight incremental refreshes. Standard operating range. |
+| **1-10 M rows** | Initial population may take minutes; incremental refresh is still efficient if change rate is low. |
+| **10-100 M+ rows** | Initial population can be significant; MERGE cost per refresh cycle grows. Hybrid Table storage costs increase. Monitor refresh history and consider whether the offline Feature View + batch scoring is more appropriate. |
+
+Compound entity keys (e.g., `USER_ID × LISTING_ID`) can produce **cross-product cardinalities** that are orders of magnitude larger than individual entities. Before enabling online serving on high-cardinality interaction Feature Views, estimate the OFT row count and evaluate:
+
+- **Is the full cross-product actually queried online?** If only a subset of entity pairs is active, consider filtering to recently active combinations.
+- **Would the [pre-joined Feature View](#sec-multi-fv-online) pattern work instead?** Pre-joining avoids the interaction OFT entirely if user and listing features can be fetched separately and combined in the application.
+- **Is an [external serving store](#sec-external-serving) more appropriate?** For tens of millions of rows with sub-20 ms latency requirements, a dedicated key-value store may be a better fit.
+
+### Latency Volatility Troubleshooting
+
+If OFT read latency is **volatile** (e.g., 100-400 ms swings) after warm-up, investigate the following:
+
+| Check | Action |
+|-------|--------|
+| **MERGE contention** | The refresh Task running MERGE into the Hybrid Table can contend with concurrent reads. Check `ONLINE_FEATURE_STORE_HISTORY()` for refresh timing overlap with latency spikes. Separate refresh and read warehouses if contention is confirmed. |
+| **Warehouse type** | Snowpark-optimized warehouses can show higher variance for point lookups. Switch to a **Standard** warehouse. |
+| **Warehouse suspension** | If the warehouse auto-suspends between requests, the next query incurs resume latency. Set `AUTO_SUSPEND` high enough (or disable suspension) for latency-sensitive serving. |
+| **Connection pooling** | Creating a new Snowflake session per request adds significant overhead. Reuse sessions / connection pools in your serving application. |
+| **Row width** | Very wide rows (hundreds of columns) increase per-read data transfer. Use `feature_names` to request only the columns needed, or consider the bundled OBJECT pattern ([Ch12](../12_advanced_patterns/index.qmd)). |
+| **Network jitter** | Cross-region or on-premises clients see variable network latency. Co-locate clients with the Snowflake account region. |
+
+### Performance Checklist
+
+- [ ] Warm up the OFT with sustained traffic before recording metrics
+- [ ] Use a **Standard** (not Snowpark-optimized) warehouse for serving
+- [ ] Use multiple concurrent client connections to reach target QPS
+- [ ] Batch entity keys into single `read_feature_view` calls where possible
+- [ ] Use parameter binding for raw SQL lookups
+- [ ] Measure P50/P95/P99 per minute, not individual query latencies
+- [ ] Consider multi-cluster warehouse for high-concurrency production serving
+- [ ] Separate refresh and read warehouses if MERGE contention affects read latency
+- [ ] Co-locate client and Snowflake account in the same cloud region
+- [ ] Reuse Snowflake sessions / connection pools -- do not create a new session per request
+
+---
+
+## Integration with external services
+
+### FastAPI example
 
 > 📁 **Full code:** [`_code/fastapi_serving.py`](_code/fastapi_serving.py)
 
 ```python
 from fastapi import FastAPI
-from snowflake.ml.feature_store import FeatureStore
+from snowflake.ml.feature_store import FeatureStore, StoreType
 
 app = FastAPI()
 
+FEATURE_NAMES = [
+    "ORDER_TOTAL_AMT_SUM",
+    "ORDER_CNT",
+    "ORDER_TOTAL_AMT_AVG",
+    "LAST_ORDER_TS",
+]
+
 @app.post("/features")
 async def get_features(user_id: str):
-    """Get features for a user."""
-    features = fs.get_online_features(
-        feature_view=user_fv,
-        entity_rows=[{"USER_ID": user_id}],
+    """Latest USER order features from the OFT."""
+    features = fs.read_feature_view(
+        feature_view=user_order_fv,
+        keys=[[user_id]],
+        feature_names=FEATURE_NAMES,
+        store_type=StoreType.ONLINE,
     )
     return features.to_pandas().to_dict(orient="records")[0]
 ```
 
----
+### External serving store fallback {#sec-external-serving}
 
-## Best Practices
+Some use cases have **sub-20 ms** latency requirements that exceed what Hybrid Table-backed OFTs can consistently deliver today. When native OFT latency does not meet the SLA, teams sometimes replicate features to an **external key-value store** (e.g., Redis, PostgreSQL, DynamoDB) for serving.
 
-### 1. Right-Size Refresh Frequency
+**Pattern**: Keep the Feature Store as the **system of record** for feature definitions, lineage, and offline retrieval. Use a CDC (change data capture) or scheduled sync tool to replicate the OFT or offline Feature View to the external store:
 
-Match OFT refresh to business requirements:
-
-```python
-# Fraud detection: needs freshest data
-fraud_oft_refresh = "1 minute"
-
-# Recommendations: can tolerate some lag
-reco_oft_refresh = "15 minutes"
+```
+Feature Store (offline FV / DT)
+    │
+    ├──▶ OFT (Hybrid Table)              ← used for moderate-latency serving
+    │
+    └──▶ CDC / sync tool (e.g., Hightouch, Fivetran, Airbyte, custom Task)
+              │
+              └──▶ External store (Redis / PostgreSQL / DynamoDB)
+                        ← ultra-low-latency serving
 ```
 
-### 2. Monitor OFT Health
+**Trade-offs:**
+
+| Factor | OFT (native) | External store |
+|--------|-------------|---------------|
+| **Latency** | 10-100 ms (warm, standard WH) | 1-20 ms (depending on store) |
+| **Operational overhead** | Fully managed by Snowflake | CDC pipeline to maintain: column/type mapping, schema evolution, monitoring |
+| **Data consistency** | Single source of truth | Eventual consistency with sync delay |
+| **Cost** | Warehouse credits (serving + refresh) | External store infrastructure + sync tool licensing |
+| **Schema changes** | Handled via FV versioning | Require manual pipeline updates; breaking changes risk sync failures |
+
+::: {.callout-tip}
+Treat an external serving store as a **temporary optimisation** rather than the long-term architecture. Snowflake's online serving capabilities are actively evolving; as latency improves (e.g., through future Postgres-backed OFTs or other enhancements), plan to consolidate back to native serving to eliminate the CDC maintenance burden.
+:::
+
+---
+
+## Best practices
+
+### 1. Right-size `target_lag`
+
+```python
+# Tight online sync for high-stakes scoring
+fraud_online = feature_view.OnlineConfig(enable=True, target_lag="30 seconds")
+
+# Relaxed sync where minutes of lag are acceptable
+reco_online = feature_view.OnlineConfig(enable=True, target_lag="5 minutes")
+```
+
+### 2. Monitor OFT health
 
 ```sql
--- Check OFT sync status
+-- Refresh / sync history (names may vary by release; use INFORMATION_SCHEMA as documented for your account)
 SELECT *
 FROM TABLE(INFORMATION_SCHEMA.ONLINE_FEATURE_STORE_HISTORY())
 ORDER BY SYNC_START_TIME DESC
 LIMIT 10;
 ```
 
-### 3. Use Dedicated Warehouse
+### 3. Use a serving warehouse appropriately
 
-```python
-# Dedicated warehouse for OFT refresh
-fs.create_online_feature_table(
-    feature_view=fv,
-    warehouse="OFT_REFRESH_WH",  # Separate from query workloads
-)
-```
+Run Feature Store sessions used for **online** reads on a warehouse sized for **latency and concurrency** (often `FS_DEV_WH` in development, a dedicated production warehouse in real deployments). The **TARGET_LAG** Task uses the warehouse you configure on the OFT / Feature Store setup.
 
 ---
 
-## Common Pitfalls
+## Common pitfalls
 
-### ❌ Pitfall 1: Expecting Historical Data
+### ❌ Pitfall 1: Expecting historical data
 
-**Problem**: OFTs only store current values, not history.
+**Problem:** OFTs only store current values, not history.
 
-**Solution**: Use standard FeatureView for historical/PIT retrieval.
+**Solution:** Use offline Feature Views and temporal retrieval for training and PIT correctness.
 
-### ❌ Pitfall 2: Over-Refreshing
+### ❌ Pitfall 2: Ignoring `refresh_freq` while tuning `target_lag`
 
-**Problem**: Very frequent refresh without business need.
+**Problem:** Setting `target_lag="10s"` while the offline Dynamic Table refreshes hourly.
 
-**Solution**: Balance freshness vs. cost based on requirements.
+**Solution:** Align offline refresh, source data latency, and `target_lag` so expectations match reality.
 
-### ❌ Pitfall 3: Individual Lookups
+### ❌ Pitfall 3: Per-entity API chatter
 
-**Problem**: Calling `get_online_features` once per entity.
+**Problem:** Calling `read_feature_view` once per key in a tight loop.
 
-**Solution**: Batch multiple entities in single call.
+**Solution:** Batch keys in one `keys=[...]` list.
+
+### ❌ Pitfall 4: Using deprecated online enablement APIs
+
+**Problem:** Code or docs that call `with_online_enabled()` or assume a separate `create_online_feature_table` Python flow as the only path.
+
+**Solution:** Use `online_config=feature_view.OnlineConfig(...)` on the Feature View (or `update_feature_view`).
 
 ---
 
@@ -228,10 +552,18 @@ fs.create_online_feature_table(
 
 | Concept | Description |
 |---------|-------------|
-| **Online Feature Table** | Hybrid Table with latest feature values |
-| **refresh_freq** | How often OFT syncs from FeatureView |
-| `get_online_features` | Low-latency feature retrieval |
-| **Current values only** | No historical data in OFT |
+| **Online Feature Table** | First-class object: Hybrid Table + Stream on offline FV + Task (MERGE), driven by **TARGET_LAG** |
+| **`OnlineConfig.target_lag`** | Python knob for maximum lag of online table behind source (10s–8d); Task frequency |
+| **`refresh_freq`** (Feature View) | Offline Dynamic Table refresh; independent of `target_lag` |
+| **`read_feature_view(..., StoreType.ONLINE)`** | Low-latency retrieval of latest values; currently single-FV per call |
+| **Multi-FV online reads** | Pre-join into a combined FV (preferred) or use parallel reads with `ThreadPoolExecutor` |
+| **Latency budget** | Plan end-to-end: network + feature serving + model inference + application overhead |
+| **Warehouse type** | Use **Standard** warehouses for OFT serving; Snowpark-optimized adds no benefit for point lookups |
+| **High-cardinality OFTs** | Compound-key entities can explode row count; evaluate cardinality before enabling online serving |
+| **Warm-up** | OFTs require sustained queries to reach steady-state latency; always warm up before benchmarking |
+| **Benchmarking** | Concurrent connections, key batching, parameter binding, per-minute P50/P95/P99, multi-cluster WH for high QPS |
+| **External serving store** | Fallback for sub-20 ms requirements; CDC to Redis/Postgres/DynamoDB with Feature Store as system of record |
+| **Current values only** | No historical timeline in the OFT |
 
 ---
 

@@ -119,9 +119,9 @@ pip install streamlit pandas
 | `SNOWFLAKE_ACCOUNT` | Snowflake account (if not using named connection) | - |
 | `SNOWFLAKE_USER` | Snowflake username | - |
 | `SNOWFLAKE_PASSWORD` | Snowflake password | - |
-| `SNOWFLAKE_WAREHOUSE` | Warehouse name | `COMPUTE_WH` |
-| `SNOWFLAKE_DATABASE` | Database name | `FEATURE_STORE_GUIDE` |
-| `SNOWFLAKE_SCHEMA` | Schema name | `CLICKSTREAM_RAW` |
+| `SNOWFLAKE_WAREHOUSE` | Warehouse name | `FS_DEV_WH` |
+| `SNOWFLAKE_DATABASE` | Database name | `FEATURE_STORE_DEMO` |
+| `SNOWFLAKE_SCHEMA` | Schema name | `CLICKSTREAM_DATA` |
 
 ### Named Connection (Recommended)
 
@@ -132,8 +132,9 @@ Create `~/.snowflake/connections.toml`:
 account = "your_account"
 user = "your_user"
 password = "your_password"
-warehouse = "COMPUTE_WH"
-database = "FEATURE_STORE_GUIDE"
+warehouse = "FS_DEV_WH"
+database = "FEATURE_STORE_DEMO"
+role = "FS_ADMIN_ROLE"
 ```
 
 Then:

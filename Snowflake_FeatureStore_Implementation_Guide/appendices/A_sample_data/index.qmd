@@ -1,5 +1,5 @@
 ---
-title: "Appendix A: Sample Data"
+title: "Sample Data"
 subtitle: "Clickstream dataset generator and public ML datasets"
 ---
 
@@ -9,6 +9,20 @@ This appendix documents the sample data used throughout the Feature Store Implem
 
 1. **Clickstream Dataset** - A synthetic e-commerce dataset generated specifically for this guide
 2. **Public ML Datasets** - Standard datasets (Iris, Titanic, etc.) for simple examples
+
+::: {.callout-tip}
+## Recommended: Streamlit Data Manager
+
+For first-time setup and interactive data management, we recommend using the **Streamlit Data Manager** app. It provides a visual interface for all data operations with guided workflows.
+
+```bash
+cd data_manager/
+export SNOWFLAKE_CONNECTION_NAME=your_connection
+streamlit run app.py
+```
+
+**[📖 Full Streamlit App Documentation →](data_manager/streamlit_app.qmd)**
+:::
 
 ## Clickstream Dataset
 
@@ -38,6 +52,8 @@ The UI provides:
 - 🌿 **Development Branch** - Create sampled dev environments
 - 📚 **Public Datasets** - Load standard ML datasets
 - 📈 **Monitoring** - Track task and DT executions
+
+**[See detailed walkthrough with screenshots →](data_manager/streamlit_app.qmd)**
 
 ## CLI Tools
 
@@ -85,18 +101,18 @@ If you have an existing database and just need to create schemas and tables:
 |-----------|--------|---------|
 | `USAGE` | Warehouse | Execute queries |
 | `USAGE` | Database | Access the database |
-| `CREATE SCHEMA` | Database | Create CLICKSTREAM_RAW schema |
+| `CREATE SCHEMA` | Database | Create CLICKSTREAM_DATA schema |
 | `CREATE TABLE` | Schema | Create data tables |
 | `CREATE STAGE` | Schema | Upload Parquet files (bulk load) |
 
 ```sql
--- Grant minimum privileges to a role
-GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE my_role;
-GRANT USAGE ON DATABASE my_database TO ROLE my_role;
-GRANT CREATE SCHEMA ON DATABASE my_database TO ROLE my_role;
+-- Grant minimum privileges to a role (canonical guide names shown)
+GRANT USAGE ON WAREHOUSE FS_DEV_WH TO ROLE my_role;
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO ROLE my_role;
+GRANT CREATE SCHEMA ON DATABASE FEATURE_STORE_DEMO TO ROLE my_role;
 
 -- After schema creation, grant table privileges
-GRANT ALL ON SCHEMA my_database.clickstream_raw TO ROLE my_role;
+GRANT ALL ON SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_DATA TO ROLE my_role;
 ```
 
 #### Full Setup (Creating New Database)
@@ -105,13 +121,13 @@ For the complete setup including database creation:
 
 | Privilege | Object | Purpose |
 |-----------|--------|---------|
-| `CREATE DATABASE` | Account | Create FEATURE_STORE_GUIDE database |
+| `CREATE DATABASE` | Account | Create FEATURE_STORE_DEMO database |
 | `USAGE` | Warehouse | Execute queries |
 
 ```sql
 -- Grant full setup privileges
 GRANT CREATE DATABASE ON ACCOUNT TO ROLE my_role;
-GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE my_role;
+GRANT USAGE ON WAREHOUSE FS_DEV_WH TO ROLE my_role;
 ```
 
 #### Incremental Generator (Additional)
@@ -125,9 +141,9 @@ To deploy and run the Snowflake-native incremental generator:
 | `EXECUTE TASK` | Account | Allow task execution |
 
 ```sql
--- Grant incremental generator privileges
-GRANT CREATE PROCEDURE ON SCHEMA clickstream_admin TO ROLE my_role;
-GRANT CREATE TASK ON SCHEMA clickstream_admin TO ROLE my_role;
+-- Grant incremental generator privileges (admin schema for generator objects)
+GRANT CREATE PROCEDURE ON SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN TO ROLE my_role;
+GRANT CREATE TASK ON SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN TO ROLE my_role;
 GRANT EXECUTE TASK ON ACCOUNT TO ROLE my_role;
 
 -- After task creation, grant operate privilege
@@ -150,19 +166,14 @@ python main.py --scale 0.01 --database MY_EXISTING_DB --schema MY_SCHEMA --outpu
 For production use, create a dedicated role with only the required privileges:
 
 ```sql
--- Create dedicated role
-CREATE ROLE IF NOT EXISTS FEATURE_STORE_GUIDE_ROLE;
+-- See Appendix B: Environment Setup for the full security model
+-- Quick start: run scripts/01_dba_setup.sql (Appendix B)
 
--- Grant warehouse access
-GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE FEATURE_STORE_GUIDE_ROLE;
-
--- Grant database privileges
-GRANT CREATE DATABASE ON ACCOUNT TO ROLE FEATURE_STORE_GUIDE_ROLE;
--- OR for existing database:
--- GRANT USAGE, CREATE SCHEMA ON DATABASE my_db TO ROLE FEATURE_STORE_GUIDE_ROLE;
-
--- Assign to user
-GRANT ROLE FEATURE_STORE_GUIDE_ROLE TO USER my_user;
+-- Or manually create a role:
+CREATE ROLE IF NOT EXISTS FS_ADMIN_ROLE;
+GRANT USAGE ON WAREHOUSE FS_DEV_WH TO ROLE FS_ADMIN_ROLE;
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE FS_ADMIN_ROLE;
+GRANT ROLE FS_ADMIN_ROLE TO USER my_user;
 ```
 :::
 
@@ -172,7 +183,7 @@ The generator creates two schemas:
 
 | Schema | Purpose |
 |--------|---------|
-| `CLICKSTREAM_RAW` | Data tables (11 tables) |
+| `CLICKSTREAM_DATA` | Data tables (11 tables) |
 | `CLICKSTREAM_ADMIN` | Generator config, state, task |
 
 ### Data Tables
@@ -205,19 +216,19 @@ For Dynamic Table and Online Feature testing we need an incremental data generat
 
 ```sql
 -- Start continuous generation (every minute)
-ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK RESUME;
+ALTER TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK RESUME;
 
 -- Monitor
-SELECT * FROM FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.GENERATION_STATUS;
+SELECT * FROM FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.GENERATION_STATUS;
 
 -- Stop when done
-ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
+ALTER TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
 ```
 
-Note: Leaving these executing will continue to generate data and update the feature store data over time, but will incur costs for the compute resources used to generate the data.  When you are done with the testing, you can suspend the task by running the following SQL command.  :
+Note: Leaving these executing will continue to generate data and update the feature store data over time, but will incur costs for the compute resources used to generate the data.  When you are done with the testing, you can suspend the task by running the following SQL command:
 
 ```sql
-ALTER TASK FEATURE_STORE_GUIDE.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
+ALTER TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
 ```
 
 You can resume the task at anytime when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated.  The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time.  This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.
@@ -275,19 +286,19 @@ cd database_subset/
 
 # Create development database (10% sample)
 python deploy.py create \
-    --prod-db FEATURE_STORE_GUIDE \
-    --dev-db FEATURE_STORE_GUIDE_DEV \
+    --prod-db FEATURE_STORE_DEMO \
+    --dev-db FEATURE_STORE_DEMO_DEV \
     --sample-pct 10 \
-    --warehouse YOUR_WAREHOUSE
+    --warehouse FS_DEV_WH
 
 # Check status
-python deploy.py status --dev-db FEATURE_STORE_GUIDE_DEV
+python deploy.py status --dev-db FEATURE_STORE_DEMO_DEV
 
 # Suspend Dynamic Tables (cost savings)
-python deploy.py suspend --dev-db FEATURE_STORE_GUIDE_DEV
+python deploy.py suspend --dev-db FEATURE_STORE_DEMO_DEV
 
 # Resume Dynamic Tables
-python deploy.py resume --dev-db FEATURE_STORE_GUIDE_DEV
+python deploy.py resume --dev-db FEATURE_STORE_DEMO_DEV
 ```
 
 ### Key Features
@@ -300,8 +311,8 @@ python deploy.py resume --dev-db FEATURE_STORE_GUIDE_DEV
 ### Multi-Environment Setup
 
 ```
-FEATURE_STORE_GUIDE (Production)        FEATURE_STORE_GUIDE_DEV (Development)
-└── CLICKSTREAM_RAW                     └── CLICKSTREAM_RAW
+FEATURE_STORE_DEMO (Production)             FEATURE_STORE_DEMO_DEV (Development)
+└── CLICKSTREAM_DATA                     └── CLICKSTREAM_DATA
     ├── USERS (100K)                        ├── USERS (10K - 10% sample)
     ├── SESSIONS (500K)                     ├── SESSIONS (~50K)
     └── EVENTS (4.4M)                       └── EVENTS (~440K)

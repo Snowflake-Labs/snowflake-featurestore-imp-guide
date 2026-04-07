@@ -22,20 +22,32 @@ After completing this chapter, you will be able to:
 
 An **Entity** represents a business object that features describe. It defines:
 
-- **What** business concept the features relate to (User, Product, Transaction)
+- **What** business concept the features relate to (for example User, Product, Session)
 - **How** features are retrieved via join keys
-- **Which** FeatureViews can be combined for a given request
+- **Which** Feature Views can be combined for a given request
+
+::: {.callout-note}
+## Entity registration lifecycle
+Register each entity with the Feature Store using `fs.register_entity(entity)` **before** you create or register Feature Views that reference it. Entities are **not** auto-created when you register a Feature View. If an entity is missing from the registry, Feature View registration fails until you register it explicitly.
+:::
+
+```python
+# Typical order: define entities, register each, then build Feature Views
+fs.register_entity(visitor_entity)
+fs.register_entity(user_entity)
+# ... other entities ...
+```
 
 > 📁 **Full code:** [`_code/entity_definitions.py`](_code/entity_definitions.py)
 
 ```python
 from snowflake.ml.feature_store import Entity
 
-# Define an entity
+# Define an entity (register with fs.register_entity before use in Feature Views)
 user_entity = Entity(
     name="USER",
     join_keys=["USER_ID"],
-    desc="Registered user in the e-commerce platform"
+    desc="Registered user in the clickstream platform"
 )
 ```
 
@@ -44,7 +56,7 @@ user_entity = Entity(
 | Component | Description | Requirements |
 |-----------|-------------|--------------|
 | `name` | Unique identifier within the Feature Store | SCREAMING_SNAKE_CASE, descriptive |
-| `join_keys` | Column(s) that uniquely identify an instance | Must exist in spine and FeatureView |
+| `join_keys` | Column(s) that uniquely identify an instance | Must exist in spine and Feature View |
 | `desc` | Human-readable description | Document the business meaning |
 
 ---
@@ -56,18 +68,37 @@ Simple entities use a single column as the join key. This is the most common pat
 ### Examples
 
 ```python
-# User entity - most common
+# Visitor (pre-login identity)
+visitor_entity = Entity(
+    name="VISITOR",
+    join_keys=["VISITOR_ID"],
+    desc="Site visitor before or without login"
+)
+
+# User entity
 user_entity = Entity(
     name="USER",
     join_keys=["USER_ID"],
     desc="Registered user with account"
 )
 
-# Product entity
+# Household rollup
+household_entity = Entity(
+    name="HOUSEHOLD",
+    join_keys=["HOUSEHOLD_ID"],
+    desc="Household containing one or more users"
+)
+
+# Product and category
 product_entity = Entity(
     name="PRODUCT",
     join_keys=["PRODUCT_ID"],
     desc="Product in the catalog"
+)
+category_entity = Entity(
+    name="CATEGORY",
+    join_keys=["CATEGORY_ID"],
+    desc="Product taxonomy category"
 )
 
 # Session entity
@@ -82,8 +113,8 @@ session_entity = Entity(
 
 | Scenario | Example |
 |----------|---------|
-| Single business object | Users, Products, Stores |
-| Natural unique identifier exists | Customer ID, SKU, Transaction ID |
+| Single business object | Users, products, sessions |
+| Natural unique identifier exists | User ID, product ID, session ID |
 | Features are always at this granularity | User-level churn prediction |
 
 ---
@@ -117,21 +148,21 @@ Compound entities use multiple columns together as the join key. Essential for m
 > 📁 **Full code:** [`_code/compound_entities.py`](_code/compound_entities.py)
 
 ```python
-# Compound entity for product-supplier combination
+# Primary compound entity: product–supplier (sourcing / many-to-many)
 product_supplier_entity = Entity(
     name="PRODUCT_SUPPLIER",
     join_keys=["PRODUCT_ID", "SUPPLIER_ID"],
     desc="Product and supplier combination for sourcing features"
 )
 
-# Compound entity for user-product interaction
+# User–product affinity (interaction grain)
 user_product_entity = Entity(
     name="USER_PRODUCT",
     join_keys=["USER_ID", "PRODUCT_ID"],
     desc="User-product affinity features"
 )
 
-# Order item entity (order + line number)
+# Order line within an order (USER places ORDER → ORDER_ITEMS)
 order_item_entity = Entity(
     name="ORDER_ITEM",
     join_keys=["ORDER_ID", "LINE_NUMBER"],
@@ -154,28 +185,28 @@ order_item_entity = Entity(
 
 Entities can form hierarchies where one entity "rolls up" to another. This enables multi-level aggregations.
 
-### Common Hierarchy Patterns
+### Clickstream hierarchy (demo domain)
+
+Relationships used throughout this guide (database `FEATURE_STORE_DEMO`, source schema `CLICKSTREAM_DATA`, Feature Store schema `FEATURE_STORE`, warehouse `FS_DEV_WH`):
+
+- **VISITOR** (`VISITOR_ID`) → identified as → **USER** (`USER_ID`) → belongs to → **HOUSEHOLD** (`HOUSEHOLD_ID`)
+- **USER** → has → **SESSION** (`SESSION_ID`) → contains events
+- **USER** → places → **ORDER** → **ORDER_ITEM** rows (`ORDER_ID`, `LINE_NUMBER`)
+- **PRODUCT** (`PRODUCT_ID`) → belongs to → **CATEGORY** (`CATEGORY_ID`)
+- **PRODUCT_SUPPLIER** (`PRODUCT_ID`, `SUPPLIER_ID`) is the compound key for supplier-specific product facts
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      ENTITY HIERARCHY PATTERNS                          │
+│                   CLICKSTREAM ENTITY RELATIONSHIPS                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  USER HIERARCHY           LOCATION HIERARCHY        PRODUCT HIERARCHY   │
+│   VISITOR ──identified as──▶ USER ──belongs to──▶ HOUSEHOLD             │
+│                                │                                        │
+│                    ┌───────────┴───────────┐                            │
+│                    ▼                       ▼                            │
+│              SESSION ──▶ events      ORDER ──▶ ORDER_ITEM               │
 │                                                                         │
-│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
-│  │  HOUSEHOLD  │         │   COUNTRY   │           │  CATEGORY   │      │
-│  └──────┬──────┘         └──────┬──────┘           └──────┬──────┘      │
-│         │                       │                         │             │
-│         ▼                       ▼                         ▼             │
-│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
-│  │    USER     │         │   REGION    │           │SUBCATEGORY  │      │
-│  └──────┬──────┘         └──────┬──────┘           └──────┬──────┘      │
-│         │                       │                         │             │
-│         ▼                       ▼                         ▼             │
-│  ┌─────────────┐         ┌─────────────┐           ┌─────────────┐      │
-│  │   SESSION   │         │    STORE    │           │   PRODUCT   │      │
-│  └─────────────┘         └─────────────┘           └─────────────┘      │
+│   PRODUCT ──belongs to──▶ CATEGORY                                      │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -185,48 +216,96 @@ Entities can form hierarchies where one entity "rolls up" to another. This enabl
 > 📁 **Full code:** [`_code/entity_hierarchies.py`](_code/entity_hierarchies.py)
 
 ```python
-# Define entities at each level
+from snowflake.ml.feature_store import Entity, FeatureView
+
+# Register each entity first: fs.register_entity(visitor_entity), etc.
+visitor_entity = Entity(name="VISITOR", join_keys=["VISITOR_ID"])
 household_entity = Entity(name="HOUSEHOLD", join_keys=["HOUSEHOLD_ID"])
 user_entity = Entity(name="USER", join_keys=["USER_ID"])
 session_entity = Entity(name="SESSION", join_keys=["SESSION_ID"])
 
-# FeatureViews at different granularities
+# Feature Views at different granularities (version labels: V01, V02, ...)
 household_fv = FeatureView(
     name="HOUSEHOLD_FEATURES",
     entities=[household_entity],
-    feature_df=household_agg_df,  # Aggregated at household level
-    # ...
+    feature_df=household_agg_df,
+    version="V01",
+    # timestamp_col, refresh_freq, desc, ...
 )
 
 user_fv = FeatureView(
     name="USER_FEATURES",
     entities=[user_entity],
-    feature_df=user_agg_df,  # Aggregated at user level
-    # ...
+    feature_df=user_agg_df,
+    version="V01",
 )
 
 session_fv = FeatureView(
     name="SESSION_FEATURES",
     entities=[session_entity],
-    feature_df=session_df,  # Session-level features
-    # ...
+    feature_df=session_df,
+    version="V01",
 )
 ```
+
+### Entity Mapping Tables for Rollup Feature Views {#sec-mapping-tables}
+
+Rollup Feature Views (see [Chapter 07](../07_aggregations_api/index.qmd#sec-rollup)) aggregate features from a finer-grained entity to a coarser-grained entity using a **mapping DataFrame**. The design of this mapping table significantly affects both correctness and performance.
+
+**Basic mapping table** (static, 1:1 or N:1):
+
+```sql
+CREATE TABLE FEATURE_STORE_DEMO.CLICKSTREAM_DATA.VISITOR_USER_MAPPING AS
+SELECT DISTINCT VISITOR_ID, USER_ID
+FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.VISITOR_SESSIONS;
+```
+
+**SCD-Type2 mapping table** (time-varying relationships):
+
+When the relationship between entities changes over time (e.g., a visitor becomes identified as a different user, or a subscriber changes accounts), a static mapping table can introduce data leakage -- the rollup uses the **current** mapping to aggregate **historical** data. For temporal correctness, use an SCD-Type2 mapping with validity windows:
+
+```sql
+CREATE TABLE VISITOR_USER_MAPPING_SCD2 (
+    VISITOR_ID   VARCHAR,
+    USER_ID      VARCHAR,
+    VALID_FROM   TIMESTAMP_NTZ,
+    VALID_TO     TIMESTAMP_NTZ  -- NULL = currently active
+);
+```
+
+When the entity mapping is time-varying, the `mapping_df` passed to `RollupConfig` should include only **currently active** rows (where `VALID_TO IS NULL`), because the rollup Feature View aggregates tiles across the mapping at refresh time -- it does not perform point-in-time mapping alignment per tile. For training scenarios that require historical mapping correctness, consider building the rollup in a custom SQL Feature View that joins the SCD2 mapping with validity range predicates.
+
+::: {.callout-warning title="Late-arriving entity mappings and PIT correctness"}
+A common source of subtle data leakage in hierarchical Feature Stores is **late-arriving entity mappings**. If a visitor-to-subscriber mapping is added retroactively (e.g., a visitor is identified as a subscriber after their browsing session), the rollup Feature View will include that visitor's historical features in the subscriber's aggregates even though the mapping did not exist at the original event time.
+
+For offline training, this means the subscriber's "7-day page view count" at training time `T` may include visitor activity that was not attributable to the subscriber at time `T`. The model learns from features that would not have been available in production.
+
+Mitigation strategies:
+
+- **Track `MAPPED_AT` timestamp** in the mapping table and filter the mapping to `MAPPED_AT <= spine_timestamp` when constructing training data.
+- **Accept the approximation** if the mapping lag is consistently small relative to the feature windows (e.g., mappings arrive within minutes but feature windows are 7+ days).
+- **Use the fine-grained entity** (visitor) for training if mapping timeliness cannot be guaranteed, and only use the coarser entity (subscriber) for inference.
+
+See [Chapter 06: PIT Correctness with Entity Mappings](../06_temporal_features/index.qmd#sec-mapping-leakage) for a detailed discussion.
+:::
+
+**Performance at scale:** For entity hierarchies with very high cardinality (e.g., 500M+ visitors mapping to 100M+ subscribers), the mapping table join is the most expensive part of the rollup. Ensure the mapping table is well-clustered on the fine-grained entity key (`VISITOR_ID`) and avoid including unnecessary columns in the mapping DataFrame.
 
 ### Combining Hierarchical Features
 
 To use features from multiple hierarchy levels, your spine must include all join keys:
 
 ```python
-# Spine with multi-level keys
+# Spine with multi-level keys (source tables in CLICKSTREAM_DATA)
 spine = session.sql("""
-    SELECT 
+    SELECT
         s.SESSION_ID,
         s.USER_ID,
         u.HOUSEHOLD_ID,
         s.SESSION_START_TS AS EVENT_TS
-    FROM SESSIONS s
-    JOIN USERS u ON s.USER_ID = u.USER_ID
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS s
+    JOIN FEATURE_STORE_DEMO.CLICKSTREAM_DATA.USERS u
+      ON s.USER_ID = u.USER_ID
 """)
 
 # Generate dataset with features from all levels
@@ -235,6 +314,41 @@ dataset = fs.generate_dataset(
     features=[session_fv, user_fv, household_fv],
 )
 ```
+
+### Modeling at a Different Grain Than the Source {#sec-cross-grain}
+
+A common design question is: the ML model operates at a **parent** grain (e.g., ORDER), but the source data lives at a **child** grain (e.g., LINEITEM / ORDER_ITEMS). You have two options:
+
+**Option A: Entity at the child grain, parent key on the Feature View.** Register the entity at the finest grain (e.g., `[ORDER_ID, LINE_NUMBER]`) and include the parent key as a column. Training sets will have **multiple rows per parent**, which is useful when the model needs line-level detail.
+
+**Option B: Entity at the parent grain, aggregated child features.** Register the entity at the parent grain (e.g., `[ORDER_ID]`) and build a Feature View that aggregates child data up:
+
+```python
+ORDER = Entity(name="ORDER", join_keys=["ORDER_ID"])
+
+# Aggregate lineitem data to the order level
+order_agg_df = session.sql("""
+    SELECT
+        ORDER_ID,
+        SUM(EXTENDED_PRICE) AS ORDER_TOTAL_AMT,
+        COUNT(*) AS LINE_COUNT,
+        SUM(CASE WHEN RETURN_FLAG = 'R' THEN 1 ELSE 0 END) AS RETURN_LINE_CNT,
+        MAX(SHIP_DATE) AS LAST_SHIP_DATE
+    FROM ORDER_ITEMS
+    GROUP BY ORDER_ID
+""")
+
+order_lineitem_agg_fv = FeatureView(
+    name="ORDER_LINEITEM_AGG_FV",
+    entities=[ORDER],
+    feature_df=order_agg_df,
+    timestamp_col="LAST_SHIP_DATE",
+    refresh_freq="1 hour",
+    desc="Lineitem features aggregated to the order level",
+)
+```
+
+When the spine carries keys from **multiple levels** of the hierarchy (e.g., `ORDER_ID`, `CUSTOMER_ID`, `NATION_ID`), `generate_training_set` performs LEFT JOINs against each Feature View on its entity keys. Higher-level features are **denormalized** (repeated) onto every child row. See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design patterns.
 
 ---
 
@@ -245,10 +359,10 @@ dataset = fs.generate_dataset(
 Align entities with business domain concepts:
 
 ```python
-# E-commerce domain
-CUSTOMER = Entity(name="CUSTOMER", join_keys=["CUSTOMER_ID"])
-PRODUCT = Entity(name="PRODUCT", join_keys=["SKU"])
-ORDER = Entity(name="ORDER", join_keys=["ORDER_NUMBER"])
+# Clickstream / e-commerce domain (this guide)
+USER = Entity(name="USER", join_keys=["USER_ID"])
+PRODUCT = Entity(name="PRODUCT", join_keys=["PRODUCT_ID"])
+ORDER = Entity(name="ORDER", join_keys=["ORDER_ID"])
 
 # Financial domain
 ACCOUNT = Entity(name="ACCOUNT", join_keys=["ACCOUNT_ID"])
@@ -261,9 +375,9 @@ MERCHANT = Entity(name="MERCHANT", join_keys=["MERCHANT_ID"])
 Model relationships between domain entities:
 
 ```python
-# User-Product interaction
+# User–product interaction (same grain as USER_PRODUCT in compound examples)
 USER_PRODUCT = Entity(
-    name="USER_PRODUCT_INTERACTION",
+    name="USER_PRODUCT",
     join_keys=["USER_ID", "PRODUCT_ID"],
     desc="User-product affinity and behavior"
 )
@@ -276,6 +390,64 @@ USER_MERCHANT = Entity(
 )
 ```
 
+### Pattern 3: Time-Grain Entities (Forecasting / Time-Series)
+
+For forecasting and time-series models, the **unit of analysis** is often a combination of a business entity and a **time period** -- not just the entity alone. For example, a demand forecast model predicts sales per store per day; a patient monitoring model tracks health metrics per patient per week. The time dimension becomes part of the **entity key**, not just the `timestamp_col`.
+
+```python
+# Daily demand forecasting: one prediction per store per date
+STORE_DAY = Entity(
+    name="STORE_DAY",
+    join_keys=["STORE_ID", "FORECAST_DATE"],
+    desc="Store-day grain for demand forecasting models",
+)
+
+# Weekly inventory planning: one prediction per SKU per week
+SKU_WEEK = Entity(
+    name="SKU_WEEK",
+    join_keys=["SKU_ID", "WEEK_START_DATE"],
+    desc="SKU-week grain for inventory planning models",
+)
+```
+
+**Key distinction:** The time-grain join key (e.g., `FORECAST_DATE`) defines the **analysis granularity** -- it determines which row the spine matches on. The `timestamp_col` on the Feature View still serves its standard role: it records **when** the feature row was computed or became valid, enabling PIT correctness if features are refreshed incrementally.
+
+```python
+# Feature View at the store-day grain
+store_day_features_df = session.sql("""
+    SELECT
+        STORE_ID,
+        SALE_DATE AS FORECAST_DATE,
+        SUM(QUANTITY) AS DAILY_UNITS_SOLD,
+        SUM(REVENUE) AS DAILY_REVENUE,
+        COUNT(DISTINCT PRODUCT_ID) AS DISTINCT_PRODUCTS_SOLD,
+        MAX(UPDATED_TS) AS FEATURE_TS
+    FROM SALES
+    GROUP BY STORE_ID, SALE_DATE
+""")
+
+store_day_fv = FeatureView(
+    name="STORE_DAY_SALES_FV",
+    entities=[STORE_DAY],
+    feature_df=store_day_features_df,
+    timestamp_col="FEATURE_TS",
+    refresh_freq="1 hour",
+    desc="Daily sales features per store for demand forecasting",
+)
+```
+
+**Spine design** for time-grain entities typically enumerates the (entity, time-period) tuples you want to score:
+
+```python
+forecast_spine = session.sql("""
+    SELECT STORE_ID, cal.CAL_DATE AS FORECAST_DATE
+    FROM STORES
+    CROSS JOIN (SELECT CAL_DATE FROM CALENDAR WHERE CAL_DATE BETWEEN '2025-01-01' AND '2025-01-31') cal
+""")
+```
+
+See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for spine design patterns, including multi-horizon forecasting spines.
+
 ---
 
 ## Best Practices
@@ -283,8 +455,8 @@ USER_MERCHANT = Entity(
 ### 1. Use Descriptive Names
 
 ```python
-# ✅ GOOD: Clear business meaning
-Entity(name="REGISTERED_USER", join_keys=["USER_ID"])
+# ✅ GOOD: Clear business meaning (SCREAMING_SNAKE_CASE, singular)
+Entity(name="USER", join_keys=["USER_ID"])
 Entity(name="PRODUCT_SUPPLIER", join_keys=["PRODUCT_ID", "SUPPLIER_ID"])
 
 # ❌ BAD: Vague or technical names
@@ -302,18 +474,25 @@ Entity(
 )
 ```
 
-### 3. Consistent Key Naming
+### 3. Consistent Key Naming {#sec-consistent-keys}
 
-Use the same column names across tables:
+The Feature Store **does not support synonyms or aliases** for join keys. The column names in the Entity's `join_keys` must appear with exactly the same name in every Feature View's `feature_df` and in every spine DataFrame. There is no mapping layer that translates `USER_KEY` to `USER_ID` at runtime -- a name mismatch will cause registration or dataset generation to fail.
+
+While this is a constraint, it is also a **conformance benefit**: it enforces a single, consistent vocabulary for entity keys across all Feature Views and consumers. Teams cannot accidentally use different column names for the same logical concept, which eliminates a common source of silent join errors.
+
+If source tables use different column names, rename them in the Feature View's `feature_df` to match the Entity definition:
 
 ```python
+# Source table uses "CUST_ID", but Entity expects "USER_ID"
+feature_df = session.table("LEGACY_CUSTOMERS").with_column_renamed("CUST_ID", "USER_ID")
+
 # ✅ GOOD: Consistent USER_ID everywhere
 Entity(name="USER", join_keys=["USER_ID"])
-# FeatureView source: SELECT USER_ID, ... FROM ...
+# Feature View source: SELECT USER_ID, ... FROM ...
 # Spine: SELECT USER_ID, ...
 
-# ❌ BAD: Inconsistent naming
-# Table A: CUSTOMER_ID, Table B: USER_KEY, Table C: USR_ID
+# ❌ BAD: Inconsistent naming for the same logical user
+# Table A: USER_ID, Table B: USER_KEY, Table C: USR_ID
 ```
 
 ---
@@ -322,7 +501,7 @@ Entity(name="USER", join_keys=["USER_ID"])
 
 ### ❌ Pitfall 1: Key Column Mismatch
 
-**Problem**: Join key column missing from FeatureView or spine.
+**Problem**: Join key column missing from Feature View or spine.
 
 **Solution**: Ensure join key columns exist in all relevant DataFrames.
 
@@ -330,13 +509,19 @@ Entity(name="USER", join_keys=["USER_ID"])
 
 **Problem**: Entity doesn't match feature computation granularity.
 
-**Solution**: Ensure FeatureView aggregates to entity grain.
+**Solution**: Ensure Feature View aggregates to entity grain.
 
 ### ❌ Pitfall 3: Missing Hierarchy Links
 
 **Problem**: Can't combine features from different hierarchy levels.
 
 **Solution**: Include all necessary foreign keys in spine.
+
+### ❌ Pitfall 4: Entity grain vs. query-time timestamps
+
+**Problem**: Features that must be computed from the **spine timestamp** (for example age or tenure as of each training row) cannot rely on columns that are not in the Feature View’s `feature_df`. The spine timestamp is not injected into Feature View SQL for you.
+
+**Solution**: Use an entity grain where the reference time is already a column in the feature data (for example snapshot rows with `SNAPSHOT_TS` as `timestamp_col`), or enrich after retrieval with the same logic for training and scoring. Event-level entities (one row per application, session, etc.) can anchor features to an intrinsic event time. See internal customer notes on SCD2 and point-in-time–correct derived attributes for a worked banking example.
 
 ---
 
@@ -352,4 +537,4 @@ Entity(name="USER", join_keys=["USER_ID"])
 
 ## Next Steps
 
-Continue to [Chapter 04: Feature Views](../04_feature_views/index.qmd) to learn about FeatureView types, versioning, and lifecycle management.
+Continue to [Chapter 04: Feature Views](../04_feature_views/index.qmd) to learn about Feature View types, versioning, and lifecycle management.

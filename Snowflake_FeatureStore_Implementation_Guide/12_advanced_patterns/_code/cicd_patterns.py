@@ -13,21 +13,21 @@ Tested in: tests/test_chapter_12.py
 def get_feature_config_template() -> dict:
     """
     Get template for feature configuration as code.
-    
+
     Returns:
         Dict with feature configuration template
     """
     return {
-        "name": "USER_PURCHASE_FEATURES",
+        "name": "USER_ORDER_FV",
         "version": "V01",
         "entities": ["USER"],
         "query": """
-            SELECT 
+            SELECT
                 USER_ID,
                 COUNT(*) AS ORDER_CNT,
-                SUM(AMOUNT) AS TOTAL_SPEND,
+                SUM(TOTAL_AMT) AS TOTAL_AMT_SUM,
                 MAX(ORDER_TS) AS LAST_ORDER_TS
-            FROM ORDERS
+            FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
             GROUP BY USER_ID
         """,
         "timestamp_col": "LAST_ORDER_TS",
@@ -44,7 +44,7 @@ def get_feature_config_template() -> dict:
 def get_deployment_workflow() -> dict:
     """
     Get CI/CD workflow configuration.
-    
+
     Returns:
         Dict with workflow configuration
     """

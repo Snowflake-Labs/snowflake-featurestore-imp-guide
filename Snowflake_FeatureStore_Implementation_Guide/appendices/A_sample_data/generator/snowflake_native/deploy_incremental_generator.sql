@@ -12,7 +12,7 @@
 --   3. Monitor: SELECT * FROM GENERATION_LOG ORDER BY BATCH_TS DESC LIMIT 10;
 -- ============================================================================
 
-USE SCHEMA FEATURE_STORE_GUIDE.CLICKSTREAM_RAW;
+USE SCHEMA FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN;
 
 -- ============================================================================
 -- CONFIGURATION TABLE

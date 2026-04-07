@@ -1,10 +1,10 @@
 """
-FeatureView creation examples.
+Feature View creation examples.
 
 This module demonstrates how to:
-- Create FeatureViews with Dynamic Table backing (materialized)
-- Create FeatureViews with View backing (query-time)
-- Register FeatureViews in the Feature Store
+- Create Feature Views with Dynamic Table backing (materialized)
+- Create Feature Views with View backing (query-time)
+- Register Feature Views in the Feature Store
 
 Tested in: tests/test_chapter_01.py::TestFeatureViewExamples
 
@@ -21,9 +21,9 @@ def create_user_purchase_featureview(
     source_table: str = "ORDERS",
 ) -> FeatureView:
     """
-    Create a FeatureView for user purchase statistics.
+    Create a Feature View for user purchase statistics.
     
-    This creates a Dynamic Table-backed FeatureView that refreshes hourly.
+    This creates a Dynamic Table-backed Feature View that refreshes hourly.
     
     Args:
         session: Active Snowpark session
@@ -31,21 +31,21 @@ def create_user_purchase_featureview(
         source_table: Name of the source orders table
         
     Returns:
-        FeatureView (not yet registered)
+        Feature View (not yet registered)
     """
     # Define feature transformations using DataFrame API
     user_purchase_df = (
         session.table(source_table)
         .group_by("USER_ID")
         .agg(
-            F.sum("AMOUNT").alias("TOTAL_SPEND"),
+            F.sum("TOTAL_AMT").alias("SPEND_SUM"),
             F.count("ORDER_ID").alias("ORDER_CNT"),
-            F.avg("AMOUNT").alias("AVG_ORDER_AMT"),
+            F.avg("TOTAL_AMT").alias("ORDER_VALUE_AVG"),
             F.max("ORDER_TS").alias("LAST_ORDER_TS"),
         )
     )
     
-    # Create FeatureView with Dynamic Table backing
+    # Create Feature View with Dynamic Table backing
     return FeatureView(
         name="USER_PURCHASE_FEATURES",
         entities=[user_entity],
@@ -62,9 +62,9 @@ def create_user_session_featureview(
     source_table: str = "SESSIONS",
 ) -> FeatureView:
     """
-    Create a FeatureView for user session statistics.
+    Create a Feature View for user session statistics.
     
-    This creates a View-backed FeatureView (query-time computation).
+    This creates a View-backed Feature View (query-time computation).
     
     Args:
         session: Active Snowpark session
@@ -72,7 +72,7 @@ def create_user_session_featureview(
         source_table: Name of the source sessions table
         
     Returns:
-        FeatureView (not yet registered)
+        Feature View (not yet registered)
     """
     # Define feature transformations
     user_session_df = (
@@ -80,13 +80,13 @@ def create_user_session_featureview(
         .group_by("USER_ID")
         .agg(
             F.count("SESSION_ID").alias("SESSION_CNT"),
-            F.avg("SESSION_DURATION_SEC").alias("AVG_SESSION_DUR"),
+            F.avg("DURATION_SEC").alias("AVG_SESSION_DUR"),
             F.sum("PAGE_VIEW_CNT").alias("TOTAL_PAGE_VIEWS"),
             F.max("SESSION_END_TS").alias("LAST_SESSION_TS"),
         )
     )
     
-    # Create FeatureView WITHOUT refresh_freq = View-backed
+    # Create Feature View WITHOUT refresh_freq = View-backed
     return FeatureView(
         name="USER_SESSION_FEATURES",
         entities=[user_entity],
@@ -100,20 +100,20 @@ def create_user_session_featureview(
 def register_featureview(
     fs: FeatureStore,
     feature_view: FeatureView,
-    version: str = "V1",
+    version: str = "V01",
     block: bool = True,
 ) -> FeatureView:
     """
-    Register a FeatureView in the Feature Store.
+    Register a Feature View in the Feature Store.
     
     Args:
         fs: Feature Store instance
-        feature_view: FeatureView to register
+        feature_view: Feature View to register
         version: Version string (e.g., "V1", "V01")
         block: If True, wait for initial materialization
         
     Returns:
-        Registered FeatureView
+        Registered Feature View
     """
     return fs.register_feature_view(
         feature_view=feature_view,
@@ -123,5 +123,5 @@ def register_featureview(
 
 
 if __name__ == "__main__":
-    print("FeatureView examples require an active Snowflake session.")
+    print("Feature View examples require an active Snowflake session.")
     print("See tests/test_chapter_01.py for integration tests.")

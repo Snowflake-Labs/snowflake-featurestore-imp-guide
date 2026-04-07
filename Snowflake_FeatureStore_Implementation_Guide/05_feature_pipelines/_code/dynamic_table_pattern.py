@@ -2,7 +2,7 @@
 Dynamic Table-based feature pipeline pattern.
 
 This module demonstrates how to:
-- Create Dynamic Table-backed FeatureViews
+- Create Dynamic Table-backed Feature Views
 - Configure refresh frequencies
 - Chain Dynamic Tables
 
@@ -15,28 +15,28 @@ from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
 def create_dynamic_table_featureview(
     session: Session,
     entity: Entity,
-    source_table: str,
+    source_table: str = "FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS",
     refresh_freq: str = "15 minutes",
 ) -> FeatureView:
     """
-    Create a Dynamic Table-backed FeatureView.
+    Create a Dynamic Table-backed Feature View.
     
     Args:
         session: Active Snowpark session
-        entity: Entity for the FeatureView
-        source_table: Source table name
+        entity: Entity for the Feature View
+        source_table: Fully qualified source table (default: clickstream ORDERS)
         refresh_freq: Refresh frequency (e.g., "15 minutes", "1 hour")
         
     Returns:
-        FeatureView (not yet registered)
+        Feature View (not yet registered)
     """
     # Define transformation logic
     feature_df = session.sql(f"""
         SELECT 
             USER_ID,
             COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
-            SUM(AMOUNT) AS TOTAL_SPEND,
-            AVG(AMOUNT) AS AVG_ORDER_AMT,
+            SUM(TOTAL_AMT) AS SPEND_SUM,
+            AVG(TOTAL_AMT) AS AVG_ORDER_AMT,
             MAX(ORDER_TS) AS LAST_ORDER_TS
         FROM {source_table}
         GROUP BY USER_ID

@@ -1,97 +1,303 @@
 ---
 title: "Feature Views"
-subtitle: "Dynamic Tables vs Views, versioning, and lifecycle management"
+subtitle: "Dynamic Tables vs Views, refresh_freq modes, versioning, and lifecycle"
 ---
 
 ## Overview
 
-A FeatureView is a collection of related features computed from source data. It defines how features are transformed, stored, and served. This chapter covers FeatureView types, versioning strategies, and lifecycle management.
+A Feature View is a collection of related features computed from source data. It defines how features are transformed, stored, and served. This chapter uses the clickstream sample model (`FEATURE_STORE_DEMO.CLICKSTREAM_DATA`: `VISITORS`, `USERS`, `HOUSEHOLDS`, `PRODUCTS`, `CATEGORIES`, `SUPPLIERS`, `PRODUCT_SUPPLIER`, `EVENTS`, `SESSIONS`, `ORDERS`, `ORDER_ITEMS`) and Feature Store objects in `FEATURE_STORE_DEMO.FEATURE_STORE`, warehouse `FS_DEV_WH`.
+
+The **`refresh_freq`** parameter determines whether a Feature View is backed by a **View** (query-time) or a **Dynamic Table** (materialized), and whether refresh follows **TARGET_LAG** or a **CRON-driven Task**.
 
 ## Learning Objectives
 
 After completing this chapter, you will be able to:
 
-- Choose between Dynamic Table and View-based FeatureViews
-- Implement versioning strategies for safe updates
-- Manage FeatureView lifecycle (create, update, deprecate)
-- Configure refresh strategies for optimal freshness vs. cost
+- Interpret the three `refresh_freq` behaviors: omitted / `None`, time period, and CRON
+- Choose between Dynamic Table and View-based Feature Views for a workload, including using Views as a development precursor to Dynamic Tables
+- Implement versioning strategies (V01, V02, …) for safe updates
+- Apply schema-evolution rules: add versions for new features, deprecate without breaking consumers, never change a registered Feature View in place
+- Evaluate the base + presentation layer model as an alternative to version-per-bundle for complex feature sets
+- Manage Feature View lifecycle: create, register new versions, validate lineage, deprecate, and remove
+- Configure refresh strategies for freshness vs. cost, understanding that the DT scheduler incurs no compute when source data is unchanged
 
 ---
 
-## FeatureView Types
+## How `refresh_freq` Controls Materialization {#sec-refresh-freq-modes}
 
-Snowflake Feature Store supports two FeatureView types based on the underlying storage:
+| `refresh_freq` | Backing object | Behavior |
+|----------------|----------------|----------|
+| **`None`** (default) or omitted | **View** | Features computed at query time; always reflects current source data; no Dynamic Table storage |
+| **Time period** (e.g. `"1 hour"`, `"15 minutes"`) | **Dynamic Table** | Materialized result; refresh driven by **TARGET_LAG** for that period |
+| **CRON expression** (e.g. `"0 8 * * *"`) | **Dynamic Table + Task** | Dynamic Table is created and receives an **initial full refresh**, then is **suspended** for ongoing lag-based refresh; a **Task** runs the refresh on the CRON schedule |
 
-| Type | Created When | Storage | Compute Model |
-|------|--------------|---------|---------------|
-| **Dynamic Table** | `refresh_freq` is specified | Materialized | Pre-computed, auto-refresh |
-| **View** | `refresh_freq` is omitted | Virtual | Computed on query |
+::: {.callout-note}
+## CRON vs period strings
+Snowflake distinguishes a **schedule string** (CRON) from a **time period** (lag). If the value parses as CRON, the platform uses the Dynamic Table + Task pattern described above—not continuous TARGET_LAG refresh.
+:::
 
-### Dynamic Table FeatureView
+### View-based Feature View (`refresh_freq = None`)
 
-> 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py)
+> 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py) — `create_view_featureview`
+
+View-based Feature Views are highly flexible. The underlying View can range from a simple pass-through to a complex declarative transformation, making them suitable for several distinct use cases:
+
+**1. Simple pass-through for externally managed tables.** When feature engineering is handled by an external process (DBT, Airflow, a Stored Procedure, etc.), the Feature View simply wraps the already-prepared table. This registers it in the Feature Store catalog for discovery, lineage, and training-set generation without duplicating any transformation logic:
 
 ```python
 from snowflake.ml.feature_store import FeatureView, Entity
 
-# Dynamic Table-backed FeatureView (refresh_freq specified)
-user_purchase_fv = FeatureView(
-    name="USER_PURCHASE_FEATURES",
-    entities=[user_entity],
-    feature_df=user_purchase_df,
-    timestamp_col="LAST_ORDER_TS",
-    refresh_freq="1 hour",  # Creates Dynamic Table
-    desc="User purchase behavior - auto-refreshed hourly"
+# Pass-through: DBT/Airflow manages the table; Feature View just wraps it
+product_catalog_fv = FeatureView(
+    name="PRODUCT_CATALOG_FV",
+    entities=[product_entity],
+    feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.PRODUCTS"),
+    timestamp_col="UPDATED_TS",
+    refresh_freq=None,
+    desc="PRODUCT attributes from CLICKSTREAM_DATA.PRODUCTS — managed by DBT",
 )
 ```
 
-**Characteristics**:
-
-- Features are pre-computed and stored
-- Automatic incremental refresh (when possible)
-- Fast query performance
-- Continuous compute costs
-
-### View-Based FeatureView
+**2. Declarative transformations.** The View definition can encode complex feature-engineering logic -- joins, aggregations, window functions, CASE expressions -- evaluated at query time. This keeps the transformation logic self-contained within the Feature Store:
 
 ```python
-# View-based FeatureView (no refresh_freq)
-product_attributes_fv = FeatureView(
-    name="PRODUCT_ATTRIBUTES",
-    entities=[product_entity],
-    feature_df=product_df,
-    timestamp_col="UPDATED_TS",
-    # No refresh_freq → View-based
-    desc="Product attributes - computed on query"
+# Complex transformation defined declaratively in the view
+user_session_df = session.sql("""
+    SELECT
+        s.USER_ID,
+        COUNT(DISTINCT s.SESSION_ID) AS SESSION_CNT,
+        AVG(s.DURATION_SEC) AS AVG_SESSION_DURATION_SEC,
+        SUM(CASE WHEN e.EVENT_TYPE = 'PURCHASE' THEN 1 ELSE 0 END) AS PURCHASE_EVENT_CNT,
+        MAX(s.START_TS) AS LAST_SESSION_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS s
+    JOIN FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS e ON s.SESSION_ID = e.SESSION_ID
+    GROUP BY s.USER_ID
+""")
+
+user_session_fv = FeatureView(
+    name="USER_SESSION_FV",
+    entities=[user_entity],
+    feature_df=user_session_df,
+    timestamp_col="LAST_SESSION_TS",
+    refresh_freq=None,
+    desc="USER session engagement features — computed at query time",
+)
+```
+
+**3. Development precursor to a Dynamic Table.** During development, use a View-based Feature View while the transformation logic is still evolving. Because the View has no materialized state, you can freely iterate on the query definition. Once the logic stabilises, convert it to a Dynamic Table by setting `refresh_freq` to a period string -- the same `feature_df` works unchanged:
+
+::: {.callout-warning}
+## Converting a View-based Feature View to a Dynamic Table
+When you switch from `refresh_freq=None` (View) to a period string (Dynamic Table), the underlying Snowflake object type changes from `VIEW` to `DYNAMIC TABLE`. The `overwrite=True` flag on `register_feature_view()` uses `CREATE OR REPLACE`, which only replaces an object of the **same type** -- it cannot replace a View with a Dynamic Table (or vice versa). You must **delete the existing Feature View first** with `fs.delete_feature_view()` before re-registering with the new `refresh_freq`. Alternatively, register the DT-backed version under a **new version string** (e.g., `V02`) to avoid the conflict entirely.
+:::
+
+```python
+# Start with a View in development
+fv = FeatureView(
+    name="USER_ORDER_FV",
+    entities=[user_entity],
+    feature_df=user_order_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq=None,           # View — iterate freely
+    desc="USER lifetime order features — DEV iteration",
+)
+
+# Later, promote to Dynamic Table for production
+fv = FeatureView(
+    name="USER_ORDER_FV",
+    entities=[user_entity],
+    feature_df=user_order_df,    # same query
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",       # now materialized as a DT
+    desc="USER lifetime order features — production DT",
 )
 ```
 
 **Characteristics**:
 
-- Computed on each query
-- Always fresh (no lag)
-- No storage costs
-- Query-time compute costs
+- Computed on each query -- always reflects current source data
+- No Dynamic Table storage or refresh cost
+- Query-time compute cost scales with read volume
+- Ideal for prototyping, rarely accessed features, or wrapping externally managed tables
 
-### Choosing Between Types
+### Dynamic Table Feature View (time period)
 
-| Factor | Dynamic Table | View |
-|--------|---------------|------|
-| **Query Frequency** | High | Low |
-| **Source Update Rate** | Frequent | Rare |
-| **Latency Requirements** | Strict | Flexible |
-| **Cost Priority** | Optimize query cost | Optimize storage cost |
-| **External Orchestration** | No | Yes (DBT, Airflow) |
+> 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py) — `create_dt_featureview`
+
+#### Pattern A: Cumulative lifetime features (one row per order event)
+
+The most PIT-friendly pattern for DT-backed Feature Views produces **multiple rows per entity over time**, so the ASOF join can select the correct snapshot for any point in the past:
+
+```python
+from snowflake.ml.feature_store import FeatureView, Entity
+
+# Cumulative lifetime order features -- one row per USER per ORDER_TS
+# Each row carries running totals as of that order, enabling true PIT retrieval
+user_order_cumulative_df = session.sql("""
+    SELECT
+        USER_ID,
+        ORDER_TS,
+        SUM(TOTAL_AMT) OVER w AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) OVER w AS ORDER_CNT,
+        AVG(TOTAL_AMT) OVER w AS ORDER_TOTAL_AMT_AVG
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    WINDOW w AS (PARTITION BY USER_ID ORDER BY ORDER_TS
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+""")
+
+user_order_fv = FeatureView(
+    name="USER_ORDER_FV",
+    entities=[user_entity],
+    feature_df=user_order_cumulative_df,
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    desc="USER cumulative order features: running total spend, order count, "
+         "and average order value — one row per order for PIT retrieval",
+)
+```
+
+This Feature View produces **one row per user per order**. When the spine requests features as of a specific timestamp, the ASOF join selects the row with the most recent `ORDER_TS` <= the spine timestamp, returning the cumulative totals as of that point in time.
+
+#### Pattern B: Latest-state aggregate (one row per entity)
+
+If you only need the **current** totals (e.g., for online serving or batch inference at "now"), a single-row aggregate is simpler and cheaper to maintain:
+
+```python
+# Latest-state lifetime order aggregates -- one row per USER
+user_order_latest_df = session.sql("""
+    SELECT
+        USER_ID,
+        SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) AS ORDER_CNT,
+        AVG(TOTAL_AMT) AS ORDER_TOTAL_AMT_AVG,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID
+""")
+
+user_order_latest_fv = FeatureView(
+    name="USER_ORDER_LATEST_FV",
+    entities=[user_entity],
+    feature_df=user_order_latest_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+    desc="USER latest-state order aggregates: lifetime total spend, order count, "
+         "and average order value from CLICKSTREAM_DATA.ORDERS",
+)
+```
+
+::: {.callout-note}
+Pattern B produces one row per user. The ASOF join always returns this single row for any spine timestamp >= `LAST_ORDER_TS`. This means every training example sees the **same** (current) totals regardless of when the training event occurred -- it does not provide true point-in-time correctness for historical training. Use Pattern A when temporal accuracy matters. See [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) for details.
+:::
+
+**Characteristics**:
+
+- Pre-computed and stored in a Dynamic Table
+- Refreshes on a lag target derived from the period string
+- Strong fit for high read volume and predictable freshness needs
+- Ongoing compute cost for refreshes
+
+::: {.callout-warning title="Float aggregations with JOINs force full refresh"}
+If your `feature_df` query combines **aggregations on `FLOAT`-typed columns** (SUM, AVG, MIN, MAX, VAR, STD) with a **JOIN in the same query block**, the Dynamic Table engine will fall back to **FULL refresh** instead of incremental. This can dramatically increase compute cost and refresh latency.
+
+**Workaround:** Cast float columns to fixed-point before aggregating:
+
+```sql
+SUM(CAST(float_col AS NUMBER(38, 6))) AS SUM_VAL
+```
+
+If you are building your `feature_df` with the Snowpark DataFrame API instead of `session.sql()`, the equivalent cast is:
+
+```python
+from snowflake.snowpark.types import DecimalType
+
+feature_df = (
+    source_df
+    .group_by("JOIN_KEY")
+    .agg(F.sum(F.col("FLOAT_COL").cast(DecimalType(38, 6))).alias("SUM_VAL"))
+)
+```
+
+If the join is unavoidable, consider splitting the query into a base DT (aggregation only, no join) and a presentation View that joins the results -- see the [Base + Presentation Layer Model](#sec-base-presentation) later in this chapter.
+:::
+
+### Dynamic Table + Task (CRON)
+
+> 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py) — `create_cron_featureview`
+
+Use CRON when features should refresh on a **calendar schedule** aligned to upstream batch loads rather than continuous lag. This is common when source data arrives in known batches (e.g., a nightly ETL) and refreshing more frequently would add cost without improving freshness:
+
+```python
+# Daily session features -- source data lands in a nightly batch
+user_daily_session_df = session.sql("""
+    SELECT
+        USER_ID,
+        COUNT(DISTINCT SESSION_ID) AS SESSION_CNT_LIFETIME,
+        AVG(DURATION_SEC) AS AVG_SESSION_DURATION_SEC,
+        MAX(START_TS) AS LAST_SESSION_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS
+    GROUP BY USER_ID
+""")
+
+user_daily_session_fv = FeatureView(
+    name="USER_SESSION_DAILY_FV",
+    entities=[user_entity],
+    feature_df=user_daily_session_df,
+    timestamp_col="LAST_SESSION_TS",
+    refresh_freq="0 8 * * *",  # CRON: refresh daily at 08:00 UTC after nightly load
+    desc="USER session engagement features — refreshed daily after batch ingestion",
+)
+```
+
+**Characteristics**:
+
+- Operational model: initial DT build, then **Task-owned** refreshes per CRON schedule
+- Aligns refresh to upstream batch cadence -- avoids paying for refreshes before new data lands
+- Document the schedule and timezone expectations for consumers
+
+### External Scheduling (Suspend + On-Demand Refresh)
+
+When refreshes should be triggered by **external pipeline completion** (e.g., an Airflow DAG, Dagster asset, or CI/CD step) rather than a fixed schedule, you can **suspend** the Feature View's DT and call `refresh_feature_view()` on demand:
+
+```python
+registered_fv = fs.register_feature_view(fv, "V01")
+
+# Suspend automatic refreshes -- DT stays idle until explicitly triggered
+fs.suspend_feature_view(registered_fv)
+
+# In your external orchestrator (Airflow task, Dagster op, etc.):
+fs.refresh_feature_view(registered_fv)
+```
+
+**Characteristics**:
+
+- Full control over refresh timing -- refresh only when upstream data is confirmed ready
+- No wasted refreshes on unchanged data
+- Requires external orchestration infrastructure
+- The DT remains suspended between refreshes; no background compute
+
+### Choosing Between Modes
+
+| Factor | View (`None`) | Dynamic Table (period) | Dynamic Table + Task (CRON) | External (suspend + refresh) |
+|--------|----------------|-------------------------|-----------------------------|-------------------------------|
+| **Query frequency** | Lower or sporadic | High | High (after batch landing) | High (after upstream completes) |
+| **Freshness** | As-of query time | Lag-bound (e.g. ≤ 1 hour) | Next scheduled run | On-demand after trigger |
+| **Cost shape** | Pay per query | Pay for refresh + storage | Pay for scheduled runs | Pay for triggered runs only |
+| **Orchestration** | Optional external prep of sources | Native lag refresh | Native Task schedule | External (Airflow, Dagster, etc.) |
+
+::: {.callout-tip title="Wide Feature Views (100+ columns)"}
+Feature tables with hundreds or thousands of columns (sensor data, one-hot encodings, time-windowed aggregations) introduce SQL compilation overhead, micro-partition bloat, and can hit Snowflake's ~2,000-column practical limit. If your Feature View exceeds ~100 columns, consider **hybrid storage** -- entity keys and timestamp as native columns, remaining features packed into a single `OBJECT` column using `OBJECT_CONSTRUCT`. This reduces storage overhead, eliminates column-limit concerns, and improves compile time. An expansion View on top can reconstitute the wide schema for consumers that need it. See [Chapter 12: Advanced Patterns -- Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for detailed architecture, column count thresholds, and the two-tier Feature View pattern.
+:::
 
 ---
 
 ## Versioning Strategies {#sec-versioning}
 
-FeatureView versions enable safe updates and rollbacks.
+Feature View versions enable safe updates and rollbacks.
 
 ::: {.callout-important}
-## Key Insight
-Versioning happens at the **FeatureView level**, not per individual feature. A FV version is an immutable bundle of features.
+## Key insight
+Versioning happens at the **Feature View level**, not per individual feature. A Feature View version is an immutable bundle of features and definitions.
 :::
 
 ### Recommended Version Naming
@@ -99,34 +305,228 @@ Versioning happens at the **FeatureView level**, not per individual feature. A F
 > 📁 **Full code:** [`_code/versioning.py`](_code/versioning.py)
 
 ```python
-# Zero-padded sequential versions (recommended)
+# Zero-padded sequential versions (recommended for production)
 fs.register_feature_view(fv, version="V01")
 fs.register_feature_view(fv, version="V02")
-fs.register_feature_view(fv, version="V10")  # Sorts correctly
+fs.register_feature_view(fv, version="V10")  # Sorts correctly lexicographically
 
-# Environment-prefixed versions
+# Environment-prefixed variants (optional)
 fs.register_feature_view(fv, version="DEV_V01")
 fs.register_feature_view(fv, version="PROD_V03")
-
-# Semantic versioning
-fs.register_feature_view(fv, version="1.0.0")
-fs.register_feature_view(fv, version="1.1.0")
 ```
+
+Prefer **V01**, **V02**, … for operational clarity and sorting. Other schemes (semantic versions, date stamps) are possible but should be agreed team-wide.
+
+### How Versions Map to Snowflake Objects
+
+When you register a Feature View, the Feature Store constructs the underlying Snowflake object name by joining the Feature View name and version with a **`$`** separator:
+
+```
+<FEATURE_VIEW_NAME>$<VERSION>
+```
+
+For example, registering a Feature View named `USER_ORDER_FV` at version `V01` creates a Dynamic Table (or View) called:
+
+```
+FEATURE_STORE_DEMO.FEATURE_STORE.USER_ORDER_FV$V01
+```
+
+This naming convention means:
+
+- Each version is a **distinct Snowflake object** -- V01 and V02 coexist as separate Dynamic Tables (or Views) in the same schema.
+- You can query any version directly via SQL: `SELECT * FROM FEATURE_STORE.USER_ORDER_FV$V02`.
+- Downstream DTs that chain off a specific version reference the fully-qualified `$`-delimited name, so upgrading consumers to a new version is an explicit, controlled change.
+- **Cost implication:** Each DT-backed version incurs independent refresh compute and storage. If V01 and V02 share overlapping features, that compute is duplicated. Mitigations: **suspend** older versions once consumers have migrated (`fs.suspend_feature_view()`), use the [Base + Presentation pattern](#sec-base-presentation) to keep shared features in a single base DT, or consolidate features into a single wide Feature View.
+- The `$` character is legal in unquoted Snowflake identifiers for most SQL statements (`SELECT`, `ALTER`, `DESCRIBE`, etc.). However, you need **double-quoting** when using the name in `ALTER ... SET CONTACT`, `ALTER ... SET TAG`, or similar DDL that could misparse the `$`, and in Snowpark `session.table('"USER_ORDER_FV$V01"')` where the string is passed to the SQL layer.
+
+### Schema Evolution and Deprecation {#sec-schema-evolution}
+
+::: {.callout-warning}
+## Breaking changes require a new version
+**Do not** alter a registered Feature View in place (same name + version) when semantics change. Register a **new version** (or a new Feature View name) instead.
+:::
+
+| Change type | What to do |
+|-------------|------------|
+| **Adding new features** | Create and register a **new version** (e.g. **V02**) that includes the new columns; keep **V01** until consumers opt in. |
+| **Deprecating features** | Leave the old version **registered** and documented as deprecated; remove columns only in a **new** version so existing training and serving jobs keep working. |
+| **Breaking changes** (rename column, change type or meaning, change entity keys, change `timestamp_col` semantics) | Always ship a **new version** (or new Feature View name). Never overwrite **V01** with incompatible definitions. |
+| **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. |
+
+Workflow summary:
+
+1. **V01** — current production bundle.
+2. **V02** — add columns or fix logic; train new models against **V02**.
+3. Deprecate **V01** in docs and catalog; delete **V01** only when no remaining dependencies.
+
+### Reducing the Cost of Schema Evolution with BACKFILL
+
+Adding features is the most common schema evolution scenario. The default path -- registering a new Feature View version with the additional columns -- creates a new Dynamic Table that must perform a **full initial refresh** over the entire source dataset. For large DTs with months or years of history, this can be prohibitively expensive.
+
+Dynamic Tables now support [`BACKFILL FROM`](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) combined with [`IMMUTABLE WHERE`](https://docs.snowflake.com/en/user-guide/dynamic-tables-immutability-constraints), which lets you **carry forward historical data** from the prior version's DT and only compute the new columns for the mutable (recent) window. The general workflow:
+
+1. **Clone** the existing DT (V01) to a regular table.
+2. **Add the new column(s)** to the clone (`ALTER TABLE ... ADD COLUMN`). Historical rows will have `NULL` for the new features.
+3. **Create the new DT** (V02) with the updated SELECT that includes the new features, using `BACKFILL FROM` the clone and `IMMUTABLE WHERE` to protect the historical region.
+4. Only the **mutable window** (e.g., last 1 day) is computed from the source data; the immutable region is copied from the backfill table at near-zero cost.
+
+```sql
+-- 1. Clone V01's Dynamic Table to a regular table
+CREATE TABLE FEATURE_STORE.USER_ORDER_FV_V01_CLONE
+  CLONE FEATURE_STORE.USER_ORDER_FV$V01;
+
+-- 2. Add the new column (NULL for historical rows)
+ALTER TABLE FEATURE_STORE.USER_ORDER_FV_V01_CLONE
+  ADD COLUMN ORDER_TOTAL_AMT_AVG FLOAT;
+
+-- 3. Create V02 with BACKFILL + IMMUTABLE WHERE
+CREATE DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V02
+  BACKFILL FROM FEATURE_STORE.USER_ORDER_FV_V01_CLONE
+  IMMUTABLE WHERE (LAST_ORDER_TS < CURRENT_TIMESTAMP() - INTERVAL '1 day')
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = FS_DEV_WH
+  AS
+    SELECT USER_ID,
+           SUM(TOTAL_AMT)   AS ORDER_TOTAL_AMT_SUM,
+           COUNT(ORDER_ID)   AS ORDER_CNT,
+           AVG(TOTAL_AMT)    AS ORDER_TOTAL_AMT_AVG,   -- new feature
+           MAX(ORDER_TS)     AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID;
+```
+
+After creation, the DT's immutable region contains the backfilled data (with `NULL` for `ORDER_TOTAL_AMT_AVG` in historical rows), while the mutable region is computed fresh and includes all columns. You can verify with `SELECT *, METADATA$IS_IMMUTABLE FROM FEATURE_STORE.USER_ORDER_FV$V02`.
+
+::: {.callout-warning}
+## Not yet available via Feature Store API
+
+`BACKFILL FROM` and `IMMUTABLE WHERE` are **Dynamic Table SQL features** -- they are not currently exposed through the Feature Store Python API (`FeatureView`, `register_feature_view`). To use this pattern you would create the DT via SQL and then register it as a view-based Feature View pointing at the resulting table, or manage the DT directly outside the API. Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store) for future API integration.
+
+::: {.callout-tip}
+## Inspecting generated SQL with `fv.query`
+The `FeatureView.query` property returns the compiled SQL from your `feature_df` -- the exact statement that becomes the `AS` clause in the `CREATE DYNAMIC TABLE` or `CREATE VIEW`. You can use this to inspect, copy, or adapt the SQL before creating the DT manually with additional clauses (e.g., `BACKFILL FROM`, `IMMUTABLE WHERE`):
+
+```python
+draft_fv = FeatureView(name="MY_FV", entities=[entity], feature_df=my_df, ...)
+print(draft_fv.query)  # prints the SQL that would be used in the AS clause
+```
+
+This gives you the inner query only. For the full DDL of an already-registered DT (including `TARGET_LAG`, `WAREHOUSE`, etc.), use `SELECT GET_DDL('DYNAMIC_TABLE', 'FEATURE_STORE."MY_FV$V01"')`.
+:::
+
+:::
+
+::: {.callout-note}
+## Downstream impact
+
+Downstream Dynamic Tables that read from the evolved DT will still need to refresh to pick up the schema change. If the downstream DTs also use `IMMUTABLE WHERE`, only their mutable window is reprocessed.
+:::
+
+### Alternative: Base + Presentation Layer Model {#sec-base-presentation}
+
+The standard approach creates a new version (a new Dynamic Table) for each schema change. An alternative for organisations with complex, frequently evolving feature sets is a **two-layer model** that separates physical storage from the consumer-facing view-based Feature Views.  This could be implemented within a single Feature Store Schema through naming convention, or two separate Feature Store Schemas to provide separation of concerns:
+
+```sql
+-- Single Feature Store Schema
+CREATE SCHEMA FEATURE_STORE;
+
+-- Two Feature Store Schemas
+CREATE SCHEMA FEATURE_STORE_BASE;
+CREATE SCHEMA FEATURE_STORE_PRESENTATION;
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  BASE + PRESENTATION LAYER MODEL                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  BASE LAYER (physical, immutable)                                       │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
+│  │ USER_ORDER_BASE  │  │ USER_ENGAGE_BASE │  │ USER_PROMO_BASE  │       │
+│  │ (DT — V01)       │  │ (DT — V01)       │  │ (DT — V02)       │       │
+│  │                  │  │                  │  │                  │       │
+│  │ ORDER_TOTAL_SUM  │  │ SESSION_CNT      │  │ PROMO_RESP_RATE  │       │
+│  │ ORDER_CNT        │  │ AVG_DURATION_SEC │  │ LAST_PROMO_TS    │       │
+│  │ LAST_ORDER_TS    │  │ LAST_SESSION_TS  │  │                  │       │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘       │
+│           │                     │                     │                 │
+│  PRESENTATION LAYER (virtual, composable)             |                 │
+│           └─────────────┬───────┴─────────────────────┘                 │
+│                         ▼                                               │
+│           ┌──────────────────────┐                                      │
+│           │ USER_COMBINED_FV     │                                      │
+│           │ (View — joins bases) │                                      │
+│           │                      │                                      │
+│           │ All features from    │                                      │
+│           │ base DTs combined    │                                      │
+│           └──────────────────────┘                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+
+1. **Base layer** -- each feature domain has its own versioned Dynamic Table (or View) Feature View. These are the immutable physical units that hold the actual feature-engineering logic and materialised data.
+2. **Presentation layer** -- a View-based Feature View that JOINs multiple base Feature Views together on their shared entity key (and timestamp column if required). Consumers query the presentation layer to get a unified feature set.
+
+A key principle of this model is **feature deduplication**: each feature computation exists in exactly one base object. Presentation layers compose existing features without re-implementing them. When a feature definition changes, only the base layer needs a new version -- the presentation layer's `SELECT *` automatically picks up the new columns. If individual features within a single Feature View evolve at different rates, consider feature-level version suffixes in naming (e.g., `ORDER_TOTAL_AMT_SUM_V01`, `ORDER_TOTAL_AMT_SUM_V02`) to maintain backward compatibility while the base layer transitions.
+
+```python
+# Base Feature Views (DT-backed, versioned independently)
+user_order_base = FeatureView(
+    name="USER_ORDER_BASE_FV", entities=[user_entity],
+    feature_df=user_order_df, timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour", desc="Base: lifetime order aggregates",
+)
+user_engage_base = FeatureView(
+    name="USER_ENGAGE_BASE_FV", entities=[user_entity],
+    feature_df=user_engage_df, timestamp_col="LAST_SESSION_TS",
+    refresh_freq="1 hour", desc="Base: session engagement features",
+)
+
+# Presentation layer (View-based, combines bases)
+combined_df = session.sql("""
+    SELECT o.*, e.SESSION_CNT, e.AVG_SESSION_DURATION_SEC
+    FROM FEATURE_STORE.USER_ORDER_BASE_FV$V01 o
+    JOIN FEATURE_STORE.USER_ENGAGE_BASE_FV$V01 e USING (USER_ID)
+""")
+user_combined_fv = FeatureView(
+    name="USER_COMBINED_FV", entities=[user_entity],
+    feature_df=combined_df, timestamp_col="LAST_ORDER_TS",
+    refresh_freq=None,  # View — always reflects latest base DT state
+    desc="Presentation: combines order + engagement base Feature Views",
+)
+```
+
+**When to add a new feature**, you create a new version of just the affected base DT (e.g., `USER_ORDER_BASE_FV$V02` with the extra column), then update the presentation View's SQL to reference `$V02`. The other base DTs are untouched -- no duplication of existing features across multiple DTs.
+
+**Trade-offs:**
+
+| | Standard versioning | Base + Presentation |
+|---|---|---|
+| **Simplicity** | One DT per version, straightforward | Multiple layers, JOIN management |
+| **Feature duplication** | New version duplicates unchanged features | Only changed base DT is re-created |
+| **Consumer migration** | Consumers point to new version | Presentation view updated centrally |
+| **Best for** | Small-to-medium feature sets, simple schemas | Large feature sets with frequent, incremental additions across domains |
+
+::: {.callout-note}
+This pattern adds operational complexity and is best suited to organisations with mature Feature Store practices and large numbers of features that evolve at different rates. For most teams starting out, standard version-per-bundle is simpler and sufficient. The Feature Store API does not natively manage the base-to-presentation relationship today -- you manage the presentation View's SQL definition yourself (or via CI/CD).
+:::
 
 ### Version Lifecycle
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    FEATUREVIEW VERSION LIFECYCLE                        │
+│                    FEATURE VIEW VERSION LIFECYCLE                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  V01 (Initial)     V02 (Update)      V03 (Current)                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │ TOTAL_SPEND  │  │ TOTAL_SPEND  │  │ TOTAL_SPEND  │                   │
-│  │ ORDER_CNT    │  │ ORDER_CNT    │  │ ORDER_CNT    │                   │
-│  │              │  │ AVG_ORDER    │  │ AVG_ORDER    │                   │
-│  │              │  │              │  │ SPEND_7D     │                   │
-│  └──────────────┘  └──────────────┘  └──────────────┘                   │
+│  V01 (Initial)         V02 (Update)          V03 (Current)              │
+│  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐    │
+│  │ORDER_TOTAL_AMT_SUM│  │ORDER_TOTAL_AMT_SUM│  │ORDER_TOTAL_AMT_SUM│    │
+│  │ ORDER_CNT         │  │ ORDER_CNT         │  │ ORDER_CNT         │    │
+│  │                   │  │ORDER_TOTAL_AMT_AVG│  │ORDER_TOTAL_AMT_AVG│    │
+│  │                   │  │                   │  │ ORDERS_7D_CNT     │    │
+│  └───────────────────┘  └───────────────────┘  └───────────────────┘    │
 │                                                                         │
 │  Status: DEPRECATED    Status: ACTIVE      Status: ACTIVE               │
 │  Models: legacy_v1     Models: prod_v2     Models: new_models           │
@@ -137,64 +537,303 @@ fs.register_feature_view(fv, version="1.1.0")
 ### Managing Versions
 
 ```python
-# List all versions
-versions = fs.list_feature_views(feature_view_name="USER_PURCHASE_FEATURES")
+# List all versions of a Feature View
+versions = fs.list_feature_views(feature_view_name="USER_ORDER_FV")
 
-# Get specific version
-v2_fv = fs.get_feature_view(name="USER_PURCHASE_FEATURES", version="V02")
+# Get a specific version
+v2_fv = fs.get_feature_view(name="USER_ORDER_FV", version="V02")
 
-# Delete old version (if no longer needed)
-fs.delete_feature_view(name="USER_PURCHASE_FEATURES", version="V01")
+# Delete an old version only after all consumers have migrated
+fs.delete_feature_view(name="USER_ORDER_FV", version="V01")
 ```
+
+**Before deleting a version**, verify that no models, datasets, or pipelines still depend on it. The Feature Store API provides a `.lineage()` method on `FeatureView` objects (requires `snowflake-ml-python >= 1.6.0` and the `VIEW LINEAGE` privilege) that traces ML-specific dependencies -- downstream datasets, models, and other Feature Views:
+
+```python
+# Feature Store API lineage — traces ML artifact dependencies
+v01_fv = fs.get_feature_view(name="USER_ORDER_FV", version="V01")
+
+# What downstream objects depend on V01? (datasets, models, other FVs)
+downstream = v01_fv.lineage(direction="downstream")
+for node in downstream:
+    print(f"{type(node).__name__}: {node.name}")
+
+# Narrower: only check if any models reference V01
+model_deps = v01_fv.lineage(direction="downstream", domain_filter=["model"])
+```
+
+For broader Snowflake-level dependencies (DT chains, views, tasks) and recent query access, complement the API with SQL:
+
+```sql
+-- Check whether any Snowflake objects still reference V01
+SELECT *
+FROM SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES
+WHERE REFERENCED_OBJECT_NAME = 'USER_ORDER_FV$V01'
+  AND REFERENCED_OBJECT_DOMAIN IN ('TABLE', 'DYNAMIC TABLE', 'VIEW');
+
+-- Check recent query access to V01
+SELECT QUERY_START_TIME, USER_NAME, QUERY_TEXT
+FROM SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY
+WHERE BASE_OBJECTS_ACCESSED LIKE '%USER_ORDER_FV$V01%'
+ORDER BY QUERY_START_TIME DESC
+LIMIT 20;
+```
+
+Only delete a version when both the API lineage check and the SQL dependency/access-history checks confirm zero remaining usage. See [Chapter 11: Operations](../11_operations/index.qmd) for more on lineage tracking.
+
+### Getting the Latest Version and Creating the Next
+
+For maximum flexibility, Feature Store is intentionally not opinionated on version semantics—there's **no built-in "latest version" alias** or auto-increment. Avoid hard-coding version strings throughout your codebase; instead, use helper utilities that derive the next version programmatically:
+
+> 📁 **Full code:** [`_code/version_utils.py`](_code/version_utils.py)
+
+```python
+import re
+from typing import Optional
+
+
+def get_latest_feature_view(
+    fs: FeatureStore,
+    feature_view_name: str,
+) -> Optional[FeatureView]:
+    """Get the most recent version of a Feature View."""
+    versions = fs.list_feature_views(feature_view_name=feature_view_name)
+    
+    # Sort by version string (works with zero-padded versions)
+    versions_sorted = sorted(versions, key=lambda fv: fv.version, reverse=True)
+    
+    return versions_sorted[0] if versions_sorted else None
+
+
+def next_version(
+    fs: FeatureStore,
+    feature_view_name: str,
+    prefix: str = "V",
+    pad: int = 2,
+) -> str:
+    """
+    Derive the next sequential version string for a Feature View.
+    
+    If USER_ORDER_FV has versions V01 and V02, returns "V03".
+    If no versions exist, returns "V01".
+    """
+    versions = fs.list_feature_views(feature_view_name=feature_view_name)
+    
+    max_num = 0
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    for fv in versions:
+        m = pattern.match(fv.version)
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+    
+    return f"{prefix}{max_num + 1:0{pad}d}"
+```
+
+Usage:
+
+```python
+version = next_version(fs, "USER_ORDER_FV")   # "V03" if V01, V02 exist
+fs.register_feature_view(fv, version=version)
+```
+
+This keeps version assignment consistent across manual runs, notebooks, and CI/CD pipelines without anyone needing to remember what the current version is.
 
 ---
 
 ## Refresh Configuration {#sec-refresh}
 
-### Refresh Frequency Options
+### Refresh Frequency Examples (time-period mode)
 
-| Frequency | Use Case | Cost Impact |
-|-----------|----------|-------------|
-| `1 minute` | Real-time fraud detection | Very High |
+When using a **period** string (not CRON), you are configuring **TARGET_LAG**-style refresh for the backing Dynamic Table.
+
+| Frequency | Example use case | Cost impact |
+|-----------|------------------|-------------|
+| `1 minute` | Tight operational or fraud signals | Very high |
 | `15 minutes` | Operational dashboards | High |
-| `1 hour` | Standard ML features | Medium |
-| `1 day` | Batch analytics | Low |
+| `1 hour` | Standard batch ML features | Medium |
+| `1 day` | Daily analytics features | Low |
 
 ### Best Practices for Refresh
 
 ```python
-# Match refresh to source update frequency
-# Source updates every 4 hours → refresh every 4 hours
+# Align period with how often upstream CLICKSTREAM_DATA tables land meaningful deltas
 fv = FeatureView(
     refresh_freq="4 hours",
     # ...
 )
 
-# For Online Feature Tables, consider sync frequency
-# OFT refresh should be <= FeatureView refresh
+# For Online Feature Tables, OFT sync frequency should be <= Feature View refresh cadence
 ```
+
+::: {.callout-tip}
+**No changes = no compute.** The Dynamic Table scheduler checks for upstream changes before triggering a refresh. If no source data has changed since the last refresh, the scheduler skips the cycle without consuming any warehouse compute. This means setting a shorter `refresh_freq` than the actual source update rate incurs near-zero cost from the change-detection check itself -- the DT simply checks more often and finds nothing to do. You do not need to perfectly match `refresh_freq` to source cadence to avoid wasted spend; err on the side of slightly shorter lag for better freshness guarantees.
+:::
 
 ---
 
-## FeatureView Ownership & SLAs
+## Feature View Ownership & SLAs
 
-Define clear ownership for production FeatureViews:
+The Feature Store API provides `desc` on Feature Views and Entities, plus Snowflake [object tags](https://docs.snowflake.com/en/sql-reference/sql/create-tag) on the underlying Dynamic Tables and Views. For many teams, this is sufficient. However, the API does not natively track ownership, consumer lists, SLA targets, or other operational metadata that mature ML platform users might need for governance and compliance.
+
+You have several options for extending the metadata layer to meet these needs -- none are part of the Feature Store product itself, but all integrate naturally using Snowflake's built-in features:
+
+**Snowflake Tags.** Attach key-value metadata directly to Feature View objects. Tags are queryable via `INFORMATION_SCHEMA` and `TAG_REFERENCES`, and can be used for governance, cost attribution, and discovery:
+
+```sql
+CREATE TAG IF NOT EXISTS FS_OWNER ALLOWED_VALUES 'marketing-ds', 'risk-eng', 'platform';
+CREATE TAG IF NOT EXISTS FS_SLA_MINUTES;
+
+ALTER DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V01
+  SET TAG FS_OWNER = 'marketing-ds', FS_SLA_MINUTES = '90';
+
+-- Query ownership across all Feature Views
+SELECT OBJECT_NAME, TAG_NAME, TAG_VALUE
+FROM TABLE(INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS(
+  'FEATURE_STORE_DEMO.FEATURE_STORE', 'SCHEMA'))
+WHERE TAG_NAME IN ('FS_OWNER', 'FS_SLA_MINUTES');
+```
+
+**Metadata tables.** Maintain a registry table within your Feature Store schema, keyed by the object name (`<FV_NAME>$<VERSION>`). This can hold owner, team, consumer list, SLA targets, deprecation status, and anything else you need:
+
+```sql
+CREATE TABLE IF NOT EXISTS FEATURE_STORE.FEATURE_VIEW_METADATA (
+    FV_OBJECT_NAME  STRING PRIMARY KEY,   -- e.g. USER_ORDER_FV$V01
+    OWNER           STRING,
+    TEAM            STRING,
+    CONSUMERS       ARRAY,
+    SLA_REFRESH     STRING,
+    SLA_MAX_LATENCY_MINUTES  NUMBER,
+    DEPRECATED      BOOLEAN DEFAULT FALSE,
+    NOTES           STRING
+);
+```
+
+You can build helper functions that populate this table automatically when registering a Feature View, and query it for discovery, alerting, or CI/CD gating.
+
+**External manifest files.** For teams that manage Feature Store definitions in Git alongside CI/CD, a YAML manifest can serve as the source of truth for ownership and SLA metadata. This is not consumed by Snowflake, but drives your deployment scripts and documentation:
 
 ```yaml
 # feature_manifest.yaml
 feature_views:
-  - name: USER_PURCHASE_FEATURES
-    version: V03
-    owner: ml-platform@company.com
-    team: ML Platform
+  - name: USER_ORDER_AGGREGATES
+    owner: marketing-ds@company.com
+    team: Marketing Data Science
+    description: Core user behavior from ORDERS and ORDER_ITEMS
+    consumers:
+      - churn-model
+      - ltv-model
     sla:
       refresh_frequency: "1 hour"
       max_latency_minutes: 90
-      availability: "99.9%"
-    consumers:
-      - churn-model-v2
-      - ltv-model-v1
 ```
+
+**Snowflake Contacts.** [Contacts](https://docs.snowflake.com/en/user-guide/governance-contacts) are schema-level objects that you assign to databases, schemas, tables, views, and Dynamic Tables to indicate who is responsible for different purposes. They integrate with Snowsight's Catalog and are queryable via `ACCOUNT_USAGE` views:
+
+```sql
+-- Create contacts for the Feature Store team
+CREATE CONTACT IF NOT EXISTS FS_STEWARD
+  METHOD EMAIL 'feature-store-team@company.com';
+CREATE CONTACT IF NOT EXISTS FS_SUPPORT
+  METHOD EMAIL 'fs-support@company.com';
+
+-- Assign at schema level -- all Feature Views inherit automatically
+ALTER SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE
+  SET CONTACT STEWARD = FS_STEWARD,
+              SUPPORT = FS_SUPPORT;
+
+-- Override for a specific Feature View if a different team owns it
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  SET CONTACT STEWARD = MARKETING_DS_STEWARD;
+```
+
+Each assignment specifies a **purpose** -- `STEWARD` (data accuracy), `SUPPORT` (technical questions), or `ACCESS_APPROVAL` (who approves access). Contacts inherit down the hierarchy (database → schema → table), so assigning at the schema level covers all Feature Views with a single statement. Direct assignment on a child overrides the inherited contact for that purpose.
+
+To audit contact assignments across your Feature Store:
+
+```sql
+SELECT object_name, purpose,
+       CASE WHEN is_inherited THEN 'Inherited' ELSE 'Direct' END AS assignment
+FROM SNOWFLAKE.ACCOUNT_USAGE.CONTACT_REFERENCES
+WHERE object_database = 'FEATURE_STORE_DEMO'
+  AND object_schema = 'FEATURE_STORE'
+  AND deleted IS NULL
+ORDER BY object_name, purpose;
+```
+
+**Cortex-powered object descriptions.** Snowflake can [automatically generate human-readable descriptions](https://docs.snowflake.com/en/user-guide/sql-cortex-descriptions) for tables, views, and their columns using Snowflake-hosted LLMs. This is useful for Feature Store objects where feature names alone (e.g., `ORDER_TOTAL_AMT_SUM`) may not be self-explanatory to consumers unfamiliar with the domain. Descriptions are stored as the standard `COMMENT` on the object, so they appear in `DESCRIBE`, `SHOW`, Snowsight's Catalog, and any data catalog tooling.
+
+You can generate descriptions from Snowsight (navigate to the object → "Generate description") or via SQL using the `AI_GENERATE_TABLE_DESC` stored procedure:
+
+```sql
+-- Generate descriptions for a Feature View's DT and all its columns
+CALL AI_GENERATE_TABLE_DESC(
+  'FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"',
+  { 'describe_columns': true, 'use_table_data': true }
+);
+```
+
+The procedure returns a JSON object with suggested descriptions. To persist them, set them as comments:
+
+```sql
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  SET COMMENT = 'User-level purchase aggregates from clickstream ORDERS: total spend, order count, average order value, and most recent order timestamp.';
+
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  MODIFY COLUMN ORDER_TOTAL_AMT_SUM COMMENT = 'Sum of all order amounts (TOTAL_AMT) for the user';
+```
+
+For Feature Stores with many Feature Views, you can script this across an entire schema using the stored procedure examples in the [documentation](https://docs.snowflake.com/en/user-guide/sql-cortex-descriptions#examples). Generated descriptions significantly improve feature discoverability -- consumers searching the catalog can find features by what they represent, not just by column name.
+
+These approaches are complementary. A common pattern is to use **Contacts** for ownership and stewardship visible in Snowsight, **Tags** for lightweight governance queries and cost attribution, **Cortex descriptions** for human-readable feature documentation, a **metadata table** for operational dashboards and alerting, and a **YAML manifest** in Git for CI/CD-driven deployments. See [Chapter 11: Operations](../11_operations/index.qmd) for monitoring SLA compliance and auditing metadata at scale.
+
+---
+
+## Hierarchical Feature Views {#sec-hierarchy-fvs}
+
+When source data exists at a **child grain** (e.g., line items, events) but the model operates at a **parent grain** (e.g., orders, users), create **aggregated rollup Feature Views** that project child-level data up to the parent entity.
+
+::: {.callout-warning title="Do not stack tiled Feature Views"}
+If you need to roll up from a finer-grained tiled (Time Aggregation) Feature View to a coarser entity, use `RollupConfig` (see [Chapter 07: Rollup Feature Views](../07_aggregations_api/index.qmd#sec-rollup)). **Do not** create a new tiled Feature View that reads from another tiled Feature View -- this causes duplicate internal `_PARTIAL_*` column names and SQL compilation errors. The correct hierarchy pattern for tiled FVs is: raw events → tiled FV (fine entity) → Rollup FV (coarse entity) via `RollupConfig`.
+:::
+
+
+```python
+# Raw lineitem Feature View at the finest grain (optional: useful for line-level models)
+lineitem_fv = FeatureView(
+    name="LINEITEM_FV", entities=[lineitem_entity],
+    feature_df=lineitem_df, timestamp_col="SHIP_DATE",
+    refresh_freq="1 hour",
+    desc="Raw lineitem features at (ORDER_ID, LINE_NUMBER) grain",
+)
+
+# Aggregated rollup to the order level
+order_lineitem_agg_df = session.sql("""
+    SELECT
+        ORDER_ID,
+        SUM(EXTENDED_PRICE) AS ORDER_TOTAL_AMT,
+        COUNT(*) AS LINE_COUNT,
+        AVG(EXTENDED_PRICE) AS AVG_LINE_PRICE,
+        MAX(SHIP_DATE) AS LAST_SHIP_DATE
+    FROM ORDER_ITEMS
+    GROUP BY ORDER_ID
+""")
+
+order_agg_fv = FeatureView(
+    name="ORDER_LINEITEM_AGG_FV", entities=[order_entity],
+    feature_df=order_lineitem_agg_df, timestamp_col="LAST_SHIP_DATE",
+    refresh_freq="1 hour",
+    desc="Lineitem features aggregated to the order level",
+)
+```
+
+When `generate_training_set` or `generate_dataset` joins Feature Views at **different entity grains**, higher-level features are **denormalized** -- repeated for every child row in the training data. For example, a spine at the lineitem grain joined with both `lineitem_fv` and `order_agg_fv` produces one row per lineitem, with order-level aggregates duplicated across all lines of the same order.
+
+If denormalization is undesirable (e.g., the model expects one row per order), either:
+
+- Use a **spine at the parent grain** and only include parent-level Feature Views, or
+- Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children.
+
+See [Chapter 03: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design.
 
 ---
 
@@ -203,44 +842,74 @@ feature_views:
 ### 1. Use Consistent Naming
 
 ```python
-# Pattern: <ENTITY>_<DOMAIN>_FV
-"USER_PURCHASE_FV"
-"PRODUCT_INVENTORY_FV"
+# Pattern: <ENTITY>_<DOMAIN>_FV (SCREAMING_SNAKE_CASE)
+"USER_ORDER_FV"
+"PRODUCT_CATALOG_FV"
 "SESSION_ENGAGEMENT_FV"
 ```
 
-### 2. Document Feature Definitions
+Entity keys and table names should stay **singular** SCREAMING_SNAKE_CASE where applicable (`USER`, `PRODUCT`, …). Prefer aggregate suffixes **`_CNT`**, **`_SUM`**, **`_AVG`**, **`_TS`**, boolean prefixes **`IS_`**, and monetary columns like **`TOTAL_AMT`** (not `AMOUNT`).
+
+::: {.callout-tip title="Plan feature prefixing early at scale"}
+When many Feature Views share the same entity (common in large deployments -- 50+ Feature Views for a single entity like `USER`), column name collisions become inevitable. Rather than resolving collisions reactively during training data generation, **adopt a prefixing convention as part of your Feature View naming standard from day one**. Options include:
+
+- **Use `auto_prefix=True`** on all `generate_dataset` / `generate_training_set` calls (columns become `FV_NAME__FEATURE_NAME`).
+- **Use short `.with_name()` prefixes** per domain (e.g., `"ord"`, `"sess"`, `"eng"`) for more concise column names.
+- **Embed the domain prefix in the `.alias()` call** on each `Feature` definition (e.g., `Feature.count("ORDER_ID", "7d").alias("ORD_ORDER_ID_CNT_7D")`).
+
+The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardising before the Feature View count grows large. See [Chapter 07: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
+:::
+
+### 2. Consolidate Feature Views from the Same Source
+
+When multiple tiled Feature Views share the same source table, entity, and tile granularity, consolidate them into a single Feature View. Separate Feature Views over identical sources create independent tile DTs, duplicating compute. See [Chapter 07: Consolidate Feature Views](../07_aggregations_api/index.qmd#sec-consolidate) for detailed guidance and exceptions.
+
+### 3. Document Feature Definitions
 
 ```python
 fv = FeatureView(
-    name="USER_PURCHASE_FEATURES",
+    name="USER_ORDER_FV",
     desc="""
-    User purchase behavior features for propensity models.
-    
+    USER-level order features from CLICKSTREAM_DATA.ORDERS for propensity models.
+
     Features:
-    - TOTAL_SPEND: Sum of all order amounts
-    - ORDER_CNT: Count of distinct orders
-    - AVG_ORDER_AMT: Average order value
-    
-    SLA: Refreshed hourly, max 90 min lag
+    - ORDER_TOTAL_AMT_SUM: Sum of TOTAL_AMT across orders
+    - ORDER_CNT: Count of orders
+    - ORDER_TOTAL_AMT_AVG: Average order TOTAL_AMT
+    - LAST_ORDER_TS: Latest ORDER_TS (point-in-time column)
+
+    SLA: Refreshed hourly (TARGET_LAG), max 90 min lag
     Owner: ml-platform@company.com
     """,
     # ...
 )
 ```
 
-### 3. Version on Schema Changes
+The Feature Store API also supports **per-feature descriptions** via `attach_feature_desc()`. These descriptions are stored as metadata and surfaced in `list_columns()`, making individual features discoverable:
 
 ```python
-# V01: Original features
-# V02: Added new feature
-# V03: Changed calculation logic (breaking change)
+fv = fv.attach_feature_desc({
+    "ORDER_TOTAL_AMT_SUM": "Sum of TOTAL_AMT across all orders for this user",
+    "ORDER_CNT": "Count of orders placed by this user",
+    "ORDER_TOTAL_AMT_AVG": "Average TOTAL_AMT per order",
+    "LAST_ORDER_TS": "Timestamp of the most recent order (point-in-time column)",
+})
 
-# Always increment version for:
-# - Adding new features
-# - Removing features
-# - Changing feature calculations
-# - Changing entity keys
+registered_fv = fs.register_feature_view(fv, "V01")
+registered_fv.list_columns().show()
+```
+
+### 4. Version on Any Consumer-Visible Change
+
+```python
+# V01: Initial column set
+# V02: Added ORDERS_7D_CNT
+# V03: Changed aggregation logic (breaking) — new version, never in-place edit
+
+# Increment version when you:
+# - Add or remove features
+# - Change calculations or filters
+# - Change entity keys or timestamp semantics
 ```
 
 ---
@@ -249,21 +918,27 @@ fv = FeatureView(
 
 ### ❌ Pitfall 1: No Versioning
 
-**Problem**: Modifying FeatureView in place breaks dependent models.
+**Problem**: Registering changes under the same version breaks dependent models.
 
-**Solution**: Always create new versions for changes.
+**Solution**: Always register **new versions** (V02, V03, …) for consumer-visible changes.
 
-### ❌ Pitfall 2: Over-Refreshing
+### ❌ Pitfall 2: Modifying a Registered Feature View In Place
 
-**Problem**: Refreshing faster than source updates.
+**Problem**: Overwriting definitions for an existing name/version breaks replay and training reproducibility.
 
-**Solution**: Match refresh to source update frequency.
+**Solution**: Treat each registered version as **immutable**; publish a new version instead.
 
-### ❌ Pitfall 3: No Documentation
+### ❌ Pitfall 3: Misunderstanding Refresh Cost
 
-**Problem**: Team doesn't understand feature definitions.
+**Problem**: Assuming a short `refresh_freq` always incurs high compute cost, or conversely, setting an unnecessarily long lag "to save money."
 
-**Solution**: Use `desc` parameter and maintain feature catalog.
+**Solution**: The DT scheduler's change-detection check is near-zero cost -- no warehouse compute is used when nothing has changed. A shorter lag than the source update frequency is safe and provides better freshness guarantees. However, if the source *does* update frequently and the DT query is expensive, a shorter lag means more frequent full refreshes. Match `refresh_freq` to the freshness your consumers actually need, not to the source rate.
+
+### ❌ Pitfall 4: No Documentation
+
+**Problem**: Teams cannot trust or reuse features.
+
+**Solution**: Use the `desc` parameter and keep a feature catalog in sync with **V01**, **V02**, …
 
 ---
 
@@ -271,10 +946,13 @@ fv = FeatureView(
 
 | Concept | Description |
 |---------|-------------|
-| **Dynamic Table FV** | Pre-computed, auto-refreshed features |
-| **View FV** | Query-time computed features |
-| **Version** | Immutable snapshot of feature definitions |
-| **refresh_freq** | How often to recompute features |
+| **View Feature View** | `refresh_freq=None` (default): query-time; pass-through, declarative transforms, or dev precursor to DT |
+| **Dynamic Table (period)** | `refresh_freq="1 hour"` (etc.): materialized; TARGET_LAG refresh; no compute when source unchanged |
+| **Dynamic Table + Task (CRON)** | `refresh_freq="0 8 * * *"`: initial DT refresh, then Task on schedule |
+| **Version (V01, V02, …)** | Immutable snapshot of feature definitions; `$`-separated object names |
+| **Schema evolution** | New features and breaking changes → new version; BACKFILL for cost-efficient evolution; base + presentation layer as alternative |
+| **Version retirement** | Validate zero usage via lineage and access history before deleting old versions |
+| **Ownership & SLAs** | Tags, Contacts, metadata tables, YAML manifests, Cortex descriptions |
 
 ---
 

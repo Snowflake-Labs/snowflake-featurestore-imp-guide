@@ -2,6 +2,8 @@
 -- Feature Pipeline Monitoring Queries
 -- =============================================================================
 -- Use these queries to monitor Dynamic Table-based feature pipelines.
+-- Canonical environment: database FEATURE_STORE_DEMO, schema FEATURE_STORE,
+-- warehouse FS_DEV_WH; clickstream source schema CLICKSTREAM_DATA.
 --
 -- Tested in: tests/test_chapter_05.py (SQL validation only)
 -- =============================================================================
@@ -21,7 +23,7 @@ SELECT
     STATISTICS:numUpdatedRows::INT AS ROWS_UPDATED,
     STATISTICS:numDeletedRows::INT AS ROWS_DELETED
 FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-    NAME => 'ML_FEATURES.FEATURE_STORE.USER_PURCHASE_STATS$V1'
+    NAME => 'FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_STATS$V01'
 ))
 ORDER BY REFRESH_START_TIME DESC
 LIMIT 10;

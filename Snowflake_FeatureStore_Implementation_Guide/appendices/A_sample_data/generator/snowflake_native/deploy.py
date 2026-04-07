@@ -22,7 +22,7 @@ def get_session():
 
 
 def deploy_generator(session, database="FEATURE_STORE_GUIDE", 
-                    data_schema="CLICKSTREAM_RAW", admin_schema="CLICKSTREAM_ADMIN"):
+                    data_schema="CLICKSTREAM_DATA", admin_schema="CLICKSTREAM_ADMIN"):
     """Deploy incremental generator to separate admin schema."""
     print(f"Deploying to {database}.{admin_schema}...")
     
@@ -143,7 +143,7 @@ def show_status(session):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", default="FEATURE_STORE_GUIDE")
-    parser.add_argument("--data-schema", default="CLICKSTREAM_RAW")
+    parser.add_argument("--data-schema", default="CLICKSTREAM_DATA")
     parser.add_argument("--admin-schema", default="CLICKSTREAM_ADMIN")
     parser.add_argument("--start", action="store_true")
     parser.add_argument("--stop", action="store_true")

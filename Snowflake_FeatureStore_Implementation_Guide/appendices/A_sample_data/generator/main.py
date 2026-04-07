@@ -663,7 +663,7 @@ Examples:
         "--schema",
         type=str,
         default=None,
-        help="Target schema name (default: from SNOWFLAKE_SCHEMA env or CLICKSTREAM_RAW)"
+        help="Target schema name (default: from SNOWFLAKE_SCHEMA env or CLICKSTREAM_DATA)"
     )
     
     args = parser.parse_args()

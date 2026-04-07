@@ -4,7 +4,7 @@ Temporal Aggregation API feature pipeline pattern.
 This module demonstrates how to:
 - Define time-windowed features using the Feature class
 - Configure tile sizes
-- Create tiled FeatureViews
+- Create tiled Feature Views
 
 Tested in: tests/test_chapter_05.py
 
@@ -60,24 +60,24 @@ def get_user_temporal_features() -> list:
 def create_tiled_featureview(
     session: Session,
     entity: Entity,
-    source_table: str,
-    timestamp_col: str,
+    source_table: str = "FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS",
+    timestamp_col: str = "ORDER_TS",
     tile_size: str = "1 hour",
     refresh_freq: str = "1 hour",
 ) -> FeatureView:
     """
-    Create a tiled FeatureView with temporal aggregations.
+    Create a tiled Feature View with temporal aggregations.
     
     Args:
         session: Active Snowpark session
-        entity: Entity for the FeatureView
-        source_table: Source table name
-        timestamp_col: Column containing event timestamp
+        entity: Entity for the Feature View
+        source_table: Fully qualified source table (default: clickstream ORDERS)
+        timestamp_col: Column for temporal ordering (default: ORDER_TS)
         tile_size: Granularity for tiling (e.g., "1 hour", "1 day")
-        refresh_freq: Refresh frequency
+        refresh_freq: Refresh frequency (None → view-based; period → DT TARGET_LAG; CRON → scheduled DT)
         
     Returns:
-        FeatureView (not yet registered)
+        Feature View (not yet registered)
     """
     features = get_user_temporal_features()
     

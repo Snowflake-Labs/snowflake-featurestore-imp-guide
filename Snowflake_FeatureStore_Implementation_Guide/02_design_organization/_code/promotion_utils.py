@@ -2,7 +2,7 @@
 Feature promotion utilities for cross-environment workflows.
 
 This module demonstrates how to:
-- Promote FeatureViews between environments
+- Promote Feature Views between environments
 - Clone Feature Store objects
 - Validate promotions
 
@@ -19,21 +19,21 @@ def promote_feature_view(
     version: str,
 ) -> FeatureView:
     """
-    Promote a FeatureView from source to target Feature Store.
+    Promote a Feature View from source to target Feature Store.
     
-    This copies the FeatureView definition to the target environment.
+    This copies the Feature View definition to the target environment.
     Entities must already exist in the target Feature Store.
     
     Args:
         source_fs: Source Feature Store (e.g., DEV)
         target_fs: Target Feature Store (e.g., TEST/PROD)
-        fv_name: Name of the FeatureView to promote
+        fv_name: Name of the Feature View to promote
         version: Version to promote
         
     Returns:
-        Registered FeatureView in target environment
+        Registered Feature View in target environment
     """
-    # Get the FeatureView from source
+    # Get the Feature View from source
     source_fv = source_fs.get_feature_view(name=fv_name, version=version)
     
     # Recreate in target
@@ -60,15 +60,15 @@ def clone_feature_view_sql(
     fv_name: str,
 ) -> None:
     """
-    Clone a FeatureView using Snowflake's zero-copy cloning.
+    Clone a Feature View using Snowflake's zero-copy cloning.
     
     This is more efficient than Python-based promotion for large objects.
     
     Args:
         session: Active Snowpark session
-        source_schema: Source schema (e.g., ML_FEATURES.DEV)
-        target_schema: Target schema (e.g., ML_FEATURES.TEST)
-        fv_name: Name of the FeatureView/Dynamic Table
+        source_schema: Source schema (e.g., FEATURE_STORE_DEMO.DEV)
+        target_schema: Target schema (e.g., FEATURE_STORE_DEMO.TEST)
+        fv_name: Name of the Feature View/Dynamic Table
     """
     session.sql(f"""
         CREATE DYNAMIC TABLE {target_schema}.{fv_name}
@@ -84,17 +84,17 @@ def validate_promotion(
     version: str,
 ) -> dict:
     """
-    Validate that a FeatureView was promoted correctly.
+    Validate that a Feature View was promoted correctly.
     
     Checks:
-    - FeatureView exists in target
+    - Feature View exists in target
     - Schema matches source
     - Row count matches (for DT-backed FVs)
     
     Args:
         source_fs: Source Feature Store
         target_fs: Target Feature Store
-        fv_name: FeatureView name
+        fv_name: Feature View name
         version: Version to validate
         
     Returns:

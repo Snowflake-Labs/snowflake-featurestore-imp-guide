@@ -262,10 +262,10 @@ class SnowflakeConfig:
     account: str = ""  # Set via SNOWFLAKE_ACCOUNT env var
     user: str = ""     # Set via SNOWFLAKE_USER env var
     password: str = "" # Set via SNOWFLAKE_PASSWORD env var
-    role: str = "ACCOUNTADMIN"
-    warehouse: str = "COMPUTE_WH"
-    database: str = "FEATURE_STORE_GUIDE"
-    schema: str = "CLICKSTREAM_RAW"
+    role: str = "FS_ADMIN_ROLE"
+    warehouse: str = "FS_DEV_WH"
+    database: str = "FEATURE_STORE_DEMO"
+    schema: str = "CLICKSTREAM_DATA"
     
     @classmethod
     def from_env(cls) -> "SnowflakeConfig":
@@ -276,10 +276,10 @@ class SnowflakeConfig:
             account=os.getenv("SNOWFLAKE_ACCOUNT", ""),
             user=os.getenv("SNOWFLAKE_USER", ""),
             password=os.getenv("SNOWFLAKE_PASSWORD", ""),
-            role=os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
-            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-            database=os.getenv("SNOWFLAKE_DATABASE", "FEATURE_STORE_GUIDE"),
-            schema=os.getenv("SNOWFLAKE_SCHEMA", "CLICKSTREAM_RAW"),
+            role=os.getenv("SNOWFLAKE_ROLE", "FS_ADMIN_ROLE"),
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "FS_DEV_WH"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "FEATURE_STORE_DEMO"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA", "CLICKSTREAM_DATA"),
         )
     
     @property

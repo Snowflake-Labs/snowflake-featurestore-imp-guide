@@ -457,8 +457,8 @@ def show_status(session: Session, dev_db: str) -> None:
     print("\nDynamic Tables:")
     try:
         session.sql(f"USE DATABASE {dev_db}").collect()
-        # Check CLICKSTREAM_RAW schema for Dynamic Tables
-        dt_status = session.sql("SHOW DYNAMIC TABLES IN SCHEMA CLICKSTREAM_RAW").collect()
+        # Check CLICKSTREAM_DATA schema for Dynamic Tables
+        dt_status = session.sql("SHOW DYNAMIC TABLES IN SCHEMA CLICKSTREAM_DATA").collect()
         
         # SHOW DYNAMIC TABLES columns:
         # [1]: name, [5]: rows, [15]: scheduling_state
@@ -531,7 +531,7 @@ Examples:
     create_parser = subparsers.add_parser("create", help="Create development database")
     create_parser.add_argument("--prod-db", required=True, help="Production database name")
     create_parser.add_argument("--dev-db", required=True, help="Development database name")
-    create_parser.add_argument("--prod-schema", default="CLICKSTREAM_RAW", help="Production schema (default: CLICKSTREAM_RAW)")
+    create_parser.add_argument("--prod-schema", default="CLICKSTREAM_DATA", help="Production schema (default: CLICKSTREAM_DATA)")
     create_parser.add_argument("--sample-pct", type=float, default=10, help="Sample percentage (default: 10)")
     create_parser.add_argument("--warehouse", default="COMPUTE_WH", help="Warehouse for DT refresh")
     create_parser.add_argument("--target-lag", default="1 HOUR", help="Dynamic Table target lag")

@@ -31,7 +31,7 @@ The Snowflake Feature Store is a managed data management layer that helps ML tea
 | [**09**](../09_preprocessing/index.qmd) | Preprocessing | Encoding, scaling, model-dependent transforms |
 | [**10**](../10_training_inference/index.qmd) | Training & Inference | Spine design, dataset generation |
 | [**11**](../11_operations/index.qmd) | Operations | Monitoring, DMFs, lineage, drift detection |
-| [**12**](../12_advanced_patterns/index.qmd) | Advanced Patterns | Streaming FeatureViews, multi-FS operations |
+| [**12**](../12_advanced_patterns/index.qmd) | Advanced Patterns | Streaming Feature Views, multi-FS operations |
 | [**13**](../13_migration_guide/index.qmd) | Migration Guide | Tecton, SageMaker, Vertex AI migration paths |
 
 ## Prerequisites
@@ -68,9 +68,9 @@ GRANT CREATE TAG ON SCHEMA <schema> TO ROLE FEATURE_STORE_USER;
 ### Software Requirements
 
 ```python
-# Minimum package versions for this guide
-snowflake-ml-python >= 1.8.0      # Core Feature Store functionality
-snowflake-snowpark-python >= 1.25.0  # DataFrame operations
+# Minimum package versions for this guide (as of March 2026)
+snowflake-ml-python >= 1.21.0     # Feature Store incl. Feature aggregation API (latest: 1.32.0)
+snowflake-snowpark-python >= 1.40.0  # DataFrame operations (latest: 1.48.0)
 
 # Additional packages used in examples
 pandas >= 2.0.0
@@ -79,18 +79,17 @@ scikit-learn >= 1.5.0
 ```
 
 ::: {.callout-note}
-## 🆕 New Features in snowflake-ml 1.21+
+## Feature Aggregation API
 
-The `Feature` aggregation class (@sec-aggregations-api) and Temporal Aggregated FeatureViews
-require version 1.21.0 or later. Earlier versions can use the approaches shown
-in @sec-feature-pipelines for temporal features.
+The `Feature` aggregation class (@sec-aggregations-api) and Temporal Aggregated Feature Views
+require `snowflake-ml-python >= 1.21.0`. This guide assumes 1.21.0 as the minimum baseline.
 :::
 
 ## Environment Setup
 
 ### Session Configuration
 
-The following code establishes a Snowpark session and verifies the environment.
+The following code establishes a Snowpark session and verifies the environment. You will need to adjust the values for `SOURCE_DATABASE`, `SOURCE_SCHEMA`, `FS_NAME`, and `WAREHOUSE` to match your environment and needs.
 
 > 📁 **Full code:** [`_code/setup_session.py`](_code/setup_session.py)
 
@@ -99,38 +98,33 @@ The following code establishes a Snowpark session and verifies the environment.
 # CONFIGURATION
 # ==============================================================================
 
-# Default configuration - override as needed
-SOURCE_DATABASE = 'FEATURE_STORE_GUIDE'
-SOURCE_SCHEMA = 'CLICKSTREAM_RAW'
-FS_NAME = 'GUIDE_FEATURE_STORE'
-WAREHOUSE = 'COMPUTE_WH'
+SOURCE_DATABASE = "FEATURE_STORE_DEMO"
+SOURCE_SCHEMA = "CLICKSTREAM_DATA"
+FS_NAME = "FEATURE_STORE"
+WAREHOUSE = "FS_DEV_WH"
 
 # ==============================================================================
 # IMPORTS
 # ==============================================================================
 
-# Python standard library
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-# Data processing
 import pandas as pd
 import numpy as np
 
-# Snowpark
 from snowflake.snowpark import Session
 from snowflake.snowpark.version import VERSION
 from snowflake.snowpark import functions as F
 from snowflake.snowpark import types as T
 from snowflake.snowpark.context import get_active_session
 
-# Feature Store
 from snowflake.ml.feature_store import (
     FeatureStore, 
     FeatureView, 
     Entity,
-    CreationMode
+    CreationMode,
 )
 
 # ==============================================================================
@@ -140,12 +134,11 @@ from snowflake.ml.feature_store import (
 # Option 1: Running in Snowflake Notebook (preferred)
 try:
     session = get_active_session()
-except:
+except Exception:
     # Option 2: Running locally with connection config
     from snowflake.ml.utils import connection_params
     session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
 
-# Enable SQL simplifier for cleaner generated SQL
 session.sql_simplifier_enabled = True
 ```
 
@@ -189,10 +182,10 @@ CONNECTION ESTABLISHED
 ======================================================================
 Account                : YOUR_ACCOUNT
 User                   : YOUR_USER
-Role                   : SYSADMIN
-Database               : FEATURE_STORE_GUIDE
-Schema                 : CLICKSTREAM_RAW
-Warehouse              : COMPUTE_WH
+Role                   : FS_DEV_ROLE
+Database               : FEATURE_STORE_DEMO
+Schema                 : CLICKSTREAM_DATA
+Warehouse              : FS_DEV_WH
 Warehouse Size         : X-SMALL
 Warehouse State        : STARTED
 Snowflake Version      : 8.x.x
@@ -238,13 +231,36 @@ The clickstream dataset includes these core tables:
 
 | Table | Description | Entity Key | Temporal Column |
 |-------|-------------|------------|-----------------|
-| `VISITORS` | Anonymous visitors | `VISITOR_ID` | `FIRST_SEEN_TS`, `LAST_SEEN_TS` |
-| `USERS` | Identified users | `USER_ID` | `CREATED_TS`, `UPDATED_TS` |
-| `SESSIONS` | User sessions | `SESSION_ID` | `SESSION_START_TS`, `SESSION_END_TS` |
+| `VISITORS` | Anonymous visitors | `VISITOR_ID` | `FIRST_SEEN_TS` |
+| `USERS` | Identified users | `USER_ID` | `CREATED_TS` |
+| `SESSIONS` | User sessions | `SESSION_ID` | `SESSION_START_TS` |
 | `EVENTS` | Clickstream events | `EVENT_ID` | `EVENT_TS` |
 | `ORDERS` | Purchase orders | `ORDER_ID` | `ORDER_TS` |
 | `PRODUCTS` | Product catalog | `PRODUCT_ID` | `CREATED_TS` |
-| `PRODUCT_SUPPLIER` | Supplier relationships | `(PRODUCT_ID, SUPPLIER_ID)` | `VALID_FROM_TS`, `VALID_TO_TS` |
+| `PRODUCT_SUPPLIER` | Supplier relationships | `(PRODUCT_ID, SUPPLIER_ID)` | `VALID_FROM_TS` |
+
+::: {.callout-tip}
+## Append-Friendly Base Tables
+
+The base tables above are designed to be **append-only** -- rows are inserted once and not updated. This pattern is common for source tables dealing with high scale ingestion rates, such as clickstream data. Append-only sources can also be more efficient for Dynamic Table incremental refresh, because the DT engine only needs to scan newly added micro-partitions rather than diffing existing ones for in-place row updates. However, Dynamic Tables work with any source table regardless of whether it is append-only or not.
+
+Note that the Dynamic Tables *themselves* will insert and update rows as new source data arrives -- this is expected. For example, when a new event is appended to `EVENTS`, the DT computing `MAX(EVENT_TS)` per session updates that session's aggregated row. The DT engine handles this transparently during incremental refresh.
+
+Closing or derived timestamps (e.g., session end time, last-seen time, supplier relationship end date) are computed in downstream Feature Views rather than maintained as updated columns on the base table. For example, `SESSION_END_TS` is derived from the last event in a session:
+
+```python
+session_features_df = (
+    session.table("EVENTS")
+    .group_by("SESSION_ID")
+    .agg(
+        F.min("EVENT_TS").alias("SESSION_START_TS"),
+        F.max("EVENT_TS").alias("SESSION_END_TS"),
+        F.count("EVENT_ID").alias("EVENT_COUNT"),
+    )
+)
+```
+
+:::
 
 ### Inline Snippet Pattern
 
@@ -282,6 +298,24 @@ All code examples follow these conventions:
 - **SQL**: UPPERCASE keywords, lowercase identifiers
 - **Python**: PEP 8 style, type hints where helpful
 - **Naming**: `SCREAMING_SNAKE_CASE` for Snowflake objects, `snake_case` for Python
+
+::: {.callout-important}
+## Adapting Code for Your Environment
+
+For clarity, code examples in this guide often use **literal object names** (e.g., `session.table("EVENTS")`, `"FEATURE_STORE_DEMO"`) rather than fully-qualified references or variable substitution. Production code should parameterise database, schema, and object names so the same codebase works across DEV, TEST, and PROD without edits:
+
+```python
+# Guide example (for readability)
+df = session.table("EVENTS")
+fs = FeatureStore(session=session, database="FEATURE_STORE_DEMO", name="FEATURE_STORE", ...)
+
+# Production equivalent (parameterised)
+df = session.table(f"{SOURCE_DATABASE}.{SOURCE_SCHEMA}.EVENTS")
+fs = FeatureStore(session=session, database=SOURCE_DATABASE, name=FS_NAME, ...)
+```
+
+Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from configuration files, environment variables, CI/CD secrets, or templating engines (e.g., Jinja, Terraform, [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview)). See [Chapter 02: Multi-Environment Deployment](../02_design_organization/index.qmd) for full parameterisation patterns.
+:::
 
 ### Feature Naming Conventions {#sec-naming-conventions}
 

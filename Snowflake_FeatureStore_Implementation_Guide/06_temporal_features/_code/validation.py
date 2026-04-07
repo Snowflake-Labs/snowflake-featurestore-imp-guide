@@ -25,8 +25,8 @@ def validate_no_data_leakage(
     
     Args:
         training_df: Generated training dataset
-        spine_timestamp_col: Column with spine timestamps
-        feature_timestamp_col: Column with feature timestamps
+        spine_timestamp_col: Spine timestamps (e.g. EVENT_TS from SESSIONS)
+        feature_timestamp_col: Feature View PIT column (e.g. LAST_EVENT_TS, LAST_ORDER_TS)
         
     Returns:
         Dict with validation results

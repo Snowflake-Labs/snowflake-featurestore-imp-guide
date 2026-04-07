@@ -7,21 +7,24 @@ subtitle: "External orchestration, Dynamic Tables, and Temporal Aggregation API"
 
 Feature pipelines are the workflows that transform raw data into features ready for ML consumption. They are the "plumbing" that connects your source data to your Feature Store. Snowflake supports multiple pipeline architectures, each with distinct trade-offs for freshness, cost, complexity, and flexibility.
 
-This chapter covers three primary approaches:
+This chapter covers four pipeline patterns and a hierarchical extension:
 
-1. **External Orchestration** - DBT, Airflow, or other tools managing transformations
-2. **Internal Management** - Dynamic Table-based pipelines fully managed by Snowflake
-3. **Temporal Aggregation API** - The new Feature class for time-windowed features with tiling
+1. **External Orchestration** -- DBT, Airflow, or other tools managing transformations
+2. **Internal Management** -- Dynamic Table-based pipelines fully managed by Snowflake
+3. **Chained Feature Views** -- Using Feature Views as sources for downstream Feature Views (multi-stage DT → DT or DT → View pipelines)
+4. **Temporal Aggregation API** -- The `Feature` class for time-windowed features with tiling (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd))
+5. **Rollup Feature Views** -- Hierarchical aggregation from fine- to coarse-grained entities (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd#sec-rollup))
 
 ## Learning Objectives
 
 After completing this chapter, you will be able to:
 
 - Choose the right pipeline architecture for your requirements
-- Implement DBT-managed feature pipelines with View-based FeatureViews
-- Build internally-managed pipelines using Dynamic Tables
+- Implement DBT-managed feature pipelines with View-based Feature Views
+- Build internally-managed pipelines using Dynamic Tables (SQL and Snowpark DataFrame API)
+- Chain Feature Views into multi-stage pipelines (DT → DT, DT → View) and understand refresh cascading
+- Use the Temporal Aggregation API and rollup Feature Views (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd))
 - Configure refresh strategies for optimal freshness vs. cost
-- Understand when to use the Temporal Aggregation API
 
 ---
 
@@ -39,7 +42,7 @@ After completing this chapter, you will be able to:
 │  │                                                                     │   │
 │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐   │   │
 │  │  │  Source  │───▶│   DBT    │───▶│  Tables/ │───▶│ View-based   │   │   │
-│  │  │  Tables  │    │  Models  │    │  Views   │    │ FeatureView  │   │   │
+│  │  │  Tables  │    │  Models  │    │  Views   │    │ Feature View │   │   │
 │  │  └──────────┘    └──────────┘    └──────────┘    └──────────────┘   │   │
 │  │                                                                     │   │
 │  │  Orchestrated by: DBT Cloud, Airflow, Dagster, Prefect              │   │
@@ -49,7 +52,7 @@ After completing this chapter, you will be able to:
 │  │                    INTERNAL MANAGEMENT                              │   │
 │  │                                                                     │   │
 │  │  ┌──────────┐              ┌──────────────────────────────────────┐ │   │
-│  │  │  Source  │─────────────▶│    Dynamic Table-based FeatureView   │ │   │
+│  │  │  Source  │─────────────▶│   Dynamic Table-based Feature View   │ │   │
 │  │  │  Tables  │              │    (transformation + storage)        │ │   │
 │  │  └──────────┘              └──────────────────────────────────────┘ │   │
 │  │                                                                     │   │
@@ -60,7 +63,7 @@ After completing this chapter, you will be able to:
 │  │                    TEMPORAL AGGREGATION API                         │   │
 │  │                                                                     │   │
 │  │  ┌──────────┐    ┌──────────────────────────────────────────────┐   │   │
-│  │  │  Source  │───▶│  Tiled FeatureView with Feature aggregations │   │   │
+│  │  │  Source  │───▶│ Tiled Feature View with Feature aggregations │   │   │
 │  │  │  Tables  │    │  (automatic window computation + tiling)     │   │   │
 │  │  └──────────┘    └──────────────────────────────────────────────┘   │   │
 │  │                                                                     │   │
@@ -72,15 +75,15 @@ After completing this chapter, you will be able to:
 
 ### Architecture Comparison
 
-| Aspect | External (DBT/Airflow) | Internal (Dynamic Tables) | Temporal API |
-|--------|------------------------|---------------------------|--------------|
-| **Orchestration** | External tool | Snowflake managed | Snowflake managed |
-| **FeatureView Type** | View-based | DT-based | DT-based (tiled) |
-| **Refresh Trigger** | Scheduled jobs | `refresh_freq` | `refresh_freq` |
-| **Typical Freshness** | Minutes to hours | Seconds to minutes | Configurable |
-| **Operational Complexity** | Higher | Lower | Lowest |
-| **Cost Model** | Job-based compute | Continuous compute | Continuous compute |
-| **Best For** | Existing DBT shops | New implementations | Time-windowed features |
+| Aspect | External (DBT/Airflow) | Internal (Dynamic Tables) | Temporal API | Rollup |
+|--------|------------------------|---------------------------|--------------|--------|
+| **Orchestration** | External tool | Snowflake managed | Snowflake managed | Snowflake managed |
+| **Feature View Type** | View-based | DT-based | DT-based (tiled) | DT-based (from tiled source) |
+| **Refresh Trigger** | Scheduled jobs | `refresh_freq` | `refresh_freq` | Follows source FV |
+| **Typical Freshness** | Minutes to hours | Seconds to minutes | Configurable | Follows source FV |
+| **Operational Complexity** | Higher | Lower | Lowest | Low (once source exists) |
+| **Cost Model** | Job-based compute | Continuous compute | Continuous compute | Incremental from tiles |
+| **Best For** | Existing DBT shops | New implementations | Time-windowed features | Entity hierarchy aggs |
 
 ---
 
@@ -92,7 +95,7 @@ External orchestration is ideal when you:
 
 - Have an existing DBT or Airflow investment
 - Need complex multi-step transformations
-- Want full control over scheduling and dependencies
+- Want full control over scheduling and external dependencies
 - Require transformations beyond SQL (Python, Spark)
 
 ### DBT Implementation Pattern
@@ -103,9 +106,17 @@ External orchestration is ideal when you:
 
 ```sql
 -- models/features/user_purchase_features.sql
+--
+-- DBT output table name = <database>.<schema>.<model_filename>
+--   database: from dbt_project.yml / profiles.yml (e.g. FEATURE_STORE_DEMO)
+--   schema:   from config() below → FEATURE_STORE
+--   model:    from filename       → USER_PURCHASE_FEATURES
+-- Result: FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES
+
+-- Source: FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS (ORDER_TS, TOTAL_AMT, USER_ID, ORDER_ID)
 {{ config(
     materialized='table',
-    schema='features',
+    schema='FEATURE_STORE',
     tags=['feature_store', 'user_features']
 ) }}
 
@@ -113,8 +124,8 @@ WITH order_stats AS (
     SELECT 
         USER_ID,
         COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
-        SUM(AMOUNT) AS TOTAL_SPEND,
-        AVG(AMOUNT) AS AVG_ORDER_AMT,
+        SUM(TOTAL_AMT) AS SPEND_SUM,
+        AVG(TOTAL_AMT) AS AVG_ORDER_AMT,
         MAX(ORDER_TS) AS LAST_ORDER_TS
     FROM {{ ref('stg_orders') }}
     GROUP BY USER_ID
@@ -125,30 +136,27 @@ SELECT *,
 FROM order_stats
 ```
 
-#### Step 2: Register as View-Based FeatureView
+#### Step 2: Register as View-Based Feature View
 
 ```python
 from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
 
-# Reference the DBT-created table as a View-based FeatureView
-user_features_df = session.table("ANALYTICS.FEATURES.USER_PURCHASE_FEATURES")
+# Reference the DBT-created table as a View-based Feature View
+user_features_df = session.table(
+    "FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES"
+)
 
 user_purchase_fv = FeatureView(
     name="USER_PURCHASE_FEATURES",
     entities=[user_entity],
     feature_df=user_features_df,
     timestamp_col="_DBT_UPDATED_TS",
-    # No refresh_freq → View-based (DBT handles refresh)
+    # refresh_freq omitted / None → View-based Feature View (DBT handles refresh)
     desc="User purchase features - managed by DBT"
 )
 
-fs.register_feature_view(feature_view=user_purchase_fv, version="V1")
+fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
 ```
-
-::: {.callout-tip}
-## Field Tip
-You can use Feature Store to assemble datasets, then export to external environments. The `snowflake-ml-python` package can be installed externally to simplify data retrieval.
-:::
 
 ---
 
@@ -167,40 +175,70 @@ Dynamic Tables are ideal when you:
 
 > 📁 **Full code:** [`_code/dynamic_table_pattern.py`](_code/dynamic_table_pattern.py)
 
+The `feature_df` can be defined using either `session.sql()` or the Snowpark DataFrame API -- both produce the same Dynamic Table:
+
 ```python
 from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+import snowflake.snowpark.functions as F
 
-# Define transformation logic as Snowpark DataFrame
+# Option A: SQL string
 user_purchase_df = session.sql("""
     SELECT 
         USER_ID,
         COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
-        SUM(AMOUNT) AS TOTAL_SPEND,
-        AVG(AMOUNT) AS AVG_ORDER_AMT,
+        SUM(TOTAL_AMT) AS SPEND_SUM,
+        AVG(TOTAL_AMT) AS AVG_ORDER_AMT,
         MAX(ORDER_TS) AS LAST_ORDER_TS
-    FROM ORDERS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
     GROUP BY USER_ID
 """)
 
-# Create Dynamic Table-backed FeatureView
+# Option B: Snowpark DataFrame API (equivalent result)
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+user_purchase_df = orders.group_by("USER_ID").agg(
+    F.count_distinct("ORDER_ID").alias("ORDER_CNT"),
+    F.sum("TOTAL_AMT").alias("SPEND_SUM"),
+    F.avg("TOTAL_AMT").alias("AVG_ORDER_AMT"),
+    F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+)
+```
+
+Both approaches produce a lazy Snowpark DataFrame -- no data moves until the Feature View is registered and the Dynamic Table is materialised.
+
+```python
+# Create Dynamic Table-backed Feature View
 user_purchase_fv = FeatureView(
     name="USER_PURCHASE_STATS",
     entities=[user_entity],
     feature_df=user_purchase_df,
     timestamp_col="LAST_ORDER_TS",
-    refresh_freq="15 minutes",  # Creates Dynamic Table
+    refresh_freq="15 minutes",  # Dynamic Table with TARGET_LAG
     desc="User purchase statistics - auto-refreshed"
 )
 
 # Register and wait for initial materialization
 registered_fv = fs.register_feature_view(
     feature_view=user_purchase_fv,
-    version="V1",
+    version="V01",
     block=True,
 )
 ```
 
-### Refresh Configuration Options
+### How `refresh_freq` Selects the Backing Object
+
+`refresh_freq` on the Feature View determines whether Snowflake builds a **view** or a **Dynamic Table**, and how refresh is scheduled:
+
+| Mode | `refresh_freq` | Behavior |
+|------|----------------|----------|
+| **View-based Feature View** | `None` or omitted | No Dynamic Table. The `feature_df` is registered as a view; **you** refresh upstream tables (DBT, Airflow, manual loads). |
+| **Dynamic Table (lag)** | Time period (e.g. `"1 hour"`, `"15 minutes"`) | Snowflake creates a Dynamic Table with **TARGET_LAG** matching that interval. |
+| **Dynamic Table (scheduled)** | CRON expression (e.g. `"0 8 * * *"`) | Dynamic Table refresh driven by a **Task** (or equivalent schedule) for fixed clock-time runs. |
+
+For tiled temporal features, you still pass `timestamp_col`, `feature_granularity`, and `features`; `refresh_freq` follows the same idea (lag vs schedule) for how often tiles are updated.
+
+### Refresh Configuration Options (lag-based Dynamic Tables)
+
+When using a **time period** for `refresh_freq`, typical choices balance freshness and cost:
 
 | Refresh Freq | Use Case | Cost Impact |
 |--------------|----------|-------------|
@@ -222,7 +260,7 @@ SELECT
     REFRESH_END_TIME,
     STATISTICS:numInsertedRows::INT AS ROWS_INSERTED
 FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-    NAME => 'ML_FEATURES.FEATURE_STORE.USER_PURCHASE_STATS$V1'
+    NAME => 'FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_STATS$V01'
 ))
 ORDER BY REFRESH_START_TIME DESC
 LIMIT 10;
@@ -230,93 +268,239 @@ LIMIT 10;
 
 ---
 
+## Chained Feature View Pipelines {#sec-chaining}
+
+Feature Views can reference other Feature Views (or their underlying Dynamic Tables / Views) as their `feature_df` source, creating **multi-stage pipelines** within the Feature Store. This is a natural way to layer transformations: base Feature Views handle raw-to-feature computation, and downstream Feature Views combine or enrich those outputs.
+
+::: {.callout-warning}
+## Views cannot appear in the middle of a DT chain
+Snowflake does **not** allow a Dynamic Table to read from a View that queries another Dynamic Table (DT -> View -> DT). Views can only appear at the **end** of a pipeline (DT -> DT -> View is fine). If your pipeline has intermediate stages that feed a downstream DT, each intermediate stage must itself be a Dynamic Table -- not a View. See the [Dynamic Table limitations](https://docs.snowflake.com/en/user-guide/dynamic-tables-limitations) documentation.
+
+In Feature Store terms: if a downstream Feature View is DT-backed (`refresh_freq` set), all upstream Feature Views it references must also be DT-backed. A View-based Feature View can only be a **terminal consumer** in the chain.
+:::
+
+### How Chaining Works
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                   CHAINED FEATURE VIEW PIPELINE                          │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Source Tables                                                           │
+│  ┌──────────┐  ┌──────────┐                                              │
+│  │  ORDERS  │  │  EVENTS  │                                              │
+│  └─────┬────┘  └────┬─────┘                                              │
+│        │             │                                                   │
+│  BASE LAYER (DT Feature Views)                                           │
+│        ▼             ▼                                                   │
+│  ┌───────────┐ ┌───────────┐                                             │
+│  │USER_ORDER │ │USER_EVENT │    refresh_freq="1 hour"                    │
+│  │ _BASE_FV  │ │ _BASE_FV  │    Materialized from source tables          │
+│  │  (DT)     │ │  (DT)     │                                             │
+│  └─────┬─────┘ └─────┬─────┘                                             │
+│        │              │                                                  │
+│  DERIVED LAYER (downstream FVs)                                          │
+│        └──────┬───────┘                                                  │
+│               ▼                                                          │
+│         ┌───────────┐                                                    │
+│         │USER_COMBI │    Joins base FVs; DT or View                      │
+│         │ _FV       │    Refreshes after upstream DTs complete           │
+│         │           │                                                    │
+│         └───────────┘                                                    │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example: Base + Derived Feature Views
+
+```python
+# Base layer: order aggregates per user (DT-backed)
+user_order_base = FeatureView(
+    name="USER_ORDER_BASE_FV",
+    entities=[user_entity],
+    feature_df=session.sql("""
+        SELECT USER_ID,
+               DATE_TRUNC('day', ORDER_TS)::TIMESTAMP_NTZ AS ORDER_DATE,
+               SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+               COUNT(ORDER_ID) AS ORDER_CNT
+        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+        GROUP BY USER_ID, DATE_TRUNC('day', ORDER_TS)
+    """),
+    timestamp_col="ORDER_DATE",
+    refresh_freq="1 hour",
+    desc="Base: daily order aggregates per user",
+)
+fs.register_feature_view(user_order_base, version="V01", block=True)
+
+# Base layer: event aggregates per user (DT-backed)
+user_event_base = FeatureView(
+    name="USER_EVENT_BASE_FV",
+    entities=[user_entity],
+    feature_df=session.sql("""
+        SELECT USER_ID,
+               DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
+               COUNT(EVENT_ID) AS EVENT_CNT,
+               COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
+        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
+        GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
+    """),
+    timestamp_col="ACTIVITY_DATE",
+    refresh_freq="1 hour",
+    desc="Base: daily event aggregates per user",
+)
+fs.register_feature_view(user_event_base, version="V01", block=True)
+
+# Derived layer: join both base FVs into a combined view
+# References the underlying DTs by their $-delimited object names
+combined_df = session.sql("""
+    SELECT
+        o.USER_ID,
+        o.ORDER_DATE,
+        o.ORDER_TOTAL_AMT_SUM,
+        o.ORDER_CNT,
+        e.EVENT_CNT,
+        e.PRODUCT_DISTINCT_CNT
+    FROM FEATURE_STORE.USER_ORDER_BASE_FV$V01 o
+    JOIN FEATURE_STORE.USER_EVENT_BASE_FV$V01 e
+        ON o.USER_ID = e.USER_ID AND o.ORDER_DATE = e.ACTIVITY_DATE
+""")
+
+user_combined_fv = FeatureView(
+    name="USER_COMBINED_FV",
+    entities=[user_entity],
+    feature_df=combined_df,
+    timestamp_col="ORDER_DATE",
+    refresh_freq=None,    # View: always reflects latest base DT state
+    desc="Derived: combines order + event base Feature Views",
+)
+fs.register_feature_view(user_combined_fv, version="V01")
+```
+
+### DT-to-DT Chaining (Refresh Cascading)
+
+When a downstream Feature View is also DT-backed (`refresh_freq` set to a period), Snowflake manages the **refresh dependency graph** automatically. The downstream DT waits for its upstream DTs to refresh before it starts its own refresh. This gives you:
+
+- **Guaranteed ordering** -- the downstream DT always reads consistent, refreshed data from upstream
+- **Incremental compute** -- only changed rows from upstream flow through to the downstream DT
+- **Simpler individual stages** -- breaking a complex single-DT query into multiple stages reduces the SQL complexity at each level, which can improve incremental refresh efficiency (the engine has smaller change sets to track per stage)
+
+There are two approaches to building the upstream stages:
+
+1. **Plain DTs outside the Feature Store** -- create raw Dynamic Tables via SQL, then have a final downstream Feature View (DT or View) consume them. This is simpler when the intermediate stages are not useful as standalone features.
+2. **All stages as Feature Views** -- each stage is registered with entity keys, a `timestamp_col`, and feature columns. This makes intermediate stages **discoverable** via `list_feature_views()` and **reusable** by other Feature Views or training pipelines. The overhead is that each stage must conform to the Feature Store schema (entity keys, timestamp, feature columns).
+
+If both layers specify independent lag values, latency can **stack**: a base DT with 1-hour lag and a derived DT with 1-hour lag yields up to ~2 hours of end-to-end staleness. To avoid this, set the **upstream** DT's target lag to `DOWNSTREAM`. This tells the upstream DT to infer its refresh schedule from the most demanding downstream consumer:
+
+```python
+# Base layer: refreshes on demand when downstream DTs need it
+user_order_base = FeatureView(
+    name="USER_ORDER_BASE_FV",
+    entities=[user_entity],
+    feature_df=order_df,
+    refresh_freq="DOWNSTREAM",  # Refresh driven by downstream consumers
+    desc="Base: order aggregates; refresh cascaded from downstream",
+)
+
+# Derived layer: controls the refresh cadence for the entire chain
+user_enriched = FeatureView(
+    name="USER_ENRICHED_FV",
+    entities=[user_entity],
+    feature_df=enriched_df,
+    refresh_freq="1 hour",  # This drives the upstream refresh too
+    desc="Derived: enriched features; sets refresh pace for chain",
+)
+```
+
+With this pattern, the scheduler refreshes the base DT just before the derived DT needs it, keeping end-to-end latency within a single lag target rather than the sum of two.
+
+::: {.callout-warning}
+A DT set to `DOWNSTREAM` with **no** downstream consumers will never refresh. Always ensure at least one downstream DT has a concrete lag value.
+:::
+
+### DT-to-View Chaining
+
+When the downstream Feature View is View-based (`refresh_freq=None`), it reads from the upstream DTs at **query time**. The View always reflects the latest state of the upstream DTs. This avoids latency stacking but means the combined query runs on the consumer's warehouse at read time.
+
+Beyond avoiding latency stacking, DT-to-View chaining enables **transformations that are not compatible with incremental DT refresh**. Some SQL operations prevent a DT from using incremental mode (e.g., non-deterministic functions, certain window functions, or self-referential patterns). By placing these in a View layer on top of incrementally-refreshed base DTs, you get the best of both worlds: efficient incremental refresh for the heavy data processing, with flexible transforms applied at read time.
+
+This also allows the inclusion of **context or timestamp functions** (`CURRENT_TIMESTAMP()`, `DATEDIFF(... , CURRENT_DATE())`, etc.) in feature derivations. These are non-deterministic and would force a DT into full-refresh mode, but in a View they evaluate fresh on every query -- useful for real-time serving features like "days since last order" or "time since account creation."
+
+::: {.callout-important}
+## PIT caveat for context-time features
+
+Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **query execution time**, not a historical point-in-time. This is correct for **online serving** (the prediction is happening *now*), but breaks point-in-time correctness for **training data generation** via ASOF joins -- the join retrieves a feature value relative to the spine timestamp, yet the `DATEDIFF` was computed against "today," not the historical event date. If you need these features in training, compute them in the spine or training pipeline relative to the spine timestamp rather than relying on a View-based derivation. See [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) for details on ASOF semantics.
+:::
+
+### Trade-offs
+
+| | DT → DT (both materialised) | DT → View (derived is virtual) |
+|---|---|---|
+| **Read performance** | Pre-computed; fast reads | Query-time join; depends on complexity |
+| **Latency** | Stacks unless upstream uses `DOWNSTREAM` lag | Single upstream lag only |
+| **Storage** | Both layers stored | Only base layer stored |
+| **Compute** | Separate refresh compute for each layer | No derived-layer refresh compute |
+| **Best for** | High-read-volume derived features | Low-read-volume or simple joins |
+
+### Refresh and Dependency Considerations
+
+- **Version coupling:** The derived Feature View's SQL references specific base FV versions (e.g., `USER_ORDER_BASE_FV$V01`). When you create a new base version (`$V02`), update the derived FV to reference the new version and register a new derived version.
+- **Lineage tracking:** Use the Feature Store API's `.lineage()` method or SQL `OBJECT_DEPENDENCIES` to identify which downstream Feature Views depend on a base version before deprecating it (see [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-versioning)).
+- **Depth limits:** Snowflake supports up to **10 levels** of Dynamic Table dependency depth. For most Feature Store pipelines, 2-3 levels is typical. Deep chains increase end-to-end latency and complicate debugging.
+
+---
+
 ## Temporal Aggregation Pipelines {#sec-temporal-api}
 
-### When to Use Temporal Aggregation API
+The Temporal Aggregation API (`Feature` class) provides a fourth pipeline pattern: declarative time-windowed aggregations with automatic **tiling** for efficient incremental computation. Instead of recomputing an entire window (e.g., 7-day sum) on each refresh, the engine pre-computes fixed time buckets (tiles) and combines them at query time -- only new tiles are refreshed.
 
-The Temporal Aggregation API (Feature class) is ideal when you:
+::: {.callout-important}
+## Why tiling exists: correct PIT retrieval over sparse data
+The primary motivation for the Feature Aggregation API is **correctness**, not just efficiency. When you pre-compute a time-windowed aggregate (e.g., "7-day spend sum") in a standard DT using SQL window functions, the window is anchored to the row's own timestamp. At retrieval time, the ASOF join returns the most recent row with a timestamp <= the spine timestamp -- but if the source data is sparse (no activity for several days), that row's window covers the **wrong** time range relative to the spine's point in time.
 
-- Need time-windowed aggregations (7-day sum, 30-day count, etc.)
-- Want optimal performance through feature tiling
-- Have high-cardinality entities with frequent updates
-- Need multiple window sizes for the same base metric
+Tiling solves this by storing **partial aggregates per time grain** (tiles) in the DT. At retrieval time, the Feature Store **reassembles** the correct window by combining tiles backwards from the spine's ASOF timestamp. This produces the correct windowed value **regardless of source data sparsity**. Without tiling, the only alternatives are to densify the data first (see [Gap-Filling Pipelines](#sec-gap-filling) below) or to accept that window boundaries may be misaligned.
 
-### Understanding Feature Tiling
+For a summary of this problem, see [Chapter 01: Core Concepts](../01_concepts/index.qmd). For the full `Feature` class API reference, see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd).
+:::
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         FEATURE TILING CONCEPT                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Traditional Approach (recomputes entire window each refresh):              │
-│                                                                             │
-│  Day 1    Day 2    Day 3    Day 4    Day 5    Day 6    Day 7                │
-│  ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤           │
-│  │████████████████████████████████████████████████████████████│ 7-day SUM   │
-│  │        Recompute ALL 7 days on each refresh                │             │
-│  └────────────────────────────────────────────────────────────┘             │
-│                                                                             │
-│  Tiled Approach (pre-computes tiles, combines at query time):               │
-│                                                                             │
-│  Day 1    Day 2    Day 3    Day 4    Day 5    Day 6    Day 7                │
-│  ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤           │
-│  │ Tile 1 │ Tile 2 │ Tile 3 │ Tile 4 │ Tile 5 │ Tile 6 │ Tile 7 │           │
-│  │  $100  │  $50   │  $75   │  $200  │  $0    │  $150  │  $80   │           │
-│  └────────┴────────┴────────┴────────┴────────┴────────┴────────┘           │
-│                                                                             │
-│  7-day SUM = Tile1 + Tile2 + ... + Tile7 = $655                             │
-│  Only refresh the latest tile(s), combine existing tiles                    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**When to use the Temporal API:**
 
-### Feature Class API
+- Time-windowed aggregations (7-day sum, 30-day count, etc.)
+- Sparse, high-cardinality event data (clickstream, transactions)
+- Multiple window sizes for the same base metric
+- Comparative features via `offset` (e.g., week-over-week trends)
 
-> 📁 **Full code:** [`_code/temporal_api.py`](_code/temporal_api.py)
+**Quick example:**
 
 ```python
 from snowflake.ml.feature_store import Feature, FeatureView
 
-# Define time-windowed aggregations declaratively
 features = [
-    Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-    Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+    Feature.sum("TOTAL_AMT", "7d").alias("SPEND_SUM_7D"),
     Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
-    Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
-    Feature.approx_count_distinct("PRODUCT_ID", "7d").alias("UNIQUE_PRODUCTS_7D"),
-    Feature.last_n("PRODUCT_ID", "7d", n=5).alias("RECENT_PRODUCTS"),
+    Feature.sum("TOTAL_AMT", "7d", offset="7d").alias("SPEND_PREV_7D"),
 ]
 
-# Create tiled FeatureView
 user_temporal_fv = FeatureView(
     name="USER_TEMPORAL_AGGREGATES",
     entities=[user_entity],
-    feature_df=session.table("ORDERS"),
+    feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"),
     timestamp_col="ORDER_TS",
     refresh_freq="1 hour",
-    feature_granularity="1 hour",  # Tile size
+    feature_granularity="1 hour",
     features=features,
-    desc="User purchase aggregations with multiple time windows"
+    desc="User purchase aggregations with multiple time windows",
 )
 ```
 
+The `feature_df` can be an arbitrarily complex query (joins, filters, CASE expressions) -- the tiling engine wraps it as a CTE.
+
+**Rollup Feature Views** extend tiled pipelines with hierarchical aggregation -- creating coarser-grained features from finer-grained tiled Feature Views without recomputing from raw data (e.g., visitor → subscriber). Use `RollupConfig(source=registered_tiled_fv, mapping_df=entity_mapping_df)`.
+
 ::: {.callout-note}
-## 🆕 New in snowflake-ml 1.21+
-The Feature class and tiled aggregation are new capabilities. See [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for the complete reference.
+## Full reference: Chapter 07
+
+For the complete `Feature` class API -- all 14 aggregation functions, the `"lifetime"` window, `offset` for comparative features, `.alias()` and `case_sensitive` for column naming, tile size recommendations, column prefixing for disambiguation, and the full `RollupConfig` example -- see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd).
 :::
-
-### Available Aggregation Functions
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `Feature.sum(col, window)` | Sum over window | `Feature.sum("AMOUNT", "7d")` |
-| `Feature.count(col, window)` | Count over window | `Feature.count("ORDER_ID", "30d")` |
-| `Feature.approx_count_distinct(col, window)` | Approximate distinct count | `Feature.approx_count_distinct("PRODUCT_ID", "7d")` |
-| `Feature.avg(col, window)` | Average over window | `Feature.avg("AMOUNT", "7d")` |
-| `Feature.min(col, window)` | Minimum over window | `Feature.min("AMOUNT", "30d")` |
-| `Feature.max(col, window)` | Maximum over window | `Feature.max("AMOUNT", "30d")` |
-| `Feature.last_n(col, window, n)` | Last N values | `Feature.last_n("PRODUCT_ID", "7d", n=5)` |
 
 ---
 
@@ -354,51 +538,129 @@ What is your primary requirement?
 
 ---
 
-## Best Practices
+## Gap-Filling and Interpolation Pipelines {#sec-gap-filling}
 
-### 1. Match Refresh to Source Update Frequency
+When source data is **sparse** -- not a record for every time period -- ML models that expect regular time-series input (e.g., daily lab values, hourly sensor readings) need a **dense** representation. This section covers techniques for filling gaps before (or as part of) a Feature View pipeline.
+
+### When to Gap-Fill vs. Use the Aggregation API
+
+If your goal is **time-windowed aggregations** (7-day sum, 30-day average), the [Temporal Aggregation API](#sec-temporal-api) handles sparsity natively via tiling -- you do not need to densify first. Gap-filling is for use cases that need a **dense time series at a regular grain** as input (e.g., forecasting models, trend/slope features, interpolated metrics).
+
+### Approach 1: RESAMPLE + INTERPOLATE (Preview)
+
+Snowflake provides time-series-specific SQL constructs for gap-filling. `RESAMPLE` upsamples to a regular interval (inserting rows for missing periods), and `INTERPOLATE_FFILL` / `INTERPOLATE_BFILL` / `INTERPOLATE_LINEAR` fill the resulting NULLs:
+
+```sql
+SELECT
+    entity_id,
+    event_timestamp,
+    metric_value,
+    INTERPOLATE_FFILL(metric_value)
+        OVER (PARTITION BY entity_id ORDER BY event_timestamp) AS metric_ffill,
+    INTERPOLATE_LINEAR(metric_value)
+        OVER (PARTITION BY entity_id ORDER BY event_timestamp) AS metric_linear
+FROM source_table
+    RESAMPLE (event_timestamp EVERY '1 day' PARTITION BY entity_id)
+ORDER BY entity_id, event_timestamp
+```
+
+See the [Snowflake time-series documentation](https://docs.snowflake.com/en/user-guide/querying-time-series-data) for full syntax and limitations.
+
+::: {.callout-note}
+`RESAMPLE` and the `INTERPOLATE_*` functions are in Preview as of March 2026. `RESAMPLE` only fills gaps **within** the observed range of timestamps per entity -- it does not extend beyond the first or last observed row. To extend through the current date, use the generator approach below.
+:::
+
+### Approach 2: Generated date spine + JOIN
+
+For full control over the date range (e.g., extending through `CURRENT_DATE` even if the last observation was weeks ago), generate a dense calendar and join the sparse data onto it:
+
+```sql
+-- Dense calendar: one row per day from the earliest observation through today
+WITH date_spine AS (
+    SELECT DATEADD('day', ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1, '2024-01-01') AS cal_date
+    FROM TABLE(GENERATOR(ROWCOUNT => 1000))
+    QUALIFY cal_date <= CURRENT_DATE
+),
+-- Cross with entities
+entity_dates AS (
+    SELECT e.entity_id, d.cal_date
+    FROM (SELECT DISTINCT entity_id FROM source_table) e
+    CROSS JOIN date_spine d
+),
+-- Left join sparse data and fill forward
+filled AS (
+    SELECT
+        ed.entity_id,
+        ed.cal_date AS event_timestamp,
+        s.metric_value,
+        LAST_VALUE(s.metric_value IGNORE NULLS)
+            OVER (PARTITION BY ed.entity_id ORDER BY ed.cal_date
+                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS metric_ffill
+    FROM entity_dates ed
+    LEFT JOIN source_table s
+        ON ed.entity_id = s.entity_id AND ed.cal_date = s.event_timestamp::DATE
+)
+SELECT * FROM filled
+```
+
+### Feature View integration
+
+Wrap the densified query as a **View-based Feature View** with `timestamp_col` pointing to the calendar date column. This avoids materialising the full dense grid as a DT (which can be expensive and may force full refresh due to `GENERATOR` or `CURRENT_DATE` in the SQL):
 
 ```python
-# GOOD: Source updates hourly, refresh hourly
+dense_metric_df = session.sql("SELECT ... FROM filled_view")  # the dense query above
+
+dense_fv = FeatureView(
+    name="ENTITY_DAILY_METRIC_FV",
+    entities=[entity],
+    feature_df=dense_metric_df,
+    timestamp_col="EVENT_TIMESTAMP",
+    refresh_freq=None,  # View-based: dense computation runs at query time
+    desc="Gap-filled daily metrics with forward-fill interpolation",
+)
+```
+
+If materialisation is needed (high read volume), consider splitting the pipeline: a pre-built **table or DT** for the date spine (refreshed periodically), joined to the sparse data in a downstream DT. Be aware that `GENERATOR(...)` and `CURRENT_DATE` in DT SQL can prevent incremental refresh -- see [Chapter 06: Lookup Tables for Dynamic History](../06_temporal_features/index.qmd) for a workaround using reference tables instead of hardcoded dates.
+
+---
+
+## Best Practices
+
+### 1. Match Refresh to Consumer Freshness Needs
+
+```python
+# GOOD: Source updates hourly, consumers need hourly freshness
 hourly_source_fv = FeatureView(
     name="HOURLY_FEATURES",
     refresh_freq="1 hour",
     # ...
 )
 
-# WASTEFUL: Source updates daily, refreshing every 5 minutes
-wasteful_fv = FeatureView(
+# ALSO OK: Source updates daily, refresh_freq shorter than source cadence
+# The DT scheduler detects no upstream changes and skips without compute
+daily_fv = FeatureView(
     name="DAILY_FEATURES",
-    refresh_freq="5 minutes",  # Unnecessary compute!
+    refresh_freq="1 hour",  # checks hourly, but only refreshes when data lands
     # ...
 )
 ```
 
-### 2. Use Appropriate Tile Sizes
+A shorter `refresh_freq` than the source update rate incurs near-zero cost -- the DT scheduler checks for upstream changes and skips the refresh cycle if nothing has changed. See [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-refresh) for details.
 
-```python
-# High-frequency events: smaller tiles
-clickstream_fv = FeatureView(
-    feature_granularity="1 hour",  # Fine-grained
-    # ...
-)
+### 2. Match Tile Size to Data Frequency
 
-# Daily batch data: larger tiles
-daily_batch_fv = FeatureView(
-    feature_granularity="1 day",  # Coarse-grained
-    # ...
-)
-```
+When using the Temporal Aggregation API, choose `feature_granularity` to match your data arrival rate. See [Chapter 07: Aggregations API -- Tile Size Recommendations](../07_aggregations_api/index.qmd#sec-tiling) for detailed guidance.
 
 ### 3. Pipeline Ownership & SLAs
 
-Define clear ownership for each pipeline:
+Define clear ownership for each pipeline. The example below shows a **team-maintained manifest file** -- this is a documentation and CI/CD convention, not something consumed by the Feature Store API. Teams can use YAML, JSON, or any format that fits their toolchain:
 
 ```yaml
-# feature_manifest.yaml
+# feature_manifest.yaml -- team convention, not consumed by Feature Store API
 feature_views:
   - name: USER_TEMPORAL_AGGREGATES
     pattern: "Temporal API"
+    version: "V01"
     refresh: "1 hour"
     owner: ml-platform@company.com
     sla:
@@ -410,7 +672,7 @@ feature_views:
 ```sql
 -- Create alerting for stale features
 CREATE ALERT feature_staleness_alert
-  WAREHOUSE = ML_WH
+  WAREHOUSE = FS_DEV_WH
   SCHEDULE = 'USING CRON 0 * * * * UTC'
   IF (EXISTS (
     SELECT * 
@@ -430,13 +692,36 @@ CREATE ALERT feature_staleness_alert
 
 **Problem**: Using complex pipeline for simple lookups.
 
-**Solution**: Use View-based FeatureView directly on source for static data.
+**Solution**: Use View-based Feature View directly on source for static data.
 
 ### ❌ Pitfall 2: Ignoring Incremental Refresh Compatibility
 
-**Problem**: Using SQL patterns that prevent incremental refresh (e.g., `RANDOM()`, self-referential queries).
+**Problem**: Using SQL patterns that prevent incremental refresh (e.g., `RANDOM()`, self-referential queries, or aggregations on `FLOAT` columns with JOINs).
 
-**Solution**: Use deterministic SQL compatible with DT incremental refresh.
+**Solution**: Use deterministic SQL compatible with DT incremental refresh. Check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration -- if it shows `FULL` when you expected `INCREMENTAL`, review your `feature_df` SQL.
+
+You can also inspect refresh mode and history through the Feature Store Python API:
+
+```python
+fv = fs.get_feature_view("MY_FV", "v1")
+
+# Check the refresh mode assigned by the DT engine (AUTO, FULL, or INCREMENTAL)
+print(f"Refresh mode: {fv.refresh_mode}")
+print(f"Reason:       {fv.refresh_mode_reason}")
+
+# Review recent refresh history -- REFRESH_ACTION shows whether each refresh was INCREMENTAL or FULL
+fs.get_refresh_history(fv).show()
+```
+
+::: {.callout-warning title="Avoid AUTO refresh mode in production"}
+When the DT engine assigns `AUTO` refresh mode, it uses internal heuristics to decide between `INCREMENTAL` and `FULL` on each refresh cycle. These heuristics can be overly conservative (forcing `FULL` when `INCREMENTAL` would work), inconsistent across engine versions, and opaque to monitoring. For production Feature Views, explicitly design your SQL to be incremental-compatible and verify the DT shows `INCREMENTAL` mode after registration. If the engine selects `FULL`, fix the SQL pattern rather than relying on `AUTO` to eventually choose correctly.
+:::
+
+A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR, STD) in the same query block as a JOIN**. The DT engine cannot prove incremental correctness for floating-point aggregate diffs across joins, so it forces full refresh. **Workaround:** cast to fixed-point before aggregating (`CAST(float_col AS NUMBER(38, 6))`), or split the query into a base DT (aggregation, no join) and a View layer that joins. See [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation pattern.
+
+::: {.callout-tip title="Fix FLOAT at the source"}
+Rather than casting in every Feature View query, consider altering the source column type to `NUMBER`/`DECIMAL`. This is a one-time change that benefits all downstream DTs and eliminates the risk of forgetting a cast in a new Feature View. The ML precision impact is negligible -- see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for details.
+:::
 
 ### ❌ Pitfall 3: Mismatched Freshness Expectations
 
@@ -458,7 +743,9 @@ CREATE ALERT feature_staleness_alert
 |------------------|---------------|-----------|----------|
 | **External (DBT)** | External tool | Minutes-hours | Existing DBT shops |
 | **Internal (DT)** | Snowflake | Seconds-minutes | New implementations |
-| **Temporal API** | Snowflake | Configurable | Time-windowed aggs |
+| **Chained FVs** | Snowflake (DT graph) | Configurable (DOWNSTREAM minimises stacking) | Multi-stage pipelines, base + derived features |
+| **Temporal API** | Snowflake | Configurable | Time-windowed aggs with tiling; see [Ch07](../07_aggregations_api/index.qmd) |
+| **Rollup** | Snowflake | Follows source | Hierarchical entity aggregation; see [Ch07](../07_aggregations_api/index.qmd#sec-rollup) |
 
 ---
 

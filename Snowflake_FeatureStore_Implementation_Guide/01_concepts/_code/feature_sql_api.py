@@ -4,7 +4,7 @@ Feature definition using pure SQL via session.sql().
 This module demonstrates how to:
 - Define features using SQL queries
 - Use complex SQL constructs (window functions, CTEs)
-- Create FeatureViews from SQL-defined DataFrames
+- Create Feature Views from SQL-defined DataFrames
 
 Tested in: tests/test_chapter_01.py::TestFeatureDefinition
 """

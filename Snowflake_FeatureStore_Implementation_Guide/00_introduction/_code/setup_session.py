@@ -41,11 +41,10 @@ from snowflake.ml.feature_store import (
 # CONFIGURATION
 # ==============================================================================
 
-# Default configuration - override as needed
-SOURCE_DATABASE = 'FEATURE_STORE_GUIDE'
-SOURCE_SCHEMA = 'CLICKSTREAM_RAW'
-FS_NAME = 'GUIDE_FEATURE_STORE'
-WAREHOUSE = 'COMPUTE_WH'
+SOURCE_DATABASE = "FEATURE_STORE_DEMO"
+SOURCE_SCHEMA = "CLICKSTREAM_DATA"
+FS_NAME = "FEATURE_STORE"
+WAREHOUSE = "FS_DEV_WH"
 
 
 # ==============================================================================

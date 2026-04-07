@@ -4,7 +4,7 @@ Feature definition using the Feature Aggregation API.
 This module demonstrates how to:
 - Use the Feature class for time-windowed aggregations
 - Define multiple aggregation windows
-- Create tiled FeatureViews for efficient computation
+- Create tiled Feature Views for efficient computation
 
 Tested in: tests/test_chapter_01.py::TestFeatureAggregation
 
@@ -38,19 +38,12 @@ def get_time_windowed_features() -> list:
         )
     
     return [
-        # Sum aggregations
-        Feature.sum("AMOUNT", "7d").alias("TOTAL_SPEND_7D"),
-        Feature.sum("AMOUNT", "30d").alias("TOTAL_SPEND_30D"),
-        
-        # Count aggregations
+        Feature.sum("TOTAL_AMT", "7d").alias("SPEND_SUM_7D"),
+        Feature.sum("TOTAL_AMT", "30d").alias("SPEND_SUM_30D"),
         Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
         Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
-        
-        # Average aggregations
-        Feature.avg("AMOUNT", "24h").alias("AVG_ORDER_24H"),
-        Feature.avg("AMOUNT", "7d").alias("AVG_ORDER_7D"),
-        
-        # Last N values (for sequence features)
+        Feature.avg("TOTAL_AMT", "24h").alias("ORDER_VALUE_AVG_24H"),
+        Feature.avg("TOTAL_AMT", "7d").alias("ORDER_VALUE_AVG_7D"),
         Feature.last_n("PRODUCT_ID", "7d", n=5).alias("RECENT_PRODUCTS"),
     ]
 
@@ -61,9 +54,9 @@ def create_tiled_featureview(
     source_table: str = "ORDERS",
 ) -> FeatureView:
     """
-    Create a tiled FeatureView with time-windowed aggregations.
+    Create a tiled Feature View with time-windowed aggregations.
     
-    Tiled FeatureViews use incremental computation for efficiency.
+    Tiled Feature Views use incremental computation for efficiency.
     
     Args:
         session: Active Snowpark session
@@ -71,7 +64,7 @@ def create_tiled_featureview(
         source_table: Name of the source orders table
         
     Returns:
-        FeatureView with tiled aggregations (not yet registered)
+        Feature View with tiled aggregations (not yet registered)
         
     Raises:
         ImportError: If Feature class is not available
@@ -79,12 +72,12 @@ def create_tiled_featureview(
     features = get_time_windowed_features()
     
     return FeatureView(
-        name="USER_PURCHASE_AGGREGATES",
+        name="USER_ORDER_AGGREGATES",
         entities=[user_entity],
         feature_df=session.table(source_table),
         timestamp_col="ORDER_TS",
-        refresh_freq="1 hour",
-        feature_granularity="1 hour",  # Tile size for incremental computation
+        refresh_freq="1h",
+        feature_granularity="1h",
         features=features,
         desc="User purchase aggregations with time windows"
     )
@@ -104,19 +97,15 @@ def get_multi_window_features() -> list:
         raise ImportError("Feature class requires snowflake-ml-python >= 1.21.0")
     
     return [
-        # Short-term vs long-term spend
-        Feature.sum("AMOUNT", "7d").alias("SPEND_7D"),
-        Feature.sum("AMOUNT", "30d").alias("SPEND_30D"),
-        Feature.sum("AMOUNT", "90d").alias("SPEND_90D"),
+        Feature.sum("TOTAL_AMT", "7d").alias("SPEND_SUM_7D"),
+        Feature.sum("TOTAL_AMT", "30d").alias("SPEND_SUM_30D"),
+        Feature.sum("TOTAL_AMT", "90d").alias("SPEND_SUM_90D"),
         
-        # Short-term vs long-term frequency
-        Feature.count("ORDER_ID", "7d").alias("ORDERS_7D"),
-        Feature.count("ORDER_ID", "30d").alias("ORDERS_30D"),
-        Feature.count("ORDER_ID", "90d").alias("ORDERS_90D"),
-        
-        # Recent activity indicators
-        Feature.count("ORDER_ID", "24h").alias("ORDERS_24H"),
-        Feature.count("ORDER_ID", "1h").alias("ORDERS_1H"),
+        Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+        Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
+        Feature.count("ORDER_ID", "90d").alias("ORDER_CNT_90D"),
+        Feature.count("ORDER_ID", "24h").alias("ORDER_CNT_24H"),
+        Feature.count("ORDER_ID", "1h").alias("ORDER_CNT_1H"),
     ]
 
 

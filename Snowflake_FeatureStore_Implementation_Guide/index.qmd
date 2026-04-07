@@ -15,7 +15,7 @@ build, and operate a production-grade Snowflake Feature Store.
 ::: {.callout-note appearance="simple"}
 ## Key Topics Covered
 
-- **Core Concepts** - Entities, FeatureViews, and the Feature Store architecture
+- **Core Concepts** - Entities, Feature Views, and the Feature Store architecture
 - **Design Patterns** - Organization, naming conventions, and governance
 - **Feature Engineering** - Temporal features, aggregations, and pipelines
 - **Production Operations** - Online serving, preprocessing, and monitoring
@@ -63,7 +63,7 @@ In the example above, the feature store schema will be created in the `ML_DB` da
 | New to Feature Store | [Chapter 0: Introduction](00_introduction/index.qmd) |
 | Design a Feature Store | [Chapter 2: Design & Organization](02_design_organization/index.qmd) |
 | Design Entities & hierarchies | [Chapter 3: Entities & Hierarchies](03_entities_hierarchies/index.qmd) |
-| Creating FeatureViews | [Chapter 4: FeatureViews](04_feature_views/index.qmd) |
+| Creating Feature Views | [Chapter 4: Feature Views](04_feature_views/index.qmd) |
 | Building Feature Pipelines | [Chapter 5: Feature Pipelines](05_feature_pipelines/index.qmd) |
 | Build temporal features | [Chapter 6: Temporal Features](06_temporal_features/index.qmd) |
 | Enable online serving | [Chapter 8: Online Features](08_online_features/index.qmd) |
@@ -78,6 +78,12 @@ All code examples in this guide are:
 - ✅ **Copy-ready** - Click the copy button on any code block
 - ✅ **Self-contained** - Each example includes necessary imports
 - ✅ **Available in repo** - Browse the `_code/` directories
+
+::: {.callout-note}
+## Hard-coded names are for illustration only
+
+Throughout this guide, code examples use literal database, schema, and table names such as `FEATURE_STORE_DEMO`, `FEATURE_STORE`, and `CLICKSTREAM_DATA`. In production code, these should **never be hard-coded**. Instead, resolve them at execution time via environment variables, configuration files, CI/CD parameter injection, or Snowflake session context. See [Chapter 02: Design & Organization -- Environment Strategies](02_design_organization/index.qmd#sec-environments) for patterns and examples.
+:::
 
 ## Feedback & Contributions {.unnumbered}
 

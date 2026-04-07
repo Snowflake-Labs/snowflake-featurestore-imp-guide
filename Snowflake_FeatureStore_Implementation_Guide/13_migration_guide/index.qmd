@@ -5,7 +5,9 @@ subtitle: "Migrating to Snowflake Feature Store from other platforms"
 
 ## Overview
 
-This chapter provides guidance for teams migrating to Snowflake Feature Store from other platforms. It covers terminology mapping, migration strategies, and common patterns.
+This chapter provides guidance for teams migrating to Snowflake Feature Store from other platforms, **primarily Tecton**. It covers terminology mapping, migration strategies, and common patterns.
+
+Examples follow the **clickstream** sample layout: database `FEATURE_STORE_DEMO`, Feature Store schema `FEATURE_STORE`, source schema `CLICKSTREAM_DATA` (tables such as `EVENTS`, `SESSIONS`, `ORDERS`, `USERS`, `PRODUCTS`), warehouse `FS_DEV_WH`. Register Feature Views with version strings in **`V01`** format (for example `fs.register_feature_view(..., version="V01")`).
 
 ## Learning Objectives
 
@@ -34,24 +36,37 @@ After completing this chapter, you will be able to:
 
 ## Terminology Mapping {#sec-terminology}
 
-### Tecton/Feast → Snowflake
+### Tecton → Snowflake
 
 > 📁 **Full code:** [`_code/terminology_mapping.py`](_code/terminology_mapping.py)
 
-| Tecton/Feast | Snowflake | Notes |
-|--------------|-----------|-------|
-| Feature Store | Feature Store | Schema + metadata |
-| Entity | Entity | Business object with join keys |
-| Feature View | FeatureView | Collection of features |
-| Batch Feature View | Dynamic Table FV | Pre-computed features |
-| On-Demand Feature View | View FV | Query-time computed |
-| Online Store | Online Feature Table | Hybrid Table serving |
-| Offline Store | FeatureView (DT) | Historical feature storage |
-| Feature Service | (N/A) | Use FeatureView slices |
-| Spine | Spine DataFrame | Entity keys + timestamps |
-| Feature Definition | `feature_df` | DataFrame transformation |
-| `get_historical_features` | `generate_dataset` | Training data generation |
-| `get_online_features` | `get_online_features` | Real-time retrieval |
+| Tecton | Snowflake | Notes |
+|--------|-----------|-------|
+| Feature View | Feature View | Registered with `register_feature_view`; use `version="V01"` (or `V02`, …) |
+| Entity | Entity | Same concept; join keys align with spine columns |
+| Batch Feature View | Feature View (Dynamic Table) | Set `refresh_freq` to a **period** (e.g. `"1 hour"`) or **CRON** string |
+| On-Demand Feature View | Feature View (View) | Omit `refresh_freq` or set `refresh_freq=None`; query-time computation |
+| Feature Service | `generate_training_set()` / `generate_dataset()` | No separate service object: pass spine + list of Feature Views (see Chapter 10) |
+| Online Store | Online Feature Table (Hybrid Table) | Enable with `OnlineConfig`; freshness via `target_lag` |
+| Offline Store | Feature Store schema | e.g. `FEATURE_STORE_DEMO.FEATURE_STORE`; materialized batch features live in Dynamic Tables there |
+| Data Source | Source table or view | e.g. `FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS` |
+| Transformation | Feature View query (`feature_df`) | Snowpark DataFrame / SQL vs Tecton Python decorators |
+| Backfill | `fs.refresh_feature_view(fv)` | Triggers refresh outside the scheduled `refresh_freq` |
+| TTL | `refresh_freq` / `target_lag` | **Offline** lag ↔ Dynamic Table `refresh_freq`; **online** freshness ↔ `OnlineConfig.target_lag` (not a single global TTL) |
+| `get_historical_features` | `generate_training_set()` / `generate_dataset()` | Snowpark DataFrame vs versioned Dataset (Parquet); same PIT semantics |
+| `get_online_features` | `get_online_features` | Retrieve from Online Feature Table |
+| Spine | Spine DataFrame | Entity keys + PIT timestamp column passed as `spine_timestamp_col` |
+
+### Feast → Snowflake (abbreviated)
+
+| Feast | Snowflake |
+|-------|-----------|
+| Feature Store (registry) | Feature Store schema + platform metadata |
+| Feature View | Feature View |
+| Online Store | Online Feature Table (Hybrid Table) |
+| Offline Store | Feature Store schema |
+| Feature Service | `generate_training_set()` / `generate_dataset()` |
+| `get_historical_features` | `generate_training_set()` / `generate_dataset()` |
 
 ---
 
@@ -83,7 +98,7 @@ After completing this chapter, you will be able to:
 1. **Inventory existing features**
    - List all Feature Views/Groups
    - Document entities and join keys
-   - Identify refresh frequencies
+   - Identify refresh frequencies (map to `refresh_freq` / `target_lag`)
 
 2. **Map to Snowflake concepts**
    - Use terminology mapping table
@@ -98,7 +113,9 @@ After completing this chapter, you will be able to:
 > 📁 **Full code:** [`_code/migration_utils.py`](_code/migration_utils.py)
 
 ```python
-# Example: Migrating a Tecton Feature View to Snowflake
+# Example: Migrating a Tecton batch Feature View to Snowflake (clickstream ORDERS)
+
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
 
 # Tecton (original)
 """
@@ -114,14 +131,14 @@ def user_purchase_fv(user_txns):
     )
 """
 
-# Snowflake (migrated)
+# Snowflake (migrated) — FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS uses TOTAL_AMT, ORDER_ID, ORDER_TS
 user_purchase_df = session.sql("""
-    SELECT 
+    SELECT
         USER_ID,
-        SUM(AMOUNT) AS TOTAL_SPEND,
-        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) AS ORDER_CNT,
         MAX(ORDER_TS) AS LAST_ORDER_TS
-    FROM USER_TRANSACTIONS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
     GROUP BY USER_ID
 """)
 
@@ -131,36 +148,39 @@ user_purchase_fv = FeatureView(
     feature_df=user_purchase_df,
     timestamp_col="LAST_ORDER_TS",
     refresh_freq="1 hour",
+    desc="USER purchase aggregates from CLICKSTREAM_DATA.ORDERS",
 )
+
+fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
 ```
 
 ### Phase 3: Validation
 
 ```python
+from snowflake.snowpark import functions as F
+
 def validate_migration(
-    source_features: DataFrame,
-    snowflake_features: DataFrame,
+    source_features,
+    snowflake_features,
     entity_cols: list,
 ) -> dict:
-    """Compare features between source and Snowflake."""
-    
-    # Join on entity keys
+    """Compare features between source platform and Snowflake (Snowpark DataFrames)."""
+
     comparison = source_features.join(
         snowflake_features,
         on=entity_cols,
         how="full_outer",
     )
-    
-    # Check for differences
+
     mismatches = comparison.filter(
-        # Compare feature values
-        F.col("source_TOTAL_SPEND") != F.col("sf_TOTAL_SPEND")
+        F.col("source_ORDER_TOTAL_AMT_SUM") != F.col("sf_ORDER_TOTAL_AMT_SUM")
     ).count()
-    
+
+    total = comparison.count()
     return {
-        "total_rows": comparison.count(),
+        "total_rows": total,
         "mismatches": mismatches,
-        "match_rate": (1 - mismatches / comparison.count()) * 100,
+        "match_rate": (1 - mismatches / total) * 100 if total else 0.0,
     }
 ```
 
@@ -177,18 +197,20 @@ Tecton migration is prioritized given Databricks Online Tables EOL.
 
 ```python
 # Key differences to handle:
-# 1. Feature definitions use SQL/Snowpark vs Python transformations
-# 2. Online serving uses Hybrid Tables vs Tecton's online store
-# 3. Scheduling uses refresh_freq vs Tecton's schedule parameter
+# 1. Feature definitions use SQL/Snowpark (feature_df) vs Tecton Python transformations
+# 2. Online serving uses Hybrid Tables + OnlineConfig.target_lag vs Tecton's online store
+# 3. Offline scheduling uses Feature View refresh_freq vs Tecton's schedule parameter
+# 4. Backfill / ad-hoc refresh: fs.refresh_feature_view(fv)
+# 5. Training data: fs.generate_training_set() (Snowpark DF) or fs.generate_dataset() (ML Dataset)
 ```
 
 ### Feast Migration
 
 ```python
 # Key differences:
-# 1. Feature Store is a Snowflake schema vs external metadata store
-# 2. Online store is Hybrid Table vs Redis/DynamoDB
-# 3. No separate Feature Service concept - use FV slices
+# 1. Feature Store is a Snowflake schema + platform objects vs external registry + plugins
+# 2. Online store is Online Feature Table (Hybrid Table) vs Redis/DynamoDB
+# 3. No separate Feature Service — use generate_training_set() / generate_dataset() with spine + FVs
 ```
 
 ---
@@ -198,7 +220,7 @@ Tecton migration is prioritized given Databricks Online Tables EOL.
 ### 1. Migrate Incrementally
 
 ```
-Week 1: Entities + 2-3 simple FeatureViews
+Week 1: Entities + 2-3 simple Feature Views
 Week 2: Remaining batch features
 Week 3: Online serving setup
 Week 4: Consumer cutover
@@ -209,12 +231,16 @@ Week 4: Consumer cutover
 Operate both systems during migration:
 
 ```python
-# Generate features from both systems
+# Historical / training: compare Snowpark path (generate_training_set) and Dataset path (generate_dataset) as needed
 source_features = tecton_client.get_historical_features(...)
-sf_features = fs.generate_dataset(...)
+sf_training_df = snowflake_fs.generate_training_set(
+    spine_df=training_spine,
+    features=[user_purchase_fv],
+    spine_timestamp_col="SESSION_START_TS",
+)
+# Or: sf_dataset = snowflake_fs.generate_dataset(..., version="V01") for Parquet-backed ML Dataset workflows
 
-# Compare outputs
-validate_migration(source_features, sf_features)
+validate_migration(source_features, sf_training_df, entity_cols=["USER_ID"])
 ```
 
 ### 3. Validate PIT Correctness
@@ -223,9 +249,12 @@ validate_migration(source_features, sf_features)
 # Ensure point-in-time retrieval produces same results
 def test_pit_correctness(spine, source_fs, snowflake_fs):
     source_result = source_fs.get_historical_features(spine)
-    sf_result = snowflake_fs.generate_dataset(spine)
-    
-    assert_dataframes_equal(source_result, sf_result)
+    sf_df = snowflake_fs.generate_training_set(
+        spine_df=spine,
+        features=[user_purchase_fv],
+        spine_timestamp_col="SESSION_START_TS",
+    )
+    assert_dataframes_equal(source_result, sf_df)
 ```
 
 ---
@@ -250,6 +279,12 @@ def test_pit_correctness(spine, source_fs, snowflake_fs):
 
 **Solution**: Document and align timestamp semantics.
 
+### ❌ Pitfall 4: Confusing TTL with a Single Knob
+
+**Problem**: Tecton TTL maps to different Snowflake controls for offline vs online paths.
+
+**Solution**: Set `refresh_freq` for Dynamic Table materialization and `OnlineConfig.target_lag` for online sync independently; align both with product freshness SLAs.
+
 ---
 
 ## Summary
@@ -257,8 +292,8 @@ def test_pit_correctness(spine, source_fs, snowflake_fs):
 | Phase | Activities |
 |-------|------------|
 | **Assessment** | Inventory, terminology mapping, planning |
-| **Migration** | Recreate entities, port definitions, setup pipelines |
-| **Validation** | Compare outputs, validate PIT, cutover |
+| **Migration** | Recreate entities, port definitions (`feature_df`), register with `V01`, setup pipelines |
+| **Validation** | Compare outputs (`generate_training_set` / `generate_dataset`), validate PIT, cutover |
 
 ---
 
