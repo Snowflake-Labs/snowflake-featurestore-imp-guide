@@ -42,16 +42,10 @@ book:
         - 13_migration_guide/index.qmd
   
   appendices:
-    - part: "Appendix A: Sample Data"
-      chapters:
-        - appendices/A_sample_data/index.qmd
-        - appendices/A_sample_data/data_manager/streamlit_app.qmd
-    - part: "Appendix B: Environment Setup"
-      chapters:
-        - appendices/B_setup/index.qmd
-    - part: "Appendix C: Snowpark to Dynamic Table"
-      chapters:
-        - appendices/C_snowpark_to_dynamic_table/index.md
+    - appendices/A_sample_data/index.qmd
+    - appendices/A_sample_data/data_manager/streamlit_app.qmd
+    - appendices/B_setup/index.qmd
+    - appendices/C_snowpark_to_dynamic_table/index.md
 
 format:
   html:
