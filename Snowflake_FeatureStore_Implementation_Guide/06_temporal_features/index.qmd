@@ -632,6 +632,30 @@ Use **`V01`, `V02`, …** when registering so promotions and rollbacks stay expl
 
 **Solution:** Implement leakage detection in your training pipeline.
 
+### ❌ Pitfall 5: Partial Leading-Edge Intervals as Data Leakage {#sec-partial-interval-leakage}
+
+**Problem:** When source data is a continuous stream of transactions aggregated into fixed time buckets (e.g., 15-minute intervals, hourly bins), the *current* bucket at any point in time is **incomplete**. If feature computation includes this partial bucket via `CURRENT ROW` in window functions, the resulting features have a different distribution than what the model was trained on:
+
+- **Training data** is historical — all intervals are complete
+- **Inference data** includes the latest interval, which is only partially filled
+- Rolling means are biased downward, DIFFs are systematically negative, rate-of-change features are distorted
+
+This is a form of **data leakage** in reverse: rather than future data leaking into training, the model trains on a distribution (complete intervals) that doesn't match what it sees at serving time (partial intervals). The effect is the same — degraded prediction quality.
+
+**Solution:** Two DT-safe strategies and one source-management strategy:
+
+1. **Exclude CURRENT ROW in window functions (DT-safe):** Use `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` inside the DT. This is deterministic and preserves incremental refresh.
+
+2. **Use `offset` in tiled Feature Views (DT-safe):** The Feature class `offset` parameter shifts the window back, inherently skipping the potentially partial current interval (e.g., `Feature.avg("QTY", "1h", offset="15m")`).
+
+3. **Gate the source table externally:** Use a scheduled Task or Stream+Task pipeline that writes only complete intervals to the source table. The DT reads a table that never contains partial data — no non-deterministic functions in the DT SQL.
+
+::: {.callout-warning title="Do not use CURRENT_TIMESTAMP() inside a DT"}
+`CURRENT_TIMESTAMP()` is non-deterministic and forces FULL refresh. Source gating with `TIME_SLICE(CURRENT_TIMESTAMP(), ...)` must be applied in a Task or ingestion pipeline *outside* the DT — never in the DT definition.
+:::
+
+See [Chapter 05: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) for the full pipeline-level mitigation pattern and [Chapter 07](../07_aggregations_api/index.qmd#sec-partial-interval-tiling) for the tiling-specific safeguard.
+
 ---
 
 ## Summary

@@ -28,7 +28,7 @@ def user_recency_raw(
     session: Session,
     env: str = "DEV",
     *,
-    refresh_freq: str = "1 hour",
+    refresh_freq: str = "1 minute",
 ) -> FeatureView:
     """Raw last-activity timestamps per user.
 
@@ -68,6 +68,7 @@ def user_recency_raw(
         feature_df=df,
         timestamp_col="LAST_ACTIVE_TS",
         refresh_freq=refresh_freq,
+        refresh_mode="INCREMENTAL",
         desc="Raw last-activity timestamps – INCREMENTAL DT base for recency (churn)",
     )
 

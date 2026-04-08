@@ -56,6 +56,14 @@ class ScaleStep:
     # DT refresh
     refresh_clusters: Optional[int] = None
     dt_target_lag: Optional[str] = None
+    # Multiprocess
+    num_processes: Optional[int] = None
+    # ML workloads (mixed benchmark)
+    enable_dataset_gen: bool = False
+    dataset_gen_interval_minutes: int = 5
+    enable_batch_inference: bool = False
+    batch_inference_interval_minutes: int = 5
+    enable_inference_dt: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -71,9 +79,23 @@ def _adjust_ingestion(session, env: str, step: ScaleStep) -> None:
     )
 
 
+def _is_adaptive_warehouse(session, wh_name: str) -> bool:
+    """Check if a warehouse is adaptive (vs standard)."""
+    try:
+        rows = session.sql(f"SHOW WAREHOUSES LIKE '{wh_name}'").collect()
+        if rows:
+            wh_type = rows[0].as_dict().get("type", "").upper()
+            return wh_type == "ADAPTIVE"
+    except Exception:
+        pass
+    return False
+
+
 def _adjust_serving_warehouse(session, step: ScaleStep) -> None:
     cfg = get_config("DEV")
     wh = cfg.get("serving_warehouse", "FS_SERVING_WH")
+    if _is_adaptive_warehouse(session, wh):
+        return
     session.sql(f"""
         ALTER WAREHOUSE {wh} SET
             MAX_CLUSTER_COUNT = {step.serving_clusters}
@@ -83,6 +105,8 @@ def _adjust_serving_warehouse(session, step: ScaleStep) -> None:
 def _adjust_refresh_warehouse(session, clusters: int) -> None:
     cfg = get_config("DEV")
     wh = cfg.get("refresh_warehouse", "FS_REFRESH_WH")
+    if _is_adaptive_warehouse(session, wh):
+        return
     session.sql(f"""
         ALTER WAREHOUSE {wh} SET
             MAX_CLUSTER_COUNT = {clusters}
@@ -129,11 +153,19 @@ def _apply_step(
         or step.serving_clusters != prev.serving_clusters
     )
     if serving_changed:
+        cfg_wh = get_config("DEV")
+        sw_name = cfg_wh.get("serving_warehouse", "FS_SERVING_WH")
+        is_adaptive = _is_adaptive_warehouse(session, sw_name)
         _adjust_serving_warehouse(session, step)
-        changes.append(
-            f"serving warehouse: "
-            f"max_clusters={step.serving_clusters}"
-        )
+        if is_adaptive:
+            changes.append(
+                f"serving warehouse: adaptive (auto-scaling)"
+            )
+        else:
+            changes.append(
+                f"serving warehouse: "
+                f"max_clusters={step.serving_clusters}"
+            )
 
     refresh_changed = (
         step.refresh_clusters is not None
@@ -141,11 +173,19 @@ def _apply_step(
              or step.refresh_clusters != prev.refresh_clusters)
     )
     if refresh_changed:
-        _adjust_refresh_warehouse(session, step.refresh_clusters)
-        changes.append(
-            f"refresh warehouse: "
-            f"max_clusters={step.refresh_clusters}"
+        rw_name = get_config("DEV").get(
+            "refresh_warehouse", "FS_REFRESH_WH",
         )
+        _adjust_refresh_warehouse(session, step.refresh_clusters)
+        if _is_adaptive_warehouse(session, rw_name):
+            changes.append(
+                f"refresh warehouse: adaptive (auto-scaling)"
+            )
+        else:
+            changes.append(
+                f"refresh warehouse: "
+                f"max_clusters={step.refresh_clusters}"
+            )
 
     lag_changed = (
         step.dt_target_lag is not None
@@ -334,7 +374,7 @@ def _extract_pipeline_stats(snapshot: dict) -> dict:
         if b.get("DURATION_MS") is not None
     ]
     stats["avg_batch_duration_ms"] = (
-        round(_st.mean(batch_durs), 0)
+        float(round(_st.mean(batch_durs), 1))
         if batch_durs else None
     )
     stats["total_events_generated"] = sum(
@@ -471,7 +511,7 @@ def _generate_markdown(data: dict, path: Path) -> None:
 
     # Cross-step OFT performance
     w("## Cross-Step Summary — OFT Serving\n")
-    w("| Step | Dur | Ingest | Threads "
+    w("| Step | Dur | Ingest | Workers "
       "| QPM | p50 | p95 | p99 | Err |")
     w("|------|-----|--------|--------"
       "|-----|-----|-----|-----|-----|")
@@ -481,11 +521,17 @@ def _generate_markdown(data: dict, path: Path) -> None:
         p = b["overall_percentiles"]
         thr = c.get("threads_per_cluster", 8)
         cl = c.get("serving_clusters", 1)
+        total_t = thr * cl
+        nproc = c.get("num_processes")
+        if nproc:
+            workers = f"{total_t}t/{nproc}p"
+        else:
+            workers = f"{total_t}t"
         w(f"| {c['name']} "
           f"| {c['duration_minutes']}m "
           f"| {c['sessions_per_batch']}"
           f"/{c['orders_per_batch']} "
-          f"| {thr * cl} "
+          f"| {workers} "
           f"| {b['qpm']:,.0f} "
           f"| {p['p50']:.0f} "
           f"| {p['p95']:.0f} "
@@ -578,8 +624,14 @@ def _generate_markdown(data: dict, path: Path) -> None:
         w(f"- **Duration:** {dur} minutes")
         w(f"- **Ingestion:** {sess} sessions, "
           f"{ords} orders/batch")
-        w(f"- **Serving:** {threads} threads "
-          f"({tpc}/cluster x {scl} cluster(s))")
+        nproc = cfg.get("num_processes")
+        if nproc:
+            w(f"- **Serving:** {threads} threads "
+              f"across {nproc} processes "
+              f"({tpc}/cluster x {scl} cluster(s))")
+        else:
+            w(f"- **Serving:** {threads} threads "
+              f"({tpc}/cluster x {scl} cluster(s))")
         if cfg.get("target_qpm"):
             w(f"- **Target QPM:** {cfg['target_qpm']:,.0f}")
         if cfg.get("refresh_clusters"):
@@ -747,6 +799,11 @@ def _generate_markdown(data: dict, path: Path) -> None:
 # Snowflake persistence — cross-run comparison
 # ---------------------------------------------------------------------------
 
+def _to_float(v) -> float | None:
+    """Coerce to float for consistent Snowpark type inference."""
+    return float(v) if v is not None else None
+
+
 def _persist_to_snowflake(
     session, env: str, results_data: dict,
 ) -> tuple[str, str]:
@@ -852,6 +909,7 @@ def _persist_to_snowflake(
         ("AVG_BATCH_DUR_MS", "FLOAT"),
         ("TOTAL_EVENTS", "NUMBER"),
         ("PIPELINE_STATS", "VARIANT"),
+        ("NUM_PROCESSES", "NUMBER"),
     ]
     for cn, ct in _new_cols:
         try:
@@ -939,27 +997,30 @@ def _persist_to_snowflake(
             c.get("target_qpm"),
             b.get("total_queries"),
             b.get("total_errors"),
-            b.get("qpm"),
-            p.get("p50"), p.get("p90"),
-            p.get("p95"), p.get("p99"),
-            p.get("mean"),
-            p.get("min"), p.get("max"),
+            _to_float(b.get("qpm")),
+            _to_float(p.get("p50")),
+            _to_float(p.get("p90")),
+            _to_float(p.get("p95")),
+            _to_float(p.get("p99")),
+            _to_float(p.get("mean")),
+            _to_float(p.get("min")),
+            _to_float(p.get("max")),
             # Pipeline scalars
             ps.get("dt_refresh_count"),
             ps.get("dt_incr_count"),
             ps.get("dt_full_count"),
-            ps.get("dt_refresh_p50_s"),
-            ps.get("dt_refresh_p90_s"),
-            ps.get("dt_refresh_p95_s"),
-            ps.get("dt_refresh_max_s"),
-            ps.get("dt_refresh_mean_s"),
+            _to_float(ps.get("dt_refresh_p50_s")),
+            _to_float(ps.get("dt_refresh_p90_s")),
+            _to_float(ps.get("dt_refresh_p95_s")),
+            _to_float(ps.get("dt_refresh_max_s")),
+            _to_float(ps.get("dt_refresh_mean_s")),
             ps.get("dt_rows_inserted"),
-            ps.get("source_freshness_max_s"),
-            ps.get("dt_freshness_max_s"),
-            ps.get("stage_latency_max_s"),
-            ps.get("stage_latency_mean_s"),
+            _to_float(ps.get("source_freshness_max_s")),
+            _to_float(ps.get("dt_freshness_max_s")),
+            _to_float(ps.get("stage_latency_max_s")),
+            _to_float(ps.get("stage_latency_mean_s")),
             ps.get("batch_count"),
-            ps.get("avg_batch_duration_ms"),
+            _to_float(ps.get("avg_batch_duration_ms")),
             ps.get("total_events_generated"),
             # VARIANTs
             json.dumps(b, default=str),
@@ -968,6 +1029,7 @@ def _persist_to_snowflake(
                 default=str,
             ),
             json.dumps(ps, default=str),
+            c.get("num_processes"),
         ))
 
     if rows:
@@ -1006,6 +1068,7 @@ def _persist_to_snowflake(
                 "TOTAL_EVENTS",
                 "BENCH_JSON", "SNAP_JSON",
                 "STATS_JSON",
+                "NUM_PROCESSES",
             ],
         )
         sdf = sdf.select(
@@ -1128,6 +1191,9 @@ def _persist_to_snowflake(
             parse_json(
                 col("STATS_JSON")
             ).alias("PIPELINE_STATS"),
+            col("NUM_PROCESSES").cast(
+                "NUMBER"
+            ).alias("NUM_PROCESSES"),
         )
         sdf.write.mode("append").save_as_table(
             steps_tbl
@@ -1160,7 +1226,7 @@ def run_e2e_test(
         warmup_seconds: Pause after applying step config before starting
             the benchmark (lets warehouse spin up and DTs begin refresh).
         output_dir: Directory for JSON + Markdown output.  Defaults to
-            ``_internal_development/benchmark_e2e_demo/results/``.
+            ``benchmark_results/`` next to the notebooks directory.
         session_factory: Passed through to ``run_benchmark()``.  If None,
             the benchmark creates its own sessions per worker thread.
         persist: If True (default), write results to Snowflake tables
@@ -1173,13 +1239,15 @@ def run_e2e_test(
     from .benchmark import BenchmarkConfig, run_benchmark
     from .generator import resume_task, suspend_task
     from .latency import pipeline_summary
+    from .ml_workloads import (
+        run_background_workloads,
+        ensure_inference_dt,
+        drop_inference_dt,
+    )
 
     if output_dir is None:
         base = Path(__file__).resolve().parents[2]
-        output_dir = (
-            base.parent / "_internal_development"
-            / "benchmark_e2e_demo" / "results"
-        )
+        output_dir = base / "benchmark_results"
     output_dir = Path(output_dir)
 
     ts_fmt = "%Y-%m-%dT%H-%M-%SZ"
@@ -1229,6 +1297,28 @@ def run_e2e_test(
         print("  Ingestion will rely on manual "
               "batches or an already-running task")
 
+    # Set up inference DT if any step requests it
+    _inference_dt_active = False
+    if any(s.enable_inference_dt for s in steps):
+        print("Setting up inference DT...")
+        try:
+            ensure_inference_dt(session, env)
+            _inference_dt_active = True
+        except Exception as e:
+            print(f"  Warning: inference DT setup failed ({e})")
+
+    has_ml = any(
+        s.enable_dataset_gen or s.enable_batch_inference
+        for s in steps
+    )
+    if has_ml:
+        ml_workloads_active = []
+        if any(s.enable_dataset_gen for s in steps):
+            ml_workloads_active.append("dataset_gen")
+        if any(s.enable_batch_inference for s in steps):
+            ml_workloads_active.append("batch_inference")
+        print(f"ML workloads enabled: {', '.join(ml_workloads_active)}")
+
     prev_step: ScaleStep | None = None
 
     try:
@@ -1242,6 +1332,21 @@ def run_e2e_test(
 
             # Apply config changes
             changes = _apply_step(session, env, step, prev_step)
+            if step.enable_dataset_gen:
+                changes.append(
+                    f"dataset generation: every "
+                    f"{step.dataset_gen_interval_minutes} min"
+                )
+            if step.enable_batch_inference:
+                changes.append(
+                    f"batch inference: every "
+                    f"{step.batch_inference_interval_minutes} min"
+                )
+            if step.enable_inference_dt:
+                changes.append(
+                    "inference DT: CHURN_RISK_SCORES_DT "
+                    "(5 min lag)"
+                )
             if changes:
                 print("  Config changes:")
                 for c in changes:
@@ -1255,12 +1360,55 @@ def run_e2e_test(
                 print(f"  Warming up ({warmup_seconds}s)...")
                 time.sleep(warmup_seconds)
 
+            # Start ML background workloads (if enabled for this step)
+            bg_handle = None
+            ml_session_factory = session_factory
+            if (step.enable_dataset_gen or step.enable_batch_inference):
+                if ml_session_factory is None:
+                    from .config import is_workspace
+                    if is_workspace():
+                        from .config import workspace_session_factory
+                        cfg_ml = get_config(env)
+                        ml_session_factory = workspace_session_factory(
+                            role=None,
+                            warehouse=cfg_ml.get(
+                                "ml_warehouse", "FS_ML_WH"
+                            ),
+                            database=cfg_ml["database"],
+                            schema=cfg_ml["fs_schema"],
+                        )
+                    else:
+                        from .config import get_session as _gs_ml
+                        _ml_role = session.get_current_role()
+                        if _ml_role:
+                            _ml_role = _ml_role.strip('"')
+
+                        def ml_session_factory(
+                            _r=_ml_role,
+                        ):
+                            return _gs_ml(role=_r)
+
+                bg_handle = run_background_workloads(
+                    session_factory=ml_session_factory,
+                    env=env,
+                    duration_seconds=step.duration_minutes * 60,
+                    enable_dataset_gen=step.enable_dataset_gen,
+                    dataset_gen_interval=(
+                        step.dataset_gen_interval_minutes * 60
+                    ),
+                    enable_batch_inference=step.enable_batch_inference,
+                    batch_inference_interval=(
+                        step.batch_inference_interval_minutes * 60
+                    ),
+                )
+
             # Run benchmark
             bench_cfg = BenchmarkConfig(
                 duration_seconds=step.duration_minutes * 60,
                 threads_per_cluster=step.threads_per_cluster,
                 max_clusters=step.serving_clusters,
                 target_qpm=step.target_qpm,
+                num_processes=step.num_processes,
             )
 
             bench_result = run_benchmark(
@@ -1268,6 +1416,25 @@ def run_e2e_test(
                 session_factory=session_factory,
             )
             bench_result.print_summary()
+
+            # Collect ML workload results
+            ml_summaries: dict = {}
+            if bg_handle is not None:
+                print("\n  Collecting ML workload results...")
+                try:
+                    ml_summaries = bg_handle.join(timeout=60)
+                    for wl_name, wl_sum in ml_summaries.items():
+                        print(
+                            f"    {wl_name}: "
+                            f"{wl_sum.cycles_completed} cycles, "
+                            f"{wl_sum.total_rows} rows, "
+                            f"avg {wl_sum.avg_duration_seconds:.1f}s"
+                            + (f", {wl_sum.cycles_failed} failed"
+                               if wl_sum.cycles_failed else "")
+                        )
+                except Exception as e:
+                    print(f"    Warning: ML workload "
+                          f"collection failed ({e})")
 
             # Pipeline snapshot — look back over step
             # duration + warmup for refresh history
@@ -1304,6 +1471,19 @@ def run_e2e_test(
                 "pipeline_snapshot": _serialise_pipeline_snapshot(snapshot),
                 "pipeline_stats": pipeline_stats,
             }
+            if ml_summaries:
+                step_data["ml_workloads"] = {
+                    name: {
+                        "cycles_completed": s.cycles_completed,
+                        "cycles_failed": s.cycles_failed,
+                        "total_rows": s.total_rows,
+                        "total_duration_seconds": s.total_duration_seconds,
+                        "avg_duration_seconds": s.avg_duration_seconds,
+                        "versions_created": s.versions_created,
+                        "cycle_results": s.cycle_results,
+                    }
+                    for name, s in ml_summaries.items()
+                }
             results_data["steps"].append(step_data)
             results_data["overall"]["steps_completed"] = step_num
             results_data["overall"]["total_queries"] += bench_result.total_queries
@@ -1327,6 +1507,16 @@ def run_e2e_test(
         )
 
     finally:
+        # Clean up inference DT
+        if _inference_dt_active:
+            print("Dropping inference DT...")
+            try:
+                drop_inference_dt(session, env)
+                print("  Inference DT dropped")
+            except Exception as e:
+                print(f"  Warning: inference DT cleanup "
+                      f"failed ({e})")
+
         # Shut down ingestion
         print("\nSuspending ingestion task...")
         try:

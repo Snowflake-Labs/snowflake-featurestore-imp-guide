@@ -6,8 +6,6 @@ Patterns covered:
 - Point-in-time (PIT) correctness (no future leakage in training datasets)
 - Schema validation for Feature View outputs
 
-See repository: _internal_development/TESTING_STRATEGY.md
-
 Tested in: tests/test_chapter_12.py
 """
 

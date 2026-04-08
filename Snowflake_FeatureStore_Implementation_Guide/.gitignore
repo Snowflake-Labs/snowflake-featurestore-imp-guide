@@ -1,1 +1,11 @@
 /.quarto/
+_site/
+_freeze/
+
+# LaTeX / Quarto build artifacts
+*.tex
+*.log
+*.aux
+
+# Benchmark output (generated at runtime)
+benchmark_results/

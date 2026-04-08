@@ -21,7 +21,7 @@ def user_permutation_features_wide(
     session: Session,
     env: str = "DEV",
     *,
-    refresh_freq: str = "1 hour",
+    refresh_freq: str = "1 minute",
 ) -> FeatureView:
     """Interaction-count features packed into an OBJECT column.
 
@@ -89,5 +89,6 @@ def user_permutation_features_wide(
         entities=[user_entity()],
         feature_df=df,
         refresh_freq=refresh_freq,
+        refresh_mode="INCREMENTAL",
         desc="Interaction permutation features packed into OBJECT – wide/sparse demo",
     )

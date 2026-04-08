@@ -635,6 +635,47 @@ output_cols = [c for c in result_df.columns if not c.startswith("_PARTIAL_")]
 result_df = result_df.select(output_cols)
 ```
 
+### ❌ Pitfall 5: Partial Leading-Edge Tiles from Incomplete Source Intervals {#sec-partial-interval-tiling}
+
+**Problem**: When the source data is a continuous stream aggregated into fixed time buckets (e.g., 15-minute intervals), the current in-progress bucket is **incomplete** at DT refresh time. The tiled Feature View generates a tile from this partial interval, producing aggregation values with a different distribution than complete historical tiles. This creates **training/serving skew**: the model trains on features derived from complete intervals but at inference time receives features that include a partial tile.
+
+This affects all tiled aggregations — `Feature.avg`, `Feature.sum`, `Feature.count`, `Feature.min`, `Feature.max` — because the partial tile has fewer source events than a complete one.
+
+**Solution**: Two complementary strategies:
+
+**Strategy 1 — Use `offset` to skip the current interval (DT-safe):**
+
+The `offset` parameter shifts the aggregation window back, inherently excluding the potentially partial current tile. This is deterministic SQL that preserves incremental DT refresh:
+
+```python
+# Window covers intervals ending one interval ago — skips partial current tile
+Feature.avg("QTY", "1h", offset="15m").alias("QTY_ROLL_4_MEAN")
+Feature.sum("QTY", "1h", offset="15m").alias("QTY_ROLL_4_SUM")
+```
+
+This is the simplest and most robust approach for tiled Feature Views. The trade-off is that features always reflect the state one interval behind — typically acceptable for forecasting use cases where the current interval is incomplete anyway.
+
+**Strategy 2 — Gate the source table externally (outside the DT):**
+
+Use a scheduled Task or Stream+Task pipeline that writes only complete intervals to the source table. The DT reads a table that never contains partial data:
+
+```sql
+-- Task runs every 15 minutes: write only complete intervals to source
+INSERT INTO SOURCE_ORDERS_15MIN
+SELECT TIME_SLICE(ORDER_TS, 15, 'MINUTE') AS INTERVAL_ID,
+       ITEM_CODE, BRANCH_CODE, COUNT(*) AS QTY
+FROM RAW_ORDERS
+WHERE TIME_SLICE(ORDER_TS, 15, 'MINUTE')
+      < TIME_SLICE(CURRENT_TIMESTAMP(), 15, 'MINUTE', 'START')
+GROUP BY 1, 2, 3;
+```
+
+::: {.callout-warning title="Do not use CURRENT_TIMESTAMP() inside a DT or feature_df"}
+`CURRENT_TIMESTAMP()` is non-deterministic and forces FULL refresh. The `TIME_SLICE` gating filter must be applied in a Task or ingestion pipeline *outside* the DT — never in the DT definition SQL or the `feature_df` passed to a Feature View. Even when passed via `session.sql(...)`, the non-deterministic expression flows through to the DT and prevents incremental refresh.
+:::
+
+For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` (excluding `CURRENT ROW`) as the DT-safe equivalent. See [Chapter 05: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) and [Chapter 06: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage).
+
 ---
 
 ## Summary

@@ -693,6 +693,13 @@ for t in dim_tables + fact_tables:
 session.sql(f"GRANT SELECT ON ALL TABLES IN SCHEMA {dev_db}.{src} TO ROLE {dev_role}").collect()
 session.sql(f"GRANT SELECT ON ALL TABLES IN SCHEMA {dev_db}.{src} TO ROLE {consumer_role}").collect()
 
+# Re-enable change tracking on fact tables (required by INCREMENTAL DTs)
+print("\n=== Enabling change tracking on source tables ===")
+for t in fact_tables:
+    for db_name in [prod_db, dev_db]:
+        session.sql(f"ALTER TABLE {db_name}.{src}.{t} SET CHANGE_TRACKING = TRUE").collect()
+    print(f"  {t}: change tracking enabled")
+
 # ---------------------------------------------------------------------------
 # 11. Verify
 # ---------------------------------------------------------------------------

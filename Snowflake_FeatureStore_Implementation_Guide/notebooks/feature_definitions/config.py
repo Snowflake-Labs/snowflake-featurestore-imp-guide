@@ -31,6 +31,7 @@ ENVIRONMENTS = {
         "warehouse_size": os.environ.get("FS_DEV_WAREHOUSE_SIZE", "X-SMALL"),
         "refresh_warehouse": os.environ.get("FS_REFRESH_WAREHOUSE", "FS_REFRESH_WH"),
         "serving_warehouse": os.environ.get("FS_SERVING_WAREHOUSE", "FS_SERVING_WH"),
+        "ml_warehouse": os.environ.get("FS_ML_WAREHOUSE", "FS_ML_WH"),
     },
     "PROD": {
         "database": os.environ.get("FS_PROD_DATABASE", "FEATURE_STORE_DEMO"),
@@ -45,6 +46,7 @@ ENVIRONMENTS = {
         "warehouse_size": os.environ.get("FS_PROD_WAREHOUSE_SIZE", "X-SMALL"),
         "refresh_warehouse": os.environ.get("FS_REFRESH_WAREHOUSE", "FS_REFRESH_WH"),
         "serving_warehouse": os.environ.get("FS_SERVING_WAREHOUSE", "FS_SERVING_WH"),
+        "ml_warehouse": os.environ.get("FS_ML_WAREHOUSE", "FS_ML_WH"),
     },
 }
 

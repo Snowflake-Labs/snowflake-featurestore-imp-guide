@@ -2,7 +2,9 @@
 
 A comprehensive best practices guide for implementing and operating Snowflake Feature Store, with executable notebooks and practical examples.
 
-**Author**: Simon Field, Technical Director, SnowCat  
+**[Read the Guide Online](https://snowflake-labs.github.io/snowflake-featurestore-imp-guide/)**
+
+**Author**: Simon Field, Technical Director, SnowCAT  
 **Version**: 2.0 (In Development)  
 **Snowflake ML Version**: 1.21.0+
 

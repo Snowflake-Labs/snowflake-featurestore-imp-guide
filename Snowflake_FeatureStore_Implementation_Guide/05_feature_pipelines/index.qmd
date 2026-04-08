@@ -723,13 +723,65 @@ A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR
 Rather than casting in every Feature View query, consider altering the source column type to `NUMBER`/`DECIMAL`. This is a one-time change that benefits all downstream DTs and eliminates the risk of forgetting a cast in a new Feature View. The ML precision impact is negligible -- see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for details.
 :::
 
-### ❌ Pitfall 3: Mismatched Freshness Expectations
+### ❌ Pitfall 3: Partial Leading-Edge Interval in Streaming/Continuous Sources {#sec-partial-interval}
+
+**Problem**: When a DT Feature View computes window functions over time-bucketed data (e.g., 15-minute or hourly aggregations of continuous transactions), the *current* time bucket at refresh time is typically **incomplete**. A 15-minute interval queried at minute 7 contains roughly half the expected events. Window functions using `CURRENT ROW` include this partial bucket, causing **training/serving skew**: the model trains on complete historical intervals but at inference time receives features computed over a partial current interval. This affects every feature that touches CURRENT ROW — rolling means, LAGs, DIFFs, rate-of-change — and produces systematically biased predictions.
+
+**Solution**: Three complementary strategies, each appropriate for different layers of the pipeline:
+
+**Strategy 1 — Exclude CURRENT ROW in window functions (DT-safe):**
+
+Use `1 PRECEDING` as the upper window bound inside the DT definition. This is deterministic SQL and preserves incremental DT refresh:
+
+```sql
+-- ✅ DT-safe: excludes potentially partial current row
+AVG(QTY) OVER (PARTITION BY ITEM_CODE ORDER BY INTERVAL_ID
+               ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING)
+
+-- ❌ Includes partial current row — biased at the leading edge
+AVG(QTY) OVER (PARTITION BY ITEM_CODE ORDER BY INTERVAL_ID
+               ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)
+```
+
+**Strategy 2 — Use `offset` in tiled Feature Views (DT-safe):**
+
+The Feature class `offset` parameter shifts the aggregation window back, inherently skipping the potentially partial current interval:
+
+```python
+# Window covers the 4 intervals ending one interval ago — excludes current
+Feature.avg("QTY", "1h", offset="15m").alias("QTY_ROLL_4_MEAN")
+```
+
+**Strategy 3 — Gate the source table externally (outside the DT):**
+
+Manage the source table so it only ever contains complete intervals. Use a scheduled Task or Stream + Task pipeline that aggregates raw transactions and writes complete intervals to the source table:
+
+```sql
+-- Task runs every 15 minutes: write only complete intervals to source
+INSERT INTO SOURCE_ORDERS_15MIN
+SELECT TIME_SLICE(ORDER_TS, 15, 'MINUTE') AS INTERVAL_ID,
+       ITEM_CODE, BRANCH_CODE, COUNT(*) AS QTY
+FROM RAW_ORDERS
+WHERE TIME_SLICE(ORDER_TS, 15, 'MINUTE')
+      < TIME_SLICE(CURRENT_TIMESTAMP(), 15, 'MINUTE', 'START')
+GROUP BY 1, 2, 3;
+```
+
+::: {.callout-warning title="Do not use CURRENT_TIMESTAMP() inside a DT"}
+`CURRENT_TIMESTAMP()` and other non-deterministic functions force a DT into **FULL refresh**. Apply time-based source gating in a Task, Stream, or View-based query layer *outside* the DT — never in the DT definition SQL.
+:::
+
+Strategies 1 and 2 are the most practical for Feature Views because they work entirely within the DT. Strategy 3 is appropriate when you control the source ingestion pipeline and want to fix the problem once for all downstream consumers.
+
+See also: [Chapter 06: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage), [Chapter 07: Window Offset as Safeguard](../07_aggregations_api/index.qmd#sec-partial-interval-tiling).
+
+### ❌ Pitfall 4: Mismatched Freshness Expectations
 
 **Problem**: Pipeline refresh doesn't match business SLA.
 
 **Solution**: Align refresh frequency with business requirements.
 
-### ❌ Pitfall 4: No Monitoring or Alerting
+### ❌ Pitfall 5: No Monitoring or Alerting
 
 **Problem**: Stale features go undetected.
 

@@ -521,7 +521,7 @@ Entity(name="USER", join_keys=["USER_ID"])
 
 **Problem**: Features that must be computed from the **spine timestamp** (for example age or tenure as of each training row) cannot rely on columns that are not in the Feature View’s `feature_df`. The spine timestamp is not injected into Feature View SQL for you.
 
-**Solution**: Use an entity grain where the reference time is already a column in the feature data (for example snapshot rows with `SNAPSHOT_TS` as `timestamp_col`), or enrich after retrieval with the same logic for training and scoring. Event-level entities (one row per application, session, etc.) can anchor features to an intrinsic event time. See internal customer notes on SCD2 and point-in-time–correct derived attributes for a worked banking example.
+**Solution**: Use an entity grain where the reference time is already a column in the feature data (for example snapshot rows with `SNAPSHOT_TS` as `timestamp_col`), or enrich after retrieval with the same logic for training and scoring. Event-level entities (one row per application, session, etc.) can anchor features to an intrinsic event time. For SCD2 and point-in-time–correct derived attributes, consider a worked banking example where snapshot-based entity grains provide the temporal anchor.
 
 ---
 
