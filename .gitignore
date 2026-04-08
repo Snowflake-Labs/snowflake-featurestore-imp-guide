@@ -1,2 +1,10 @@
 
 .DS_Store
+
+# LaTeX / Quarto build artifacts
+*.tex
+*.log
+*.aux
+
+# Sync workflow (belongs in dev repo only)
+sync-to-snowflake-labs.yml.disabled
