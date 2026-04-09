@@ -71,19 +71,19 @@ Snowflake distinguishes a **schedule string** (CRON) from a **time period** (lag
 
 View-based Feature Views are highly flexible. The underlying View can range from a simple pass-through to a complex declarative transformation, making them suitable for several distinct use cases:
 
-**1. Simple pass-through for externally managed tables.** When feature engineering is handled by an external process (DBT, Airflow, a Stored Procedure, etc.), the Feature View simply wraps the already-prepared table. This registers it in the Feature Store catalog for discovery, lineage, and training-set generation without duplicating any transformation logic:
+**1. Simple pass-through for externally managed tables.** When feature engineering is handled by an external process (dbt, Airflow, a Stored Procedure, etc.), the Feature View simply wraps the already-prepared table. This registers it in the Feature Store catalog for discovery, lineage, and training-set generation without duplicating any transformation logic:
 
 ```python
 from snowflake.ml.feature_store import FeatureView, Entity
 
-# Pass-through: DBT/Airflow manages the table; Feature View just wraps it
+# Pass-through: dbt/Airflow manages the table; Feature View just wraps it
 product_catalog_fv = FeatureView(
     name="PRODUCT_CATALOG_FV",
     entities=[product_entity],
     feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.PRODUCTS"),
     timestamp_col="UPDATED_TS",
     refresh_freq=None,
-    desc="PRODUCT attributes from CLICKSTREAM_DATA.PRODUCTS — managed by DBT",
+    desc="PRODUCT attributes from CLICKSTREAM_DATA.PRODUCTS — managed by dbt",
 )
 ```
 
@@ -113,11 +113,11 @@ user_session_fv = FeatureView(
 )
 ```
 
-**3. Development precursor to a Dynamic Table.** During development, use a View-based Feature View while the transformation logic is still evolving. Because the View has no materialized state, you can freely iterate on the query definition. Once the logic stabilises, convert it to a Dynamic Table by setting `refresh_freq` to a period string -- the same `feature_df` works unchanged:
+**3. Development precursor to a Dynamic Table.** During development, use a View-based Feature View while the transformation logic is still evolving. Because the View has no materialized state, you can freely iterate on the query definition. Once the logic stabilizes, convert it to a Dynamic Table by setting `refresh_freq` to a period string -- the same `feature_df` works unchanged:
 
-::: {.callout-warning}
+::: {.callout-note}
 ## Converting a View-based Feature View to a Dynamic Table
-When you switch from `refresh_freq=None` (View) to a period string (Dynamic Table), the underlying Snowflake object type changes from `VIEW` to `DYNAMIC TABLE`. The `overwrite=True` flag on `register_feature_view()` uses `CREATE OR REPLACE`, which only replaces an object of the **same type** -- it cannot replace a View with a Dynamic Table (or vice versa). You must **delete the existing Feature View first** with `fs.delete_feature_view()` before re-registering with the new `refresh_freq`. Alternatively, register the DT-backed version under a **new version string** (e.g., `V02`) to avoid the conflict entirely.
+When you switch from `refresh_freq=None` (View) to a period string (Dynamic Table), the underlying Snowflake object type changes from `VIEW` to `DYNAMIC TABLE`. As of `snowflake-ml-python` **1.27.0**, `register_feature_view()` with `overwrite=True` handles this conversion automatically -- it drops the existing object and creates the new type. On earlier versions, you must delete the existing Feature View first with `fs.delete_feature_view()` before re-registering with the new `refresh_freq`.
 :::
 
 ```python
@@ -462,7 +462,7 @@ Downstream Dynamic Tables that read from the evolved DT will still need to refre
 
 ### Alternative: Base + Presentation Layer Model {#sec-base-presentation}
 
-The standard approach creates a new version (a new Dynamic Table) for each schema change. An alternative for organisations with complex, frequently evolving feature sets is a **two-layer model** that separates physical storage from the consumer-facing view-based Feature Views.  This could be implemented within a single Feature Store Schema through naming convention, or two separate Feature Store Schemas to provide separation of concerns:
+The standard approach creates a new version (a new Dynamic Table) for each schema change. An alternative for organizations with complex, frequently evolving feature sets is a **two-layer model** that separates physical storage from the consumer-facing view-based Feature Views.  This could be implemented within a single Feature Store Schema through naming convention, or two separate Feature Store Schemas to provide separation of concerns:
 
 ```sql
 -- Single Feature Store Schema
@@ -504,7 +504,7 @@ CREATE SCHEMA FEATURE_STORE_PRESENTATION;
 
 **How it works:**
 
-1. **Base layer** -- each feature domain has its own versioned Dynamic Table (or View) Feature View. These are the immutable physical units that hold the actual feature-engineering logic and materialised data.
+1. **Base layer** -- each feature domain has its own versioned Dynamic Table (or View) Feature View. These are the immutable physical units that hold the actual feature-engineering logic and materialized data.
 2. **Presentation layer** -- a View-based Feature View that JOINs multiple base Feature Views together on their shared entity key (and timestamp column if required). Consumers query the presentation layer to get a unified feature set.
 
 A key principle of this model is **feature deduplication**: each feature computation exists in exactly one base object. Presentation layers compose existing features without re-implementing them. When a feature definition changes, only the base layer needs a new version -- the presentation layer's `SELECT *` automatically picks up the new columns. If individual features within a single Feature View evolve at different rates, consider feature-level version suffixes in naming (e.g., `ORDER_TOTAL_AMT_SUM_V01`, `ORDER_TOTAL_AMT_SUM_V02`) to maintain backward compatibility while the base layer transitions.
@@ -548,7 +548,7 @@ user_combined_fv = FeatureView(
 | **Best for** | Small-to-medium feature sets, simple schemas | Large feature sets with frequent, incremental additions across domains |
 
 ::: {.callout-note}
-This pattern adds operational complexity and is best suited to organisations with mature Feature Store practices and large numbers of features that evolve at different rates. For most teams starting out, standard version-per-bundle is simpler and sufficient. The Feature Store API does not natively manage the base-to-presentation relationship today -- you manage the presentation View's SQL definition yourself (or via CI/CD).
+This pattern adds operational complexity and is best suited to organizations with mature Feature Store practices and large numbers of features that evolve at different rates. For most teams starting out, standard version-per-bundle is simpler and sufficient. The Feature Store API does not natively manage the base-to-presentation relationship today -- you manage the presentation View's SQL definition yourself (or via CI/CD).
 :::
 
 ### Version Lifecycle
@@ -893,7 +893,7 @@ When many Feature Views share the same entity (common in large deployments -- 50
 - **Use short `.with_name()` prefixes** per domain (e.g., `"ord"`, `"sess"`, `"eng"`) for more concise column names.
 - **Embed the domain prefix in the `.alias()` call** on each `Feature` definition (e.g., `Feature.count("ORDER_ID", "7d").alias("ORD_ORDER_ID_CNT_7D")`).
 
-The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardising before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
+The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardizing before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
 :::
 
 ### 2. Consolidate Feature Views from the Same Source {.unnumbered}

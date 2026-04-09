@@ -42,9 +42,11 @@ These callouts are **not** removed when features graduate—timelines shift. Re-
 
 ## Streaming Feature Views (roadmap and workarounds)
 
+> 📁 **Full code:** [`_code/streaming_patterns.py`](_code/streaming_patterns.py)
+
 ### Current state
 
-Many ML use cases (fraud scoring, session personalisation, real-time recommendations) need features computed over data that is **seconds or minutes old**, not hours. Native Streaming Feature Views are the platform's long-term answer, but may not yet be enabled in every account and region.
+Many ML use cases (fraud scoring, session personalization, real-time recommendations) need features computed over data that is **seconds or minutes old**, not hours. Native Streaming Feature Views are the platform's long-term answer, but may not yet be enabled in every account and region.
 
 Until your account is explicitly enabled, plan on **workarounds** that approximate low latency:
 
@@ -91,6 +93,8 @@ streaming_fv = FeatureView(
 
 ## Multi-region and disaster recovery
 
+> 📁 **Full code:** [`_code/multi_region_dr.py`](_code/multi_region_dr.py)
+
 Enterprise deployments often require **multiple regions** and **disaster recovery (DR)**. At a high level:
 
 - **Database replication:** Snowflake **database replication** can replicate databases that hold Feature Store schemas (for example `FEATURE_STORE_DEMO` / `FEATURE_STORE`), subject to replication rules, edition, and licensing.
@@ -103,7 +107,7 @@ Enterprise deployments often require **multiple regions** and **disaster recover
 
 ## Multi-Feature Store operations
 
-Large organisations rarely run a single Feature Store schema. Different business domains (marketing, fraud, risk, personalisation) have distinct data ownership, sensitivity levels, and development cadences. The Snowflake Feature Store maps one-to-one with a **schema**, so multiple Feature Stores are simply multiple schemas -- potentially in different databases.
+Large organizations rarely run a single Feature Store schema. Different business domains (marketing, fraud, risk, personalization) have distinct data ownership, sensitivity levels, and development cadences. The Snowflake Feature Store maps one-to-one with a **schema**, so multiple Feature Stores are simply multiple schemas -- potentially in different databases.
 
 ### Cross-domain ML
 
@@ -236,7 +240,7 @@ for fs_name in ["SHARED_FS", "MARKETING_FS", "FRAUD_FS"]:
 
 ## External Data Sources
 
-Feature Views can wrap tables managed by external systems. For **DBT integration** (View-based Feature Views backed by DBT-managed tables), see [Chapter 5: Feature Pipelines -- External Orchestration](../05_feature_pipelines/index.qmd#sec-dbt).
+Feature Views can wrap tables managed by external systems. For **dbt integration** (View-based Feature Views backed by dbt-managed tables), see [Chapter 5: Feature Pipelines -- External Orchestration](../05_feature_pipelines/index.qmd#sec-dbt).
 
 ### Iceberg Tables
 
@@ -260,6 +264,8 @@ This is functionally identical to any View-based Feature View -- the Iceberg tab
 ---
 
 ## CI/CD for Feature Store
+
+> 📁 **Full code:** [`_code/cicd_patterns.py`](_code/cicd_patterns.py)
 
 Feature definitions should be treated as production code: version-controlled, reviewed, tested, and deployed through an automated pipeline. This prevents configuration drift between environments and ensures that every Feature View change is auditable.
 
@@ -319,6 +325,8 @@ Combine this with the environment-strategy patterns from [Chapter 2](../02_desig
 ---
 
 ## Testing strategies
+
+> 📁 **Full code:** [`_code/testing_strategies.py`](_code/testing_strategies.py)
 
 Reliable Feature Store operations depend on tests that go beyond "the job finished." The patterns below are the minimum bar for advanced deployments. Most can be implemented with **pytest** and Snowpark's local testing framework or a dedicated Snowflake test account.
 
@@ -398,7 +406,7 @@ Feature Store tables inherit these characteristics. When `generate_training_set(
 
 ### Why wide tables hurt in Snowflake
 
-**SQL compilation cost.** Every column in a query must be parsed, resolved, and optimised. At 500+ columns, compilation can dominate total query time -- particularly for `UNPIVOT`, `PIVOT`, and `SELECT *` operations.
+**SQL compilation cost.** Every column in a query must be parsed, resolved, and optimized. At 500+ columns, compilation can dominate total query time -- particularly for `UNPIVOT`, `PIVOT`, and `SELECT *` operations.
 
 **Micro-partition overhead.** Each column adds metadata overhead (min/max statistics, null counts, bloom filters). At 500+ columns per-partition metadata grows substantially, impacting partition pruning and scan initialisation.
 
@@ -553,7 +561,7 @@ X_sparse = coo_matrix((vals, (rows, cols)), shape=(len(records), len(feature_nam
 
 ### Two-tier Feature View architecture
 
-For production-grade wide Feature Views backed by Dynamic Tables, the recommended pattern is a **two-tier architecture**: a materialised bundled DT underneath, with an expansion View on top. The expansion View presents the same wide-column schema that consumers expect while the bundled DT stores data compactly.
+For production-grade wide Feature Views backed by Dynamic Tables, the recommended pattern is a **two-tier architecture**: a materialized bundled DT underneath, with an expansion View on top. The expansion View presents the same wide-column schema that consumers expect while the bundled DT stores data compactly.
 
 ```
 User's Feature SQL (e.g. 500+ columns)
@@ -618,7 +626,7 @@ SELECT ... FROM FEATURE_STORE_DEMO.FEATURE_STORE.USER_WIDE_FEATURES__BUNDLED;
 `COALESCE` with the appropriate default (0 for numeric, NULL for strings) handles features that were absent from the OBJECT due to sparsity.
 
 ::: {.callout-note title="When NOT to bundle"}
-If the Feature View has **no refresh frequency** (i.e., it is a plain View with no materialisation), bundling serves no purpose -- there is no stored data to compress. The packing/unpacking adds unnecessary query-time overhead. Only apply the two-tier pattern to **DT-backed Feature Views**.
+If the Feature View has **no refresh frequency** (i.e., it is a plain View with no materialization), bundling serves no purpose -- there is no stored data to compress. The packing/unpacking adds unnecessary query-time overhead. Only apply the two-tier pattern to **DT-backed Feature Views**.
 :::
 
 ### Type fidelity and metadata
@@ -644,7 +652,7 @@ DT1: Wide aggregated (Feature View's backing DT)
   │
   ├──▶ DT2: Bundled hybrid (entity keys + OBJECT column)
   │       │
-  │       └──▶ DT3: Pre-materialised KV (LATERAL FLATTEN) [optional]
+  │       └──▶ DT3: Pre-materialized KV (LATERAL FLATTEN) [optional]
   │
   └──▶ Expansion View (SELECT keys, obj:col1::TYPE, ... FROM DT2)
 ```
@@ -665,7 +673,7 @@ AS SELECT entity_id, ts,
           OBJECT_CONSTRUCT(* EXCLUDE (entity_id, ts)) AS features
    FROM (/* user's wide feature query */);
 
--- Optional: pre-materialised KV for heavy KV consumers
+-- Optional: pre-materialized KV for heavy KV consumers
 CREATE DYNAMIC TABLE my_features__kv
     TARGET_LAG = '1 hour'  WAREHOUSE = FS_DEV_WH
 AS SELECT b.entity_id, b.ts,
@@ -683,7 +691,7 @@ SELECT entity_id, ts,
 FROM my_features__bundled;
 ```
 
-Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behaviour). Only create DT3 (the KV materialisation) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
+Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behavior). Only create DT3 (the KV materialization) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
 
 ::: {.callout-note}
 The SQL examples above use `CREATE DYNAMIC TABLE` / `CREATE VIEW` for clarity, but each stage can equally be implemented through the **Feature Store API** (register a View-based or DT-backed Feature View). Using the API makes the objects discoverable within the Feature Store and ensures entity/timestamp metadata is tracked.
@@ -747,9 +755,9 @@ At large scale (50+ Feature Views, billions of spine rows, thousands of features
 
 SDK version 1.32+ automatically batches Feature View joins into groups of ~10, producing intermediate results before a final merge. This resolved OOM failures seen at 77+ Feature Views and ~1.7 billion spine rows. See [Chapter 10: Dataset Generation at Scale](../10_training_inference/index.qmd#sec-scale) for manual batching code when upgrading the SDK is not immediately possible.
 
-### Warehouse Selection: Standard vs Snowpark Optimised
+### Warehouse Selection: Standard vs Snowpark Optimized
 
-A common misconception is that Snowpark Optimised (SPO) warehouses are always better for large-scale dataset generation. In practice, **standard Gen2 warehouses** provide superior performance for join-heavy workloads because they offer more parallelism per credit:
+A common misconception is that Snowpark Optimized (SPO) warehouses are always better for large-scale dataset generation. In practice, **standard Gen2 warehouses** provide superior performance for join-heavy workloads because they offer more parallelism per credit:
 
 | Warehouse | Nodes | Memory per node | Total memory | Best for |
 |-----------|-------|----------------|--------------|----------|
@@ -827,13 +835,13 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 
 **Problem**: Teams design multi-region, multi-schema, streaming architectures before they have a single model in production.
 
-**Solution**: Start with a single Feature Store schema, View-based or simple DT-based Feature Views, and a manual deployment script. Add streaming, multi-schema isolation, and CI/CD automation only when the scale and organisational complexity demand it. The patterns in this chapter are a menu, not a mandatory checklist.
+**Solution**: Start with a single Feature Store schema, View-based or simple DT-based Feature Views, and a manual deployment script. Add streaming, multi-schema isolation, and CI/CD automation only when the scale and organizational complexity demand it. The patterns in this chapter are a menu, not a mandatory checklist.
 
 ### Pitfall 2: Inconsistent patterns across teams
 
 **Problem**: Each team uses different naming conventions, version strategies, and refresh configurations. This creates confusion when cross-domain models attempt to join Feature Views from different schemas.
 
-**Solution**: Establish organisation-wide standards early: `V01`-style versioning, consistent naming conventions (see [Chapter 2](../02_design_organization/index.qmd)), and shared Entity definitions. A "Feature Store working group" or a shared manifest format prevents divergence before it becomes entrenched.
+**Solution**: Establish organization-wide standards early: `V01`-style versioning, consistent naming conventions (see [Chapter 2](../02_design_organization/index.qmd)), and shared Entity definitions. A "Feature Store working group" or a shared manifest format prevents divergence before it becomes entrenched.
 
 ### Pitfall 3: No testing beyond "it runs"
 

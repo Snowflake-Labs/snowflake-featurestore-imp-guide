@@ -9,7 +9,7 @@ Feature pipelines are the workflows that transform raw data into features ready 
 
 This chapter covers four pipeline patterns and a hierarchical extension:
 
-1. **External Orchestration** -- DBT, Airflow, or other tools managing transformations
+1. **External Orchestration** -- dbt, Airflow, or other tools managing transformations
 2. **Internal Management** -- Dynamic Table-based pipelines fully managed by Snowflake
 3. **Chained Feature Views** -- Using Feature Views as sources for downstream Feature Views (multi-stage DT → DT or DT → View pipelines)
 4. **Temporal Aggregation API** -- The `Feature` class for time-windowed features with tiling (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd))
@@ -20,7 +20,7 @@ This chapter covers four pipeline patterns and a hierarchical extension:
 After completing this chapter, you will be able to:
 
 - Choose the right pipeline architecture for your requirements
-- Implement DBT-managed feature pipelines with View-based Feature Views
+- Implement dbt-managed feature pipelines with View-based Feature Views
 - Build internally-managed pipelines using Dynamic Tables (SQL and Snowpark DataFrame API)
 - Chain Feature Views into multi-stage pipelines (DT → DT, DT → View) and understand refresh cascading
 - Use the Temporal Aggregation API and rollup Feature Views (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd))
@@ -156,7 +156,7 @@ user_purchase_df = orders.group_by("USER_ID").agg(
 )
 ```
 
-Both approaches produce a lazy Snowpark DataFrame -- no data moves until the Feature View is registered and the Dynamic Table is materialised.
+Both approaches produce a lazy Snowpark DataFrame -- no data moves until the Feature View is registered and the Dynamic Table is materialized.
 
 ```python
 # Create Dynamic Table-backed Feature View
@@ -183,7 +183,7 @@ registered_fv = fs.register_feature_view(
 
 | Mode | `refresh_freq` | Behavior |
 |------|----------------|----------|
-| **View-based Feature View** | `None` or omitted | No Dynamic Table. The `feature_df` is registered as a view; **you** refresh upstream tables (DBT, Airflow, manual loads). |
+| **View-based Feature View** | `None` or omitted | No Dynamic Table. The `feature_df` is registered as a view; **you** refresh upstream tables (dbt, Airflow, manual loads). |
 | **Dynamic Table (lag)** | Time period (e.g. `"1 hour"`, `"15 minutes"`) | Snowflake creates a Dynamic Table with **TARGET_LAG** matching that interval. |
 | **Dynamic Table (scheduled)** | CRON expression (e.g. `"0 8 * * *"`) | Dynamic Table refresh driven by a **Task** (or equivalent schedule) for fixed clock-time runs. |
 
@@ -386,7 +386,7 @@ Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **qu
 
 ### Trade-offs
 
-| | DT → DT (both materialised) | DT → View (derived is virtual) |
+| | DT → DT (both materialized) | DT → View (derived is virtual) |
 |---|---|---|
 | **Read performance** | Pre-computed; fast reads | Query-time join; depends on complexity |
 | **Latency** | Stacks unless upstream uses `DOWNSTREAM` lag | Single upstream lag only |
@@ -403,6 +403,8 @@ Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **qu
 ---
 
 ## Temporal Aggregation Pipelines {#sec-temporal-api}
+
+> 📁 **Full code:** [`_code/temporal_api.py`](_code/temporal_api.py)
 
 The Temporal Aggregation API (`Feature` class) provides a fourth pipeline pattern: declarative time-windowed aggregations with automatic **tiling** for efficient incremental computation. Instead of recomputing an entire window (e.g., 7-day sum) on each refresh, the engine pre-computes fixed time buckets (tiles) and combines them at query time -- only new tiles are refreshed.
 
@@ -681,7 +683,7 @@ dense_fv = FeatureView(
 )
 ```
 
-If materialisation is needed (high read volume), consider splitting the pipeline: a pre-built **table or DT** for the date spine (refreshed periodically), joined to the sparse data in a downstream DT. Be aware that `GENERATOR(...)` and `CURRENT_DATE` in DT SQL can prevent incremental refresh -- see [Chapter 6: Lookup Tables for Dynamic History](../06_temporal_features/index.qmd) for a workaround using reference tables instead of hardcoded dates.
+If materialization is needed (high read volume), consider splitting the pipeline: a pre-built **table or DT** for the date spine (refreshed periodically), joined to the sparse data in a downstream DT. Be aware that `GENERATOR(...)` and `CURRENT_DATE` in DT SQL can prevent incremental refresh -- see [Chapter 6: Lookup Tables for Dynamic History](../06_temporal_features/index.qmd) for a workaround using reference tables instead of hardcoded dates.
 
 ---
 
@@ -850,7 +852,7 @@ See also: [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_featur
 
 | Pipeline Pattern | Orchestration | Freshness | Best For |
 |------------------|---------------|-----------|----------|
-| **External (DBT)** | External tool | Minutes-hours | Existing DBT shops |
+| **External (dbt)** | External tool | Minutes-hours | Existing dbt investments |
 | **Internal (DT)** | Snowflake | Seconds-minutes | New implementations |
 | **Chained FVs** | Snowflake (DT graph) | Configurable (DOWNSTREAM minimises stacking) | Multi-stage pipelines, base + derived features |
 | **Temporal API** | Snowflake | Configurable | Time-windowed aggs with tiling; see [Ch07](../07_aggregations_api/index.qmd) |

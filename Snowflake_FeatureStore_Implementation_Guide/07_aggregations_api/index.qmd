@@ -349,7 +349,7 @@ fv = FeatureView(
 
 When Feature Views need to serve both **short lookback windows** (1d, 7d) and **long lookback windows** (90d, 360d), a single tile size creates a trade-off: small tiles (1 hour) provide precision for short windows but require combining thousands of tiles for 360-day windows; large tiles (1 day) are efficient for long windows but lose sub-day precision.
 
-The recommended approach is to use **multiple Feature Views at different tile granularities**, each optimised for the windows it serves:
+The recommended approach is to use **multiple Feature Views at different tile granularities**, each optimized for the windows it serves:
 
 ```python
 short_window_features = [

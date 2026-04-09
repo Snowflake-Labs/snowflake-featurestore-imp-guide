@@ -305,7 +305,7 @@ The `timestamp_col` should represent when the feature **row** is valid for ASOF 
 For ASOF joins to be meaningful, the Feature View must produce **multiple rows per entity over time**. A single row per entity (e.g., `GROUP BY USER_ID` with `MAX(EVENT_TS)`) always returns the same record regardless of spine timestamp -- it's a latest-state lookup, not a temporal one.
 
 ::: {.callout-tip}
-**Standardise `timestamp_col` with aliasing.** Just as entity join keys are aliased to a consistent name (see [Chapter 1](../01_concepts/index.qmd)), adopt a **standard timestamp column name** across all Feature Views -- for example `FV_TS`. Alias the source timestamp in the Feature View SQL:
+**Standardize `timestamp_col` with aliasing.** Just as entity join keys are aliased to a consistent name (see [Chapter 1](../01_concepts/index.qmd)), adopt a **standard timestamp column name** across all Feature Views -- for example `FV_TS`. Alias the source timestamp in the Feature View SQL:
 
 ```sql
 -- Every Feature View aliases its temporal column to the same name
@@ -362,7 +362,7 @@ user_order_fv = FeatureView(
     desc="Daily order activity per user — one row per order day",
 )
 
-# Pattern 3: Periodic snapshots from an external pipeline (e.g. DBT/Airflow)
+# Pattern 3: Periodic snapshots from an external pipeline (e.g. dbt/Airflow)
 # Pre-built snapshot table with one row per user per calendar day
 user_snapshot_fv = FeatureView(
     name="USER_DAILY_SNAPSHOT",
@@ -497,7 +497,7 @@ AS
 Updating the config table row changes the history window on the **next DT refresh** without any DDL change. This same principle applies to any configurable parameter in DT SQL: date ranges, numeric thresholds, feature toggles, or environment-specific values. Keeping literals out of the DT definition makes the pipeline environment-agnostic and operationally flexible.
 
 ::: {.callout-warning}
-Adding a JOIN to a config table may affect the DT engine's ability to use incremental refresh, depending on the query pattern. Test `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration to verify incremental behaviour is preserved. See [Chapter 5: Pitfall 2](../05_feature_pipelines/index.qmd) for diagnostics.
+Adding a JOIN to a config table may affect the DT engine's ability to use incremental refresh, depending on the query pattern. Test `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration to verify incremental behavior is preserved. See [Chapter 5: Pitfall 2](../05_feature_pipelines/index.qmd) for diagnostics.
 :::
 
 ---

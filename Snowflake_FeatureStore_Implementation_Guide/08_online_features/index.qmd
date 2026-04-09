@@ -200,7 +200,7 @@ Offline APIs (`generate_dataset`, `generate_training_set`, `retrieve_feature_val
 
 ### Solution A: Pre-joined Feature View (preferred)
 
-If the entity keys allow it, create a **combined Dynamic Table** that pre-joins the required Feature Views into a single record, then derive the OFT from that combined Feature View. This pushes the join into the materialisation layer so the online read is a single point lookup:
+If the entity keys allow it, create a **combined Dynamic Table** that pre-joins the required Feature Views into a single record, then derive the OFT from that combined Feature View. This pushes the join into the materialization layer so the online read is a single point lookup:
 
 ```python
 combined_df = session.sql("""
@@ -301,7 +301,7 @@ If the latency budget leaves less than ~30 ms for feature serving, consider the 
 
 ## Performance Tuning and Benchmarking
 
-### Warm-Up Behaviour
+### Warm-Up Behavior
 
 OFTs (backed by Hybrid Tables) require a number of queries to **warm up** before reaching steady-state optimal response times. The initial queries populate internal caches (data pages, metadata, connection pools) and will show higher latency than the system achieves once warmed.
 
@@ -318,7 +318,7 @@ Do not draw conclusions from the first few hundred queries. Run at least several
 | **Run duration** | Sustain the test for long enough to reach steady state (minimum 5-10 minutes at target QPS). Short bursts capture warm-up noise, not true throughput. |
 | **Measure per-minute aggregates** | Report P50, P95, P99 latency aggregated per minute. Avoid reporting single-query or first-query latencies as representative. |
 | **Use concurrent connections** | A single serial connection under-utilises the warehouse. Launch multiple concurrent client connections (threads / async) to saturate the target QPS. |
-| **Match expected workload** | Set QPS, key batch sizes, and feature column counts to match your production profile. Results from a 1 QPS test do not predict 1000 QPS behaviour. |
+| **Match expected workload** | Set QPS, key batch sizes, and feature column counts to match your production profile. Results from a 1 QPS test do not predict 1000 QPS behavior. |
 | **Account for network latency** | Measure round-trip time from the client to your Snowflake account region. If the client is in a different region or on-premises, network latency dominates at low query times. Co-locate clients with the Snowflake account where possible. |
 
 ### Batch Key Lookups
@@ -345,7 +345,7 @@ fs.read_feature_view(
 ```
 
 ::: {.callout-tip}
-**Large key sets**: OFTs are optimised for serving a modest number of key-based lookups (tens to low hundreds per call). If you need to look up thousands of entity keys at once (e.g., for batch scoring), it is typically faster to query the **offline** Feature View directly -- the columnar scan of a Dynamic Table handles large result sets more efficiently than many point lookups against a Hybrid Table.
+**Large key sets**: OFTs are optimized for serving a modest number of key-based lookups (tens to low hundreds per call). If you need to look up thousands of entity keys at once (e.g., for batch scoring), it is typically faster to query the **offline** Feature View directly -- the columnar scan of a Dynamic Table handles large result sets more efficiently than many point lookups against a Hybrid Table.
 :::
 
 ### Parameter Binding
@@ -388,7 +388,7 @@ Match **offline** `refresh_freq` to upstream **CLICKSTREAM_DATA** landing latenc
 
 OFT row count directly affects **initial population time**, **MERGE refresh cost**, and **Hybrid Table storage**. Guidelines:
 
-| Entity cardinality | Expected behaviour |
+| Entity cardinality | Expected behavior |
 |---|---|
 | **< 1 M rows** | Fast initial load, lightweight incremental refreshes. Standard operating range. |
 | **1-10 M rows** | Initial population may take minutes; incremental refresh is still efficient if change rate is low. |

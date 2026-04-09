@@ -371,11 +371,11 @@ The optimal warehouse configuration depends on whether your bottleneck is **para
 | Bottleneck | Symptom | Recommendation |
 |------------|---------|----------------|
 | Parallelism | High idle execution skew; CPU-bound | Scale **up** standard warehouse size (more nodes) |
-| Memory | OOM errors; high disk spill | Consider Snowpark Optimised warehouse, or reduce batch size |
-| Both | OOM + skew | Snowpark Optimised at larger size (3XL+) |
+| Memory | OOM errors; high disk spill | Consider Snowpark Optimized warehouse, or reduce batch size |
+| Both | OOM + skew | Snowpark Optimized at larger size (3XL+) |
 
 ::: {.callout-tip title="Prefer standard Gen2 warehouses"}
-For join-heavy dataset generation workloads, **standard Gen2 warehouses** typically outperform Snowpark Optimised warehouses of equivalent credit cost. A standard 4XL Gen2 (128 nodes × 16 GB) provides far more parallelism than an SPO 3XL (16 nodes × 256 GB) at similar cost. Only move to SPO when profiling confirms memory -- not parallelism -- is the constraint.
+For join-heavy dataset generation workloads, **standard Gen2 warehouses** typically outperform Snowpark Optimized warehouses of equivalent credit cost. A standard 4XL Gen2 (128 nodes × 16 GB) provides far more parallelism than an SPO 3XL (16 nodes × 256 GB) at similar cost. Only move to SPO when profiling confirms memory -- not parallelism -- is the constraint.
 :::
 
 ### The Wide Resultset Problem {#sec-wide-resultset}
@@ -428,7 +428,7 @@ For training datasets that feed distributed ML frameworks (Ray, Spark, PyTorch),
 
 1. **`generate_dataset` with `output_type="parquet"`** -- writes directly to a Snowflake stage; files are readable by Ray's `read_parquet()`.
 2. **Snowflake-managed Iceberg tables** -- queryable via both Snowflake SQL and external Parquet readers. Useful when the same training data is consumed by both Snowflake-based and external ML pipelines.
-3. **`COPY INTO` from a materialised table** -- if you need fine-grained control over Parquet file layout (row group size, compression).
+3. **`COPY INTO` from a materialized table** -- if you need fine-grained control over Parquet file layout (row group size, compression).
 
 ::: {.callout-tip title="Skip to_pandas() for large datasets"}
 For datasets exceeding ~100M rows or ~500 features, writing to Parquet and reading directly from your ML framework is both faster and more memory-efficient than `to_pandas()`. This is especially true when using the VARIANT approach, where `to_pandas()` returns JSON strings requiring single-threaded `json.loads()` deserialization.
@@ -442,7 +442,7 @@ For datasets exceeding ~100M rows or ~500 features, writing to Parquet and readi
 If your Feature Views follow the recommended convention of aliasing their timestamp column to a standard name (e.g., `FV_TS` -- see [Chapter 6: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements)), name the spine timestamp to match:
 
 ```python
-# ✅ GOOD: Standardised timestamp name matches FV convention
+# ✅ GOOD: Standardized timestamp name matches FV convention
 spine = session.sql("""
     SELECT
         USER_ID,

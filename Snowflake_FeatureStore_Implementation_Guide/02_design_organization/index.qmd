@@ -394,6 +394,8 @@ GRANT ROLE FS_ADMIN_ROLE TO ROLE SYSADMIN;
 
 ## Cross-Environment Promotion {#sec-promotion}
 
+> 📁 **Full code:** [`_code/promotion_utils.py`](_code/promotion_utils.py) | [`_code/feature_discovery.sql`](_code/feature_discovery.sql)
+
 Moving features from development to production requires a controlled promotion process. For the Feature View version lifecycle that underpins promotion (V01 → V02 → deprecation), see [Chapter 4: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
 ### Promotion Workflow
@@ -480,16 +482,16 @@ FROM @my_stage/feature_store_definitions/;
 
 This gives you a plan-then-deploy workflow with full audit trail, and Snowflake determines the DDL changes needed to reach the desired state.
 
-**DCM support for Dynamic Tables.** Dynamic Tables are a [supported object type](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-supported-entities) in DCM Projects. The change behaviour depends on what you modify:
+**DCM support for Dynamic Tables.** Dynamic Tables are a [supported object type](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-supported-entities) in DCM Projects. The change behavior depends on what you modify:
 
-| Change | Behaviour |
+| Change | Behavior |
 |--------|-----------|
 | Warehouse, target-lag | Applied without full refresh |
-| Body changes (add/drop columns, new logic) | Re-initialisation or full refresh of the DT |
-| Refresh mode | Re-initialisation or full refresh |
+| Body changes (add/drop columns, new logic) | Re-initialization or full refresh of the DT |
+| Refresh mode | Re-initialization or full refresh |
 | Rename or reorder columns | Not supported (requires drop + recreate) |
 
-When a Dynamic Table is re-initialised due to a body change, any **downstream** Dynamic Tables that depend on it will also need to refresh to pick up the schema/data changes -- this follows the standard DT dependency chain behaviour.
+When a Dynamic Table is re-initialized due to a body change, any **downstream** Dynamic Tables that depend on it will also need to refresh to pick up the schema/data changes -- this follows the standard DT dependency chain behavior.
 
 DCM Projects also provide pipeline-aware commands: `REFRESH ALL` bulk-refreshes all Dynamic Tables managed by the project (plus required upstream DTs), and `TEST ALL` runs attached data quality expectations. A typical CI/CD promotion flow is: `PLAN` → `DEPLOY` → `REFRESH ALL` → `TEST ALL` on staging, then repeat `PLAN` → `DEPLOY` on production.
 

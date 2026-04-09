@@ -192,12 +192,12 @@ The Feature Store does not support synonyms or aliases for join keys. The column
 :::
 
 ::: {.callout-tip}
-## Standardise `timestamp_col` names across Feature Views
+## Standardize `timestamp_col` names across Feature Views
 Just as entity join keys must be named consistently, adopting a **standard timestamp column name** (e.g., `FV_TS`) across all Feature Views simplifies spine design and validation. Alias the source timestamp in the Feature View SQL:
 
 ```sql
 SELECT USER_ID,
-       ORDER_TS AS FV_TS,       -- standardised name
+       ORDER_TS AS FV_TS,       -- standardized name
        SUM(TOTAL_AMT) AS ...
 FROM ...
 GROUP BY USER_ID, ORDER_TS
@@ -358,11 +358,11 @@ The `session.sql()` approach is useful when migrating existing SQL-based feature
 ::: {.callout-warning}
 ## Time-windowed features over sparse data produce incorrect results at retrieval time
 
-SQL window functions such as `RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW` compute correct windows **at materialisation time** -- each row's 7-day window is anchored to that row's own timestamp. The problem surfaces at **retrieval time**. When the Feature Store performs an ASOF join against a pre-materialised Dynamic Table, it returns the most recent row whose timestamp is <= the spine timestamp. If the source data is sparse (not a record for every time grain), that row may be **days older** than the spine timestamp, and its pre-computed window is anchored to the wrong point in time.
+SQL window functions such as `RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW` compute correct windows **at materialization time** -- each row's 7-day window is anchored to that row's own timestamp. The problem surfaces at **retrieval time**. When the Feature Store performs an ASOF join against a pre-materialized Dynamic Table, it returns the most recent row whose timestamp is <= the spine timestamp. If the source data is sparse (not a record for every time grain), that row may be **days older** than the spine timestamp, and its pre-computed window is anchored to the wrong point in time.
 
 **Example:** A spine row requests features as of **Jan 15**, but the nearest pre-computed row in the DT has a timestamp of **Jan 10** (no source activity between Jan 10-15). The returned "7-day sum" covers **Jan 3-10**, not the expected **Jan 8-15**.
 
-This is an inherent limitation of pre-computing fixed windows and retrieving them via ASOF: the window boundaries are baked into the row at materialisation time and cannot shift to match an arbitrary query timestamp. For time-windowed aggregations, use the **Feature Aggregation API** (@sec-aggregations-api) instead. Its tiling mechanism stores partial aggregates per time grain and reassembles the correct window from the spine timestamp backwards at retrieval time -- regardless of source sparsity. See [Chapter 5: Temporal Aggregation Pipelines](../05_feature_pipelines/index.qmd#sec-temporal-api) for the detailed motivation and [Chapter 7](../07_aggregations_api/index.qmd) for API reference.
+This is an inherent limitation of pre-computing fixed windows and retrieving them via ASOF: the window boundaries are baked into the row at materialization time and cannot shift to match an arbitrary query timestamp. For time-windowed aggregations, use the **Feature Aggregation API** (@sec-aggregations-api) instead. Its tiling mechanism stores partial aggregates per time grain and reassembles the correct window from the spine timestamp backwards at retrieval time -- regardless of source sparsity. See [Chapter 5: Temporal Aggregation Pipelines](../05_feature_pipelines/index.qmd#sec-temporal-api) for the detailed motivation and [Chapter 7](../07_aggregations_api/index.qmd) for API reference.
 :::
 
 #### Method 3: Feature Aggregation Class (Time-Windowed) {#sec-aggregations-api}

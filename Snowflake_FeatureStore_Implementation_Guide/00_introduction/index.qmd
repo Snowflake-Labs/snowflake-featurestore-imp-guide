@@ -25,7 +25,7 @@ The Snowflake Feature Store is a managed data management layer that helps ML tea
 | [**02**](../02_design_organization/index.qmd) | Design & Organization | Feature Store structure, multi-environment patterns |
 | [**03**](../03_entities_hierarchies/index.qmd) | Entities & Hierarchies | Entity keys (simple & compound), relationships |
 | [**04**](../04_feature_views/index.qmd) | Feature Views | DT vs View, versioning, lifecycle management |
-| [**05**](../05_feature_pipelines/index.qmd) | Feature Pipelines | DBT, Dynamic Tables, Temporal API pipelines |
+| [**05**](../05_feature_pipelines/index.qmd) | Feature Pipelines | dbt, Dynamic Tables, Temporal API pipelines |
 | [**06**](../06_temporal_features/index.qmd) | Temporal Features | Point-in-time correctness, tiling, aggregations |
 | [**07**](../07_aggregations_api/index.qmd) | Aggregations API | `Feature` class, windows, rollups |
 | [**08**](../08_online_features/index.qmd) | Online Features | Online Feature Tables, serving patterns |
@@ -220,6 +220,8 @@ print(f'Feature Store initialized: {SOURCE_DATABASE}.{FS_NAME}')
 
 ## Sample Data
 
+> 📁 **Full code:** [`_code/sample_data.py`](_code/sample_data.py)
+
 This guide uses a synthetic clickstream dataset designed to demonstrate all Feature Store capabilities, including:
 
 - **Temporal patterns**: Event timestamps with realistic distributions
@@ -359,7 +361,7 @@ Each abbreviation is expanded on first use in every chapter. After that, the sho
 
 ::: {.callout-tip}
 ## Establish naming conventions early
-Agreeing on feature naming conventions at the start of a project prevents inconsistency, reduces refactoring, and makes features discoverable across teams. The table above is a starting point — adapt it to your organisation and enforce it through code review and automation. See [Chapter 2: Establish Naming Conventions Early](../02_design_organization/index.qmd) for object-level conventions (databases, schemas, Feature Views, Entities) and [Chapter 7: Naming Conventions](../07_aggregations_api/index.qmd) for aggregation-specific prefixing patterns.
+Agreeing on feature naming conventions at the start of a project prevents inconsistency, reduces refactoring, and makes features discoverable across teams. The table above is a starting point — adapt it to your organization and enforce it through code review and automation. See [Chapter 2: Establish Naming Conventions Early](../02_design_organization/index.qmd) for object-level conventions (databases, schemas, Feature Views, Entities) and [Chapter 7: Naming Conventions](../07_aggregations_api/index.qmd) for aggregation-specific prefixing patterns.
 :::
 
 ### Version Callouts

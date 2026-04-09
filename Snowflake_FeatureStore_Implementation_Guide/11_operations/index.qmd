@@ -140,7 +140,7 @@ Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-
 
 ### INITIALIZATION_WAREHOUSE
 
-The initial population of a Dynamic Table (and any full re-initialisation) is often far more expensive than incremental refreshes. `INITIALIZATION_WAREHOUSE` lets you point that one-time heavy lift at a larger warehouse while keeping a smaller, cheaper warehouse for day-to-day refreshes.
+The initial population of a Dynamic Table (and any full re-initialization) is often far more expensive than incremental refreshes. `INITIALIZATION_WAREHOUSE` lets you point that one-time heavy lift at a larger warehouse while keeping a smaller, cheaper warehouse for day-to-day refreshes.
 
 ```sql
 CREATE DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V01
@@ -158,7 +158,7 @@ ALTER DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V01
   UNSET INITIALIZATION_WAREHOUSE;
 ```
 
-This is particularly valuable when promoting features to production where large historical datasets must be materialised for the first time, or when recovering from a full re-initialisation event.
+This is particularly valuable when promoting features to production where large historical datasets must be materialized for the first time, or when recovering from a full re-initialization event.
 
 ### ROW_TIMESTAMP
 
@@ -227,7 +227,7 @@ ALTER DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V01
 - **`MAX_DATA_EXTENSION_TIME_IN_DAYS`** -- increase for DTs with very long `TARGET_LAG` or infrequent refresh schedules to prevent accidental staleness. Be aware that higher values increase storage costs because Snowflake retains more micro-partition history.
 
 ::: {.callout-tip}
-**Combine for resilience.** For production Feature Views, consider setting `DATA_RETENTION_TIME_IN_DAYS = 7` (enables weekly point-in-time debugging) alongside `INITIALIZATION_WAREHOUSE` (fast recovery if re-initialisation is needed) and `ROW_TIMESTAMP = TRUE` (freshness monitoring). Together these provide a robust operational baseline.
+**Combine for resilience.** For production Feature Views, consider setting `DATA_RETENTION_TIME_IN_DAYS = 7` (enables weekly point-in-time debugging) alongside `INITIALIZATION_WAREHOUSE` (fast recovery if re-initialization is needed) and `ROW_TIMESTAMP = TRUE` (freshness monitoring). Together these provide a robust operational baseline.
 :::
 
 ---
@@ -255,12 +255,12 @@ Different Feature Store operations have different compute profiles. Using the ri
 | DT refresh (incremental) | Low CPU, low memory | Standard XS-S |
 | DT refresh (full / initial) | High CPU, moderate memory | Standard L-2XL (or `INITIALIZATION_WAREHOUSE` at 4XL) |
 | Dataset generation (`generate_training_set`) | High parallelism, wide shuffles | Standard Gen2 XL-4XL |
-| Model training (in Snowpark stored procedures) | Single-node, high memory | Snowpark Optimised M-XL |
+| Model training (in Snowpark stored procedures) | Single-node, high memory | Snowpark Optimized M-XL |
 | Online Feature Table sync | Background, managed | No warehouse required (managed service) |
 
-### Standard vs Snowpark Optimised
+### Standard vs Snowpark Optimized
 
-A common mistake is using **Snowpark Optimised (SPO)** warehouses for join-heavy operations like `generate_training_set`. SPO warehouses have fewer, larger nodes -- designed for Python UDFs that need large per-node memory. Dataset generation is a distributed SQL operation where parallelism matters more than per-node memory:
+A common mistake is using **Snowpark Optimized (SPO)** warehouses for join-heavy operations like `generate_training_set`. SPO warehouses have fewer, larger nodes -- designed for Python UDFs that need large per-node memory. Dataset generation is a distributed SQL operation where parallelism matters more than per-node memory:
 
 | Warehouse | Nodes (approx) | Memory per node | Total memory | Credits/hr |
 |-----------|----------------|-----------------|-------------|------------|
@@ -488,7 +488,7 @@ ALTER TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
 
 Dynamic tables support DMFs as table objects; use **`ALTER TABLE`** with the fully qualified dynamic table name (quote the identifier if it contains `$`).
 
-### Standardised DMF Attachment for Feature Views
+### Standardized DMF Attachment for Feature Views
 
 Manually attaching DMFs to each Feature View is error-prone and doesn't scale. Create a stored procedure that applies a standard set of quality checks to any registered Feature View:
 
@@ -546,7 +546,7 @@ Snowsight provides **built-in dashboards** for Data Metric Functions. Navigate t
 
 For Feature-Store-specific dashboards that go beyond what Snowsight provides out of the box, build a [Streamlit in Snowflake](https://docs.snowflake.com/en/developer-guide/streamlit/about-streamlit) app. DMF results accumulate in `SNOWFLAKE.LOCAL.DATA_QUALITY_MONITORING_RESULTS` and can be combined with other operational views:
 
-- **Feature freshness dashboard** -- query `DYNAMIC_TABLES()` for lag and scheduling state; colour-code by HEALTHY / WARNING / STALE thresholds.
+- **Feature freshness dashboard** -- query `DYNAMIC_TABLES()` for lag and scheduling state; color-code by HEALTHY / WARNING / STALE thresholds.
 - **Data quality trends** -- plot DMF results (null rates, row counts) over time per Feature View to detect drift or ingestion failures.
 - **Cost attribution** -- join `SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY` with warehouse credit usage to show per-Feature-View compute costs.
 
@@ -660,7 +660,7 @@ Schedule weekly reviews:
 - Unused features
 
 ### 4. Pin SDK Versions Across Environments {#sec-sdk-versioning .unnumbered}
-Using different versions of `snowflake-ml-python` to create and retrieve Feature Views can cause inconsistent behaviour, metadata mismatches, and retrieval errors. Feature Views registered with one SDK version may use internal formats that a different version cannot correctly interpret.
+Using different versions of `snowflake-ml-python` to create and retrieve Feature Views can cause inconsistent behavior, metadata mismatches, and retrieval errors. Feature Views registered with one SDK version may use internal formats that a different version cannot correctly interpret.
 
 **Recommendations:**
 
@@ -720,7 +720,7 @@ See [Chapter 12: CI/CD for Feature Store](../12_advanced_patterns/index.qmd) for
 | **Avoiding Duplicates** | Search by name pattern before creating new Feature Views |
 | **Model Registry metadata** | `INFORMATION_SCHEMA.MODEL_VERSIONS` |
 | **Lineage** | `FeatureView.lineage()`, `OBJECT_DEPENDENCIES`, `ACCESS_HISTORY` |
-| **Data Quality** | System DMFs + custom DMFs; standardised attachment via Sproc; Streamlit dashboards |
+| **Data Quality** | System DMFs + custom DMFs; standardized attachment via Sproc; Streamlit dashboards |
 | **Duplicate Detection** | `OBJECT_AGG` query on `INFORMATION_SCHEMA.COLUMNS` |
 
 ---
