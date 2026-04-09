@@ -7,7 +7,7 @@ book:
   author: "Simon Field"
   date: "2026-01-21"
   search: true
-  repo-url: https://github.com/snowcat-cloud/FeatureStore_BestPractice
+  repo-url: https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide
   repo-actions: [edit, issue]
   
   sidebar:

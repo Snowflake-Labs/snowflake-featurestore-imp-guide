@@ -1,0 +1,49 @@
+# Snowflake Feature Store Implementation Guide - Requirements
+# 
+# Create a virtual environment before installing:
+#   python -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+
+# ============================================================================
+# Snowflake Packages (pin to compatible versions)
+# ============================================================================
+snowflake-snowpark-python>=1.21.0
+snowflake-ml-python>=1.8.0
+snowflake-connector-python>=3.10.0
+
+# ============================================================================
+# Data Processing (pin NumPy for compatibility)
+# ============================================================================
+numpy<2.0  # Required for compatibility with Snowflake packages
+pandas>=2.0,<3.0
+pyarrow>=14.0.0
+
+# ============================================================================
+# Testing
+# ============================================================================
+pytest>=8.0.0
+pytest-cov>=4.0.0
+
+# ============================================================================
+# Data Generation (Appendix)
+# ============================================================================
+Faker>=25.0.0
+
+# ============================================================================
+# Data Manager UI (Streamlit)
+# ============================================================================
+streamlit>=1.28.0
+plotly>=5.18.0  # For interactive charts
+
+# ============================================================================
+# Public Dataset Loading
+# ============================================================================
+scikit-learn>=1.3.0  # For loading datasets like iris, california housing
+requests>=2.31.0     # For downloading remote datasets
+
+# ============================================================================
+# Documentation (Quarto)
+# ============================================================================
+jupyter>=1.0.0
+nbformat>=5.0.0
