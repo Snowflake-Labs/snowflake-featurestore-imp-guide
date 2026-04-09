@@ -78,13 +78,13 @@ pip install -r Snowflake_FeatureStore_Implementation_Guide/requirements.txt
 
 ### Build the Guide Locally
 
-Render the Quarto book offline with your own edits. Requires [Quarto CLI](https://quarto.org/docs/get-started/) (1.4+) and Python 3.11+.
+Render the Quarto book offline with your own edits. Requires [Quarto CLI](https://quarto.org/docs/get-started/) (1.6+) and Python 3.11+.
 
 ```bash
 pip install jupyter nbformat pandas numpy
 cd Snowflake_FeatureStore_Implementation_Guide
-quarto render --to html        # Output in _site/
-quarto preview                 # Live-reload preview at localhost:4848
+quarto render --to html --no-execute   # Output in _site/ (uses cached outputs)
+quarto preview                          # Live-reload preview at localhost:4848
 ```
 
 See the [guide README](./Snowflake_FeatureStore_Implementation_Guide/README.md#-building-the-guide-locally) for full build instructions including PDF rendering.
