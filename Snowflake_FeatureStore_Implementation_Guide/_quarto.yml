@@ -62,6 +62,11 @@ format:
     toc-depth: 3
     number-sections: true
     highlight-style: github
+    open-graph:
+      title: "Snowflake Feature Store Implementation Guide"
+      description: "Best practices for building production ML feature platforms with Snowflake Feature Store — entities, Feature Views, pipelines, online serving, and operations."
+      site-name: "Snowflake-Labs"
+    description: "Comprehensive guide to implementing Snowflake Feature Store for production ML, covering design patterns, temporal features, aggregations, online serving, and CI/CD."
     
   pdf:
     documentclass: scrreprt
