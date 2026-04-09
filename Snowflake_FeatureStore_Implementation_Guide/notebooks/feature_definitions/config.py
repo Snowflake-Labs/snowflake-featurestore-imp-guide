@@ -76,7 +76,7 @@ FEATUREVIEW_VERSION_INITIAL = "V01"
 # Connection profile (for local development outside Workspace Notebooks)
 # ---------------------------------------------------------------------------
 
-CONNECTION_PROFILE = os.environ.get("FS_CONNECTION_PROFILE", "ak32940_remote_dev")
+CONNECTION_PROFILE = os.environ.get("FS_CONNECTION_PROFILE", "default")
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ def get_session(role: Optional[str] = None):
         key_path = os.environ.get(
             "FS_PRIVATE_KEY_PATH",
             os.path.expanduser(
-                "~/.snowflake/keys/simon_rsa_key.p8"
+                "~/.snowflake/keys/rsa_key.p8"
             ),
         )
         with open(key_path, "rb") as f:
@@ -161,10 +161,10 @@ def get_session(role: Optional[str] = None):
         session = Session.builder.configs(
             {
                 "account": os.environ.get(
-                    "FS_ACCOUNT", "ak32940"
+                    "FS_ACCOUNT", "your_account"
                 ),
                 "user": os.environ.get(
-                    "FS_USER", "SIMON"
+                    "FS_USER", "your_user"
                 ),
                 "private_key": pkb,
                 "role": role or ROLES["admin"],
