@@ -100,6 +100,7 @@ Found an issue or want to suggest an improvement?
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 2.3 | April 9, 2026 | Quality polish: American English standardization, dbt branding consistency, `_code/` companion file references for all chapters, `{.unnumbered}` TOC fix, Ch05 dbt Projects on Snowflake section, abbreviations table, appendix spelling and code fixes |
 | 2.2 | April 9, 2026 | Collapsible sidebar toggles for chapter nav and TOC (localStorage-persistent), CRON refresh and `timestamp_col` documentation improvements, CI freeze-cache rendering fix |
 | 2.1 | April 9, 2026 | Snowflake-branded theme (light/dark), executable code cells with live outputs in 8 chapters, freeze cache for CI rendering, cross-chapter link validation |
 | 2.0 | April 9, 2026 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API (Ch 07), benchmark framework, Streamlit monitoring dashboard, local build instructions |

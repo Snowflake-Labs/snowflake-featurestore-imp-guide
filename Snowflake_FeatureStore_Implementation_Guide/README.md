@@ -5,7 +5,7 @@ A comprehensive best practices guide for implementing and operating Snowflake Fe
 **[Read the Guide Online](https://snowflake-labs.github.io/snowflake-featurestore-imp-guide/)**
 
 **Author**: Simon Field, Technical Director, SnowCAT  
-**Version**: 2.2  
+**Version**: 2.3  
 **Snowflake ML Version**: 1.21.0+ (latest: 1.34.0)
 
 ---
@@ -224,6 +224,7 @@ This guide uses a **synthetic clickstream dataset** designed for demonstrating F
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.3 | 2026-04-09 | American English standardization, dbt branding, `_code/` references for all chapters, TOC heading fixes, Ch05 dbt Projects on Snowflake, appendix polish |
 | 2.2 | 2026-04-09 | Collapsible sidebar toggles, Snowflake-branded theme (light/dark), executable code cells with live outputs in 8 chapters, CI freeze-cache rendering, content improvements |
 | 2.0 | 2026-04-09 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API, benchmark framework, Streamlit dashboard, local build instructions |
 | 1.0 | 2025-05-22 | [Initial PDF release](https://github.com/Snowflake-Labs/sfguide-getting-started-with-snowflake-feature-store/tree/main/best_practice_guide) |
