@@ -45,6 +45,7 @@ End-to-end notebooks walk through the full ML lifecycle on Snowflake:
 | `03_model_deployment` | Batch inference, online serving, FastAPI endpoint |
 | `04_operations_monitoring` | Refresh monitoring, data quality, Streamlit dashboard |
 | `05_pipeline_performance` | Pipeline latency profiling and optimization |
+| `05b_benchmark` | Multi-step scaled benchmark orchestrator (QPM, latency, DT refresh) |
 
 ---
 
