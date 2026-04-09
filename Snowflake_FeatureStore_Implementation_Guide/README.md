@@ -6,7 +6,7 @@ A comprehensive best practices guide for implementing and operating Snowflake Fe
 
 **Author**: Simon Field, Technical Director, SnowCAT  
 **Version**: 2.0  
-**Snowflake ML Version**: 1.8.0+
+**Snowflake ML Version**: 1.21.0+ (latest: 1.32.0)
 
 ---
 
@@ -97,7 +97,7 @@ jupyter notebook
 ### Prerequisites
 
 ```bash
-pip install snowflake-ml-python>=1.8.0
+pip install snowflake-ml-python>=1.21.0
 pip install snowflake-snowpark-python>=1.21.0
 ```
 
@@ -224,8 +224,8 @@ This guide uses a **synthetic clickstream dataset** designed for demonstrating F
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 2.0 | 2026-04-08 | Complete rewrite: 14 chapters, notebooks, aggregations API, benchmarks |
-| 1.0 | 2025-05-22 | Initial PDF release |
+| 2.0 | 2026-04-09 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API, benchmark framework, Streamlit dashboard, local build instructions |
+| 1.0 | 2025-05-22 | [Initial PDF release]() |
 
 ---
 

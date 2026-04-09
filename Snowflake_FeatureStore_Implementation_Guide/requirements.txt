@@ -9,7 +9,7 @@
 # Snowflake Packages (pin to compatible versions)
 # ============================================================================
 snowflake-snowpark-python>=1.21.0
-snowflake-ml-python>=1.8.0
+snowflake-ml-python>=1.21.0
 snowflake-connector-python>=3.10.0
 
 # ============================================================================

@@ -5,7 +5,7 @@ project:
 book:
   title: "Snowflake Feature Store Implementation Guide"
   author: "Simon Field"
-  date: "2026-01-21"
+  date: "2026-04-09"
   search: true
   repo-url: https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide
   repo-actions: [edit, issue]

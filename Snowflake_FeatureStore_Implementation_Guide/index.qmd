@@ -27,7 +27,7 @@ build, and operate a production-grade Snowflake Feature Store.
 Before starting, ensure you have:
 
 - ✅ Snowflake account (Standard Edition or higher)
-- ✅ Python 3.8+ with `snowflake-ml-python` >= 1.7.0
+- ✅ Python 3.11+ with `snowflake-ml-python` >= 1.21.0 (latest: 1.32.0)
 - ✅ Basic familiarity with SQL and Python
 - ✅ Understanding of ML concepts (training, inference, features, etc)
 
@@ -90,9 +90,16 @@ Throughout this guide, code examples use literal database, schema, and table nam
 Found an issue or want to suggest an improvement?
 
 - 📝 Use the "Edit this page" link on any page
-- 🐛 [Report an issue](https://github.com/snowcat-cloud/FeatureStore_BestPractice/issues)
+- 🐛 [Report an issue](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues)
 - 💬 Questions? Reach out via GitHub Discussions
 
 ---
 
-*Last updated: January 2026*
+## Revision History {.unnumbered}
+
+| Version | Date | Summary |
+|---------|------|---------|
+| 2.0 | April 9, 2026 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API (Ch 07), benchmark framework, Streamlit monitoring dashboard, local build instructions |
+| 1.0 | May 22, 2025 | Initial PDF release with single notebook |
+
+*Last updated: April 2026*

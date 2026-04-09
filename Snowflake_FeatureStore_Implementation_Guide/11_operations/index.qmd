@@ -661,7 +661,7 @@ Using different versions of `snowflake-ml-python` to create and retrieve Feature
 ```python
 # In your CI/CD pipeline or Dockerfile
 # requirements.txt
-snowflake-ml-python==1.8.0  # pin to exact version
+snowflake-ml-python==1.32.0  # pin to exact version
 snowflake-snowpark-python==1.23.0
 ```
 
