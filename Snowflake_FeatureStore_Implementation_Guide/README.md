@@ -211,7 +211,7 @@ This guide uses a **synthetic clickstream dataset** designed for demonstrating F
 
 - [Feature Store Overview](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/overview)
 - [Feature Store API Reference](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/api-reference)
-- [Online Feature Serving](https://docs.snowflake.com/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python)
+- [Online Feature Serving](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python)
 
 ### Additional Resources
 
