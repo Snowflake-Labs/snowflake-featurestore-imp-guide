@@ -728,8 +728,11 @@ feature_views:
 ```
 
 ### 4. Pipeline Health Monitoring {.unnumbered}
+
+Snowflake's built-in [Alerts](https://docs.snowflake.com/en/user-guide/alerts) let you define condition-based monitoring directly in SQL -- no external monitoring stack required. An Alert evaluates a SQL condition on a schedule and fires an action (email, webhook, or procedure call) when the condition is true. Combined with Dynamic Table metadata from [`INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()`](https://docs.snowflake.com/en/sql-reference/functions/dynamic_table_refresh_history) and [`INFORMATION_SCHEMA.DYNAMIC_TABLES()`](https://docs.snowflake.com/en/sql-reference/info-schema/dynamic_tables), this gives you pipeline-native observability without leaving Snowflake:
+
 ```sql
--- Create alerting for stale features
+-- Alert when any Feature Store Dynamic Table falls behind by more than 60 minutes
 CREATE ALERT feature_staleness_alert
   WAREHOUSE = FS_DEV_WH
   SCHEDULE = 'USING CRON 0 * * * * UTC'
@@ -742,6 +745,8 @@ CREATE ALERT feature_staleness_alert
   THEN
     CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
 ```
+
+See [Chapter 11: Operations](../11_operations/index.qmd) for comprehensive monitoring patterns including refresh history dashboards, data quality checks, and Streamlit-based observability.
 
 ---
 
@@ -773,7 +778,29 @@ fs.get_refresh_history(fv).show()
 ```
 
 ::: {.callout-warning title="Avoid AUTO refresh mode in production"}
-When the DT engine assigns `AUTO` refresh mode, it uses internal heuristics to decide between `INCREMENTAL` and `FULL` on each refresh cycle. These heuristics can be overly conservative (forcing `FULL` when `INCREMENTAL` would work), inconsistent across engine versions, and opaque to monitoring. For production Feature Views, explicitly design your SQL to be incremental-compatible and verify the DT shows `INCREMENTAL` mode after registration. If the engine selects `FULL`, fix the SQL pattern rather than relying on `AUTO` to eventually choose correctly.
+When the DT engine assigns `AUTO` refresh mode, it uses internal heuristics to decide between `INCREMENTAL` and `FULL` on each refresh cycle. These heuristics can be overly conservative (forcing `FULL` when `INCREMENTAL` would work), inconsistent across engine versions, and opaque to monitoring. For production Feature Views, explicitly set `refresh_mode="INCREMENTAL"` on the `FeatureView` constructor and verify the DT confirms that mode after registration:
+
+```python
+fv = FeatureView(
+    name="USER_ORDER_FV",
+    entities=[user_entity],
+    feature_df=user_order_df,
+    refresh_freq="15 minutes",
+    refresh_mode="INCREMENTAL",
+    desc="User order features — explicit incremental refresh",
+)
+```
+
+If the engine overrides this to `FULL` (check `fv.refresh_mode` after registration), the underlying SQL contains a pattern incompatible with incremental tracking -- fix the SQL rather than falling back to `AUTO`.
+
+For an existing Feature View, you can also change the refresh mode via SQL:
+
+```sql
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  SET REFRESH_MODE = INCREMENTAL;
+```
+
+See the Snowflake documentation on [Dynamic Table refresh modes](https://docs.snowflake.com/en/user-guide/dynamic-tables-refresh) for the full list of SQL patterns that support incremental refresh.
 :::
 
 A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR, STD) in the same query block as a JOIN**. The DT engine cannot prove incremental correctness for floating-point aggregate diffs across joins, so it forces full refresh. **Workaround:** cast to fixed-point before aggregating (`CAST(float_col AS NUMBER(38, 6))`), or split the query into a base DT (aggregation, no join) and a View layer that joins. See [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation pattern.

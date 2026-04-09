@@ -747,7 +747,7 @@ See also [Chapter 9: Preprocessing -- Pre-Encoding Categoricals](../09_preproces
 
 ---
 
-## Dataset Generation at Enterprise Scale {#sec-scale}
+## Dataset Generation at Enterprise Scale {#sec-enterprise-scale}
 
 At large scale (50+ Feature Views, billions of spine rows, thousands of features), the default single-query join strategy in `generate_training_set` / `generate_dataset` hits memory and shuffle limits. This section covers architectural patterns for scale.
 

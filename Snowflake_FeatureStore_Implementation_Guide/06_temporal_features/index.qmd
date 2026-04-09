@@ -7,7 +7,7 @@ subtitle: "Point-in-time correctness, ASOF joins, and data leakage prevention"
 
 Temporal correctness is critical for ML systems. When training a model, you must ensure features are computed using only data that would have been available at the time of prediction. Using future data ("data leakage") leads to artificially good training metrics but poor production performance.
 
-This chapter uses the **clickstream** sample shape: source data in database `FEATURE_STORE_DEMO`, schema `CLICKSTREAM_DATA` (tables `EVENTS`, `SESSIONS`, `ORDERS`), Feature Store metadata in schema `FEATURE_STORE`, warehouse `FS_DEV_WH`. Feature View registrations use version strings in **`V01` format** (for example `version="V01"`).
+Code examples in this chapter use the shared demo environment (`FEATURE_STORE_DEMO.CLICKSTREAM_DATA`) established in the [Introduction](../00_introduction/index.qmd).
 
 The chapter covers how Snowflake Feature Store ensures temporal correctness through point-in-time (PIT) retrieval and ASOF joins, how to **backfill** materialized features, and how to avoid **silent errors** when features are *derived* from timestamps that only exist on the spine—not inside the Feature View SQL.
 

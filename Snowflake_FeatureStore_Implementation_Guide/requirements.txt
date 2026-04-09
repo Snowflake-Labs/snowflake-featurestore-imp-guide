@@ -15,7 +15,7 @@ snowflake-connector-python>=3.10.0
 # ============================================================================
 # Data Processing (pin NumPy for compatibility)
 # ============================================================================
-numpy<2.0  # Required for compatibility with Snowflake packages
+numpy>=1.23,<3.0
 pandas>=2.0,<3.0
 pyarrow>=14.0.0
 

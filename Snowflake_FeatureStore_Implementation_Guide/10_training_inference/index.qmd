@@ -7,7 +7,7 @@ subtitle: "Generating datasets, spine design, and Model Registry integration"
 
 This chapter covers the end-to-end workflow for using Feature Store in ML pipelines: from designing spines and generating training datasets to batch and online inference.
 
-This guide uses the **clickstream** sample shape: database `FEATURE_STORE_DEMO`, source schema `CLICKSTREAM_DATA` (tables `SESSIONS`, `EVENTS`, `ORDERS`, `USERS`), Feature Store schema `FEATURE_STORE`, warehouse `FS_DEV_WH`. Feature View registrations use version strings in **`V01` format** (for example `version="V01"`).
+Code examples in this chapter use the shared demo environment (`FEATURE_STORE_DEMO.CLICKSTREAM_DATA`) established in the [Introduction](../00_introduction/index.qmd).
 
 ## Learning Objectives
 

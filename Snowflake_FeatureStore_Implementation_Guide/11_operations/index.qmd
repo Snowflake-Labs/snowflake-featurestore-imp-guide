@@ -672,8 +672,8 @@ Using different versions of `snowflake-ml-python` to create and retrieve Feature
 ```python
 # In your CI/CD pipeline or Dockerfile
 # requirements.txt
-snowflake-ml-python==1.32.0  # pin to exact version
-snowflake-snowpark-python==1.23.0
+snowflake-ml-python==1.34.0  # pin to exact version
+snowflake-snowpark-python==1.48.1
 ```
 
 See [Chapter 12: CI/CD for Feature Store](../12_advanced_patterns/index.qmd) for deployment pipeline patterns that enforce version consistency.
