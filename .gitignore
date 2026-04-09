@@ -1,10 +1,45 @@
-
+# macOS
 .DS_Store
 
-# LaTeX / Quarto build artifacts
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Quarto build artifacts
+_site/
+.quarto/
 *.tex
 *.log
 *.aux
 
-# Sync workflow (belongs in dev repo only)
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment & secrets
+.env
+*.pem
+*.key
+
+# Testing
+.coverage
+.pytest_cache/
+
+# Data output
+*.csv
+*.parquet
+
+# Sync workflow (dev repo only)
 sync-to-snowflake-labs.yml.disabled
