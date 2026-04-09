@@ -45,10 +45,10 @@ jobs:
         with:
           version: '1.6.43'
 
-      - name: Render Quarto Book (HTML only)
+      - name: Render Quarto Book (HTML only, from freeze cache)
         run: |
           cd Snowflake_FeatureStore_Implementation_Guide
-          quarto render --to html
+          quarto render --to html --no-execute
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
