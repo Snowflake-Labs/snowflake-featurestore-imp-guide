@@ -134,13 +134,13 @@ pre.sourceCode {
   background-color: transparent;
 }
 
-// Cell output styling
+// Cell output styling — match code block font size
 .cell-output-stdout pre,
 .cell-output pre {
   background-color: #f0f6f0;
   border-left: 4px solid $success;
   border-radius: $border-radius;
-  font-size: 0.88em;
+  font-size: 0.82rem;
 }
 
 // ---------------------------------------------------------------------------
