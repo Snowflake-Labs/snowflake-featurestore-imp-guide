@@ -52,6 +52,8 @@ format:
     theme:
       light: [cosmo, _theme/snowflake-light.scss]
       dark:  [darkly, _theme/snowflake-dark.scss]
+    include-after-body:
+      - file: _theme/sidebar-toggle-include.html
     code-fold: false
     code-tools: true
     code-copy: true

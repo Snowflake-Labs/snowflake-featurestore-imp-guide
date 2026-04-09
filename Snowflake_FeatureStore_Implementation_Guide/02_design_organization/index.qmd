@@ -78,6 +78,7 @@ fs = FeatureStore(
 - Single ML project or use case
 - Quick proof-of-concept work
 - No regulatory separation requirements
+- Naming conventions are sufficient to distinguish environment promotion
 
 ### Intermediate Organization: One Database, Multiple Schemas
 

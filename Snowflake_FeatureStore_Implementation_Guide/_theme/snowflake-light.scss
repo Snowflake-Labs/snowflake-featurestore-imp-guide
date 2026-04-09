@@ -206,6 +206,79 @@ div.callout-warning {
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar toggle buttons (appended to body, positioned fixed)
+// ---------------------------------------------------------------------------
+.sf-sidebar-toggle {
+  position: fixed;
+  z-index: 1060;
+  width: 26px;
+  height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba($sf-blue, 0.35);
+  background: $sf-iceberg;
+  color: $sf-star-blue;
+  cursor: pointer;
+  transition: background-color 0.2s, opacity 0.2s;
+  opacity: 0.6;
+
+  &:hover {
+    opacity: 1;
+    background: $sf-mid-blue;
+    color: #fff;
+  }
+}
+
+#sf-toggle-left {
+  top: 120px;
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+#sf-toggle-right {
+  right: 0;
+  top: 120px;
+  border-radius: 6px 0 0 6px;
+  border-right: none;
+}
+
+// --- Left sidebar collapsed ---
+// The sidebar is a CSS Grid item (grid-column: screen-start/body-start).
+// display:none removes it from flow so the content grid expands leftward.
+.sf-left-collapsed #quarto-sidebar {
+  display: none !important;
+}
+
+@media (min-width: 992px) {
+  .sf-left-collapsed .page-columns > .content,
+  .sf-left-collapsed .page-columns > main {
+    grid-column-start: screen-start-inset !important;
+  }
+}
+
+// --- Right sidebar collapsed ---
+.sf-right-collapsed #quarto-margin-sidebar {
+  display: none !important;
+}
+
+@media (min-width: 992px) {
+  .sf-right-collapsed .page-columns > .content,
+  .sf-right-collapsed .page-columns > main {
+    grid-column-end: page-end !important;
+    padding-right: 2em;
+  }
+}
+
+// Hide toggle buttons on mobile (Quarto has its own responsive collapse)
+@media (max-width: 991.98px) {
+  .sf-sidebar-toggle {
+    display: none !important;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Misc
 // ---------------------------------------------------------------------------
 ::selection {

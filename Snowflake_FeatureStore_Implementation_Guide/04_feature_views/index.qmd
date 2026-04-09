@@ -260,7 +260,7 @@ If the join is unavoidable, consider splitting the query into a base DT (aggrega
 
 > 📁 **Full code:** [`_code/dynamic_table_fv.py`](_code/dynamic_table_fv.py) — `create_cron_featureview`
 
-Use CRON when features should refresh on a **calendar schedule** aligned to upstream batch loads rather than continuous lag. This is common when source data arrives in known batches (e.g., a nightly ETL) and refreshing more frequently would add cost without improving freshness:
+Use CRON when features should refresh on a **calendar schedule** aligned to upstream batch loads rather than continuous lag. This is common when source data arrives in known batches (e.g., a nightly ETL) and you want refresh timing to match the upstream cadence. Note that even with a shorter `refresh_freq`, cost is minimal when there is no new source data -- the Dynamic Table scheduler checks for upstream changes and skips the refresh cycle without starting a warehouse:
 
 ```python
 # Daily session features -- source data lands in a nightly batch
@@ -268,8 +268,7 @@ user_daily_session_df = session.sql("""
     SELECT
         USER_ID,
         COUNT(DISTINCT SESSION_ID) AS SESSION_CNT_LIFETIME,
-        AVG(DURATION_SEC) AS AVG_SESSION_DURATION_SEC,
-        MAX(START_TS) AS LAST_SESSION_TS
+        AVG(DURATION_SEC) AS AVG_SESSION_DURATION_SEC
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS
     GROUP BY USER_ID
 """)
@@ -278,11 +277,15 @@ user_daily_session_fv = FeatureView(
     name="USER_SESSION_DAILY_FV",
     entities=[user_entity],
     feature_df=user_daily_session_df,
-    timestamp_col="LAST_SESSION_TS",
     refresh_freq="0 8 * * *",  # CRON: refresh daily at 08:00 UTC after nightly load
     desc="USER session engagement features — refreshed daily after batch ingestion",
 )
 ```
+
+::: {.callout-note}
+## `timestamp_col` is optional
+This example omits `timestamp_col` because it produces a single latest-state row per entity. Without a timestamp column, Feature Store performs an **equality join** on the entity key when retrieving features -- every spine row for that entity receives the same feature values. Use `timestamp_col` when you need **point-in-time (ASOF) joins** for temporally correct training data; omit it when you only need the current snapshot. See [Chapter 6: Temporal Features](../06_temporal_features/index.qmd) for details.
+:::
 
 **Characteristics**:
 
@@ -350,7 +353,7 @@ fs.register_feature_view(fv, version="DEV_V01")
 fs.register_feature_view(fv, version="PROD_V03")
 ```
 
-Prefer **V01**, **V02**, … for operational clarity and sorting. Other schemes (semantic versions, date stamps) are possible but should be agreed team-wide.
+Prefer **V01**, **V02**, … for operational clarity and sorting. Other schemes (semantic versions, date stamps) are possible but should be agreed team-wide. Consider creating shared Python helper functions that automate version incrementing and enforce your preferred scheme -- this reduces human error as the Feature View count grows and keeps versioning consistent across teams.
 
 ### How Versions Map to Snowflake Objects
 
@@ -386,7 +389,7 @@ This naming convention means:
 | **Adding new features** | Create and register a **new version** (e.g. **V02**) that includes the new columns; keep **V01** until consumers opt in. |
 | **Deprecating features** | Leave the old version **registered** and documented as deprecated; remove columns only in a **new** version so existing training and serving jobs keep working. |
 | **Breaking changes** (rename column, change type or meaning, change entity keys, change `timestamp_col` semantics) | Always ship a **new version** (or new Feature View name). Never overwrite **V01** with incompatible definitions. |
-| **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. |
+| **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. Use [lineage](../11_operations/index.qmd#sec-lineage) to identify dependencies and usage. |
 
 Workflow summary:
 
@@ -446,7 +449,7 @@ draft_fv = FeatureView(name="MY_FV", entities=[entity], feature_df=my_df, ...)
 print(draft_fv.query)  # prints the SQL that would be used in the AS clause
 ```
 
-This gives you the inner query only. For the full DDL of an already-registered DT (including `TARGET_LAG`, `WAREHOUSE`, etc.), use `SELECT GET_DDL('DYNAMIC_TABLE', 'FEATURE_STORE."MY_FV$V01"')`.
+This gives you the inner query only. For the full DDL of an already-registered DT (including `TARGET_LAG`, `WAREHOUSE`, `TAGS` etc.), use `SELECT GET_DDL('DYNAMIC_TABLE', 'FEATURE_STORE."MY_FV$V01"')`.
 :::
 
 :::

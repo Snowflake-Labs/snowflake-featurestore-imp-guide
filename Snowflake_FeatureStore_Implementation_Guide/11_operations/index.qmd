@@ -415,7 +415,7 @@ def search_features(fs: FeatureStore, search_term: str) -> list:
 
 ---
 
-## Data Lineage
+## Data Lineage {#sec-lineage}
 
 ### Feature Store API Lineage
 

@@ -56,24 +56,22 @@ An **Entity** represents a business object that features describe. It defines:
 Register each entity with the Feature Store using `fs.register_entity(entity)` **before** you create or register Feature Views that reference it. Entities are **not** auto-created when you register a Feature View. If an entity is missing from the registry, Feature View registration fails until you register it explicitly.
 :::
 
-```python
-# Typical order: define entities, register each, then build Feature Views
-fs.register_entity(visitor_entity)
-fs.register_entity(user_entity)
-# ... other entities ...
-```
-
 > 📁 **Full code:** [`_code/entity_definitions.py`](_code/entity_definitions.py)
 
 ```python
 from snowflake.ml.feature_store import Entity
 
-# Define an entity (register with fs.register_entity before use in Feature Views)
+# 1. Define entities
 user_entity = Entity(
     name="USER",
     join_keys=["USER_ID"],
     desc="Registered user in the clickstream platform"
 )
+
+# 2. Register entities (must happen before any Feature View that references them)
+fs.register_entity(user_entity)
+fs.register_entity(visitor_entity)
+# ... other entities ...
 ```
 
 ### Entity Components
@@ -237,7 +235,7 @@ Relationships used throughout this guide (database `FEATURE_STORE_DEMO`, source 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                   CLICKSTREAM ENTITY RELATIONSHIPS                       │
+│                   CLICKSTREAM ENTITY RELATIONSHIPS                      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │   VISITOR ──identified as──▶ USER ──belongs to──▶ HOUSEHOLD             │
