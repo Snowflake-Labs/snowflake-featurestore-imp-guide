@@ -330,9 +330,8 @@ For automated deployments, consider these patterns:
 ```sql
 -- Create CI/CD service user
 CREATE USER FS_CICD_USER
-    PASSWORD = 'SecurePassword!'
     DEFAULT_ROLE = FS_ADMIN_ROLE
-    RSA_PUBLIC_KEY = '...';  -- Key-pair auth for automation
+    RSA_PUBLIC_KEY = '<your-rsa-public-key>';  -- Key-pair auth recommended for CI/CD
 
 GRANT ROLE FS_ADMIN_ROLE TO USER FS_CICD_USER;
 ```
