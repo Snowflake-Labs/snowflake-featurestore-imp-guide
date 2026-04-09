@@ -255,6 +255,7 @@ div.callout-warning {
   .sf-left-collapsed .page-columns > .content,
   .sf-left-collapsed .page-columns > main {
     grid-column-start: screen-start-inset !important;
+    padding-left: 2em;
   }
 }
 

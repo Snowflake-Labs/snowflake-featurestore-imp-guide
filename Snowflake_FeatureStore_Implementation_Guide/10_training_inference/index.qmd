@@ -18,7 +18,7 @@ After completing this chapter, you will be able to:
 - Generate training data with point-in-time correctness
 - Apply feature column prefixing for disambiguation
 - Integrate with Snowflake Model Registry using open-source or Snowflake ML estimators
-- Implement batch inference workflows, including DT-based continuous scoring
+- Implement batch inference workflows, including Dynamic Table (DT)-based continuous scoring
 
 ---
 

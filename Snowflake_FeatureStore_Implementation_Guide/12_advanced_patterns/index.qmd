@@ -18,7 +18,7 @@ After completing this chapter, you will be able to:
 - Plan multi-region and disaster recovery considerations for Feature Store schemas
 - Integrate Feature Store deployments with CI/CD pipelines and environment promotion
 - Apply structured testing: unit logic, PIT correctness, schema validation, and freshness checks
-- Apply hybrid storage, two-tier Feature View architecture, and DT cascades to manage wide and sparse feature data at scale
+- Apply hybrid storage, two-tier Feature View architecture, and Dynamic Table (DT) cascades to manage wide and sparse feature data at scale
 - Use `OBJECT_CONSTRUCT` and semi-structured types for embeddings, JSON features, and column-count reduction
 
 ---

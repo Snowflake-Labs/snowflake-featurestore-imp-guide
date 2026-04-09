@@ -320,6 +320,22 @@ fs = FeatureStore(session=session, database=SOURCE_DATABASE, name=FS_NAME, ...)
 Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from configuration files, environment variables, CI/CD secrets, or templating engines (e.g., Jinja, Terraform, [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview)). See [Chapter 2: Multi-Environment Deployment](../02_design_organization/index.qmd) for full parameterisation patterns.
 :::
 
+### Abbreviations Used in This Guide {#sec-abbreviations}
+
+| Abbreviation | Meaning |
+|--------------|---------|
+| **DT** | Dynamic Table |
+| **FV** | Feature View |
+| **OFT** | Online Feature Table |
+| **PIT** | Point-in-Time |
+| **MIT** | Model-Independent Transformation |
+| **MDT** | Model-Dependent Transformation |
+| **ODT** | On-Demand Transformation |
+| **SCD** | Slowly Changing Dimension |
+| **RBAC** | Role-Based Access Control |
+
+Each abbreviation is expanded on first use in every chapter. After that, the short form is used for readability.
+
 ### Feature Naming Conventions {#sec-naming-conventions}
 
 | Suffix | Meaning | Example |

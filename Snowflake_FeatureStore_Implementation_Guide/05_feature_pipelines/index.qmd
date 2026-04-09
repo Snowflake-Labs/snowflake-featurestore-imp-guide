@@ -64,17 +64,6 @@ user_entity = Entity(name="USER", join_keys=["USER_ID"])
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    EXTERNAL ORCHESTRATION                           │   │
-│  │                                                                     │   │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐   │   │
-│  │  │  Source  │───▶│   DBT    │───▶│  Tables/ │───▶│ View-based   │   │   │
-│  │  │  Tables  │    │  Models  │    │  Views   │    │ Feature View │   │   │
-│  │  └──────────┘    └──────────┘    └──────────┘    └──────────────┘   │   │
-│  │                                                                     │   │
-│  │  Orchestrated by: DBT Cloud, Airflow, Dagster, Prefect              │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                    INTERNAL MANAGEMENT                              │   │
 │  │                                                                     │   │
 │  │  ┌──────────┐              ┌──────────────────────────────────────┐ │   │
@@ -96,93 +85,31 @@ user_entity = Entity(name="USER", join_keys=["USER_ID"])
 │  │  Managed by: Snowflake (optimized temporal aggregation engine)      │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    EXTERNAL ORCHESTRATION                           │   │
+│  │                                                                     │   │
+│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐   │   │
+│  │  │  Source  │───▶│   dbt    │───▶│  Tables/ │───▶│ View-based   │   │   │
+│  │  │  Tables  │    │  Models  │    │  Views   │    │ Feature View │   │   │
+│  │  └──────────┘    └──────────┘    └──────────┘    └──────────────┘   │   │
+│  │                                                                     │   │
+│  │  Orchestrated by: dbt Projects on Snowflake, Airflow, Dagster       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Architecture Comparison
 
-| Aspect | External (DBT/Airflow) | Internal (Dynamic Tables) | Temporal API | Rollup |
-|--------|------------------------|---------------------------|--------------|--------|
-| **Orchestration** | External tool | Snowflake managed | Snowflake managed | Snowflake managed |
-| **Feature View Type** | View-based | DT-based | DT-based (tiled) | DT-based (from tiled source) |
-| **Refresh Trigger** | Scheduled jobs | `refresh_freq` | `refresh_freq` | Follows source FV |
-| **Typical Freshness** | Minutes to hours | Seconds to minutes | Configurable | Follows source FV |
-| **Operational Complexity** | Higher | Lower | Lowest | Low (once source exists) |
-| **Cost Model** | Job-based compute | Continuous compute | Continuous compute | Incremental from tiles |
-| **Best For** | Existing DBT shops | New implementations | Time-windowed features | Entity hierarchy aggs |
-
----
-
-## External Orchestration (DBT/Airflow) {#sec-dbt}
-
-### When to Use External Orchestration
-
-External orchestration is ideal when you:
-
-- Have an existing DBT or Airflow investment
-- Need complex multi-step transformations
-- Want full control over scheduling and external dependencies
-- Require transformations beyond SQL (Python, Spark)
-
-### DBT Implementation Pattern
-
-> 📁 **Full code:** [`_code/dbt_pattern.py`](_code/dbt_pattern.py)
-
-#### Step 1: Create DBT Feature Models
-
-```sql
--- models/features/user_purchase_features.sql
---
--- DBT output table name = <database>.<schema>.<model_filename>
---   database: from dbt_project.yml / profiles.yml (e.g. FEATURE_STORE_DEMO)
---   schema:   from config() below → FEATURE_STORE
---   model:    from filename       → USER_PURCHASE_FEATURES
--- Result: FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES
-
--- Source: FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS (ORDER_TS, TOTAL_AMT, USER_ID, ORDER_ID)
-{{ config(
-    materialized='table',
-    schema='FEATURE_STORE',
-    tags=['feature_store', 'user_features']
-) }}
-
-WITH order_stats AS (
-    SELECT 
-        USER_ID,
-        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
-        SUM(TOTAL_AMT) AS SPEND_SUM,
-        AVG(TOTAL_AMT) AS AVG_ORDER_AMT,
-        MAX(ORDER_TS) AS LAST_ORDER_TS
-    FROM {{ ref('stg_orders') }}
-    GROUP BY USER_ID
-)
-
-SELECT *,
-    CURRENT_TIMESTAMP() AS _DBT_UPDATED_TS
-FROM order_stats
-```
-
-#### Step 2: Register as View-Based Feature View
-
-```python
-from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
-
-# Reference the DBT-created table as a View-based Feature View
-user_features_df = session.table(
-    "FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES"
-)
-
-user_purchase_fv = FeatureView(
-    name="USER_PURCHASE_FEATURES",
-    entities=[user_entity],
-    feature_df=user_features_df,
-    timestamp_col="_DBT_UPDATED_TS",
-    # refresh_freq omitted / None → View-based Feature View (DBT handles refresh)
-    desc="User purchase features - managed by DBT"
-)
-
-fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
-```
+| Aspect | Internal (Dynamic Tables) | Temporal API | Rollup | External (dbt / Airflow) |
+|--------|---------------------------|--------------|--------|--------------------------|
+| **Orchestration** | Snowflake managed | Snowflake managed | Snowflake managed | dbt Projects on Snowflake, or external tool |
+| **Feature View Type** | DT-based | DT-based (tiled) | DT-based (from tiled source) | View-based |
+| **Refresh Trigger** | `refresh_freq` | `refresh_freq` | Follows source FV | Scheduled jobs / Tasks |
+| **Typical Freshness** | Seconds to minutes | Configurable | Follows source FV | Minutes to hours |
+| **Operational Complexity** | Lower | Lowest | Low (once source exists) | Higher |
+| **Cost Model** | Continuous compute | Continuous compute | Incremental from tiles | Job-based compute |
+| **Best For** | New implementations | Time-windowed features | Entity hierarchy aggs | Existing dbt investments |
 
 ---
 
@@ -534,6 +461,106 @@ For the complete `Feature` class API -- all 14 aggregation functions, the `"life
 
 ---
 
+## External Orchestration (dbt / Airflow) {#sec-dbt}
+
+### When to Use External Orchestration
+
+External orchestration is appropriate when you:
+
+- Have an existing dbt or Airflow investment and want to incorporate Feature Store into those workflows
+- Need complex multi-step transformations that span systems beyond Snowflake
+- Require transformations that mix SQL and Python across multiple engines
+
+::: {.callout-tip}
+## dbt Projects on Snowflake
+Snowflake now supports running dbt Core projects natively via [dbt Projects on Snowflake](https://docs.snowflake.com/en/user-guide/data-engineering/dbt-projects-on-snowflake). You can create, deploy, schedule, and monitor dbt projects entirely within Snowflake using the `CREATE DBT PROJECT`, `EXECUTE DBT PROJECT` commands and Snowflake Tasks -- no external dbt Cloud or self-hosted infrastructure required. If your team uses dbt for feature transformations, evaluate this option before setting up an external deployment.
+:::
+
+### dbt Implementation Pattern
+
+> 📁 **Full code:** [`_code/dbt_pattern.py`](_code/dbt_pattern.py)
+
+#### Step 1: Create dbt Feature Models
+
+```sql
+-- models/features/user_purchase_features.sql
+--
+-- dbt output table name = <database>.<schema>.<model_filename>
+--   database: from dbt_project.yml / profiles.yml (e.g. FEATURE_STORE_DEMO)
+--   schema:   from config() below → FEATURE_STORE
+--   model:    from filename       → USER_PURCHASE_FEATURES
+-- Result: FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES
+
+-- Source: FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS (ORDER_TS, TOTAL_AMT, USER_ID, ORDER_ID)
+{{ config(
+    materialized='table',
+    schema='FEATURE_STORE',
+    tags=['feature_store', 'user_features']
+) }}
+
+WITH order_stats AS (
+    SELECT 
+        USER_ID,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(TOTAL_AMT) AS SPEND_SUM,
+        AVG(TOTAL_AMT) AS AVG_ORDER_AMT,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM {{ ref('stg_orders') }}
+    GROUP BY USER_ID
+)
+
+SELECT *,
+    CURRENT_TIMESTAMP() AS _DBT_UPDATED_TS
+FROM order_stats
+```
+
+#### Step 2: Deploy and Schedule via dbt Projects on Snowflake
+
+```sql
+-- Deploy the dbt project as a Snowflake object
+CREATE OR ALTER DBT PROJECT FEATURE_STORE_DEMO.FEATURE_STORE.USER_FEATURES_DBT
+  FROM @my_stage/dbt_project;
+
+-- Execute the dbt project (builds the models)
+EXECUTE DBT PROJECT FEATURE_STORE_DEMO.FEATURE_STORE.USER_FEATURES_DBT
+  ARGS = 'run --select user_purchase_features'
+  USING WAREHOUSE = FS_PROD_WH;
+
+-- Schedule with a Snowflake Task for recurring runs
+CREATE OR REPLACE TASK FEATURE_STORE_DEMO.FEATURE_STORE.DBT_USER_FEATURES_TASK
+  WAREHOUSE = FS_PROD_WH
+  SCHEDULE = 'USING CRON 0 8 * * * UTC'
+AS
+  EXECUTE DBT PROJECT FEATURE_STORE_DEMO.FEATURE_STORE.USER_FEATURES_DBT
+    ARGS = 'run --select user_purchase_features';
+
+ALTER TASK FEATURE_STORE_DEMO.FEATURE_STORE.DBT_USER_FEATURES_TASK RESUME;
+```
+
+#### Step 3: Register as View-Based Feature View
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+
+# Reference the dbt-created table as a View-based Feature View
+user_features_df = session.table(
+    "FEATURE_STORE_DEMO.FEATURE_STORE.USER_PURCHASE_FEATURES"
+)
+
+user_purchase_fv = FeatureView(
+    name="USER_PURCHASE_FEATURES",
+    entities=[user_entity],
+    feature_df=user_features_df,
+    timestamp_col="_DBT_UPDATED_TS",
+    # refresh_freq omitted / None → View-based Feature View (dbt handles refresh)
+    desc="User purchase features - managed by dbt"
+)
+
+fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
+```
+
+---
+
 ## Pipeline Selection Framework {#sec-selection}
 
 ### Decision Tree
@@ -541,28 +568,32 @@ For the complete `Feature` class API -- all 14 aggregation functions, the `"life
 ```
 What is your primary requirement?
 │
-├── Already have DBT/Airflow infrastructure?
+├── Are features time-windowed aggregations?
+│   ├── YES → Temporal Aggregation API
+│   └── NO  → Continue below
+│
+├── Need real-time features (<1 min latency)?
+│   ├── YES → Dynamic Tables + Online Feature Tables
+│   └── NO  → Continue below
+│
+├── Already have dbt / Airflow infrastructure?
 │   ├── YES → Do you need sub-hour freshness?
 │   │         ├── YES → Consider migrating critical features to DT
-│   │         └── NO  → External Orchestration (keep DBT)
+│   │         └── NO  → External Orchestration (dbt Projects on Snowflake)
 │   │
-│   └── NO  → Are features time-windowed aggregations?
-│             ├── YES → Temporal Aggregation API
-│             └── NO  → Internal Management (Dynamic Tables)
+│   └── NO  → Internal Management (Dynamic Tables)
 │
-└── Need real-time features (<1 min latency)?
-    ├── YES → Dynamic Tables + Online Feature Tables
-    └── NO  → Any approach works, optimize for cost
+└── Default → Internal Management (Dynamic Tables)
 ```
 
 ### Selection Matrix
 
 | Requirement | Recommended Approach |
 |-------------|---------------------|
-| Existing DBT investment | External Orchestration |
 | Minimal operational overhead | Internal (Dynamic Tables) |
 | Time-windowed aggregations | Temporal Aggregation API |
 | Sub-minute freshness | Dynamic Tables (short refresh) |
+| Existing dbt investment | External Orchestration (dbt Projects on Snowflake) |
 | Complex multi-step transforms | External Orchestration |
 | New Feature Store implementation | Internal (Dynamic Tables) |
 
