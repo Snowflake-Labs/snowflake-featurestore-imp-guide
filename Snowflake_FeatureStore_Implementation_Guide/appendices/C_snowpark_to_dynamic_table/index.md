@@ -211,6 +211,7 @@ According to the Snowflake documentation, both UDFs and UDTFs **are supported fo
 
 ```python
 from snowflake.snowpark.types import PandasSeries, FloatType
+import snowflake.snowpark.functions as F
 from snowflake.snowpark.functions import udf, call_udf
 import numpy as np
 

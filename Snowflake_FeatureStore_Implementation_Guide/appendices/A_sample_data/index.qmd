@@ -231,7 +231,7 @@ Note: Leaving these executing will continue to generate data and update the feat
 ALTER TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK SUSPEND;
 ```
 
-You can resume the task at anytime when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated.  The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time.  This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.
+You can resume the task at any time when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated.  The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time.  This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.
 
 ### Files
 
