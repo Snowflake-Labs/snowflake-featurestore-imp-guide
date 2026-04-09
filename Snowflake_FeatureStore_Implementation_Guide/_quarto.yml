@@ -50,8 +50,8 @@ book:
 format:
   html:
     theme:
-      light: cosmo
-      dark: darkly
+      light: [cosmo, _theme/snowflake-light.scss]
+      dark:  [darkly, _theme/snowflake-dark.scss]
     code-fold: false
     code-tools: true
     code-copy: true

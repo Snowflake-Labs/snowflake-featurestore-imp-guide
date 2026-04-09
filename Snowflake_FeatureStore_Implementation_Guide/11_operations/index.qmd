@@ -20,6 +20,30 @@ After completing this chapter, you will be able to:
 - Discover and search existing features to avoid duplication
 - Troubleshoot common issues
 
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark import functions as F
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+```
+
 ---
 
 ## Metadata and INFORMATION_SCHEMA
@@ -256,7 +280,7 @@ Tiled aggregation Feature Views (`features` + `feature_granularity`) have two di
 1. **Tile computation** (DT refresh) -- aggregates source data into tiles. Cost scales with source data volume and tile count.
 2. **Tile reassembly** (query time / dataset generation) -- combines tiles into windows for each spine row. Cost scales with `spine_rows × tiles_per_window`.
 
-For tile computation, a small warehouse (XS-M) is usually sufficient since each refresh only processes new/changed tiles. For tile reassembly during dataset generation, the cost can be substantial when combining long lookback windows (e.g., 360 days of daily tiles = 360 tiles per entity per window). Use the multi-granularity tile strategy from [Chapter 07](../07_aggregations_api/index.qmd#sec-multi-granularity) to reduce tile counts for long windows.
+For tile computation, a small warehouse (XS-M) is usually sufficient since each refresh only processes new/changed tiles. For tile reassembly during dataset generation, the cost can be substantial when combining long lookback windows (e.g., 360 days of daily tiles = 360 tiles per entity per window). Use the multi-granularity tile strategy from [Chapter 7](../07_aggregations_api/index.qmd#sec-multi-granularity) to reduce tile counts for long windows.
 
 ---
 
@@ -266,16 +290,9 @@ For tile computation, a small warehouse (XS-M) is usually sufficient since each 
 
 > 📁 **Full code:** [`_code/discovery.py`](_code/discovery.py)
 
-```python
-# List all Feature Views
-feature_views = fs.list_feature_views()
-print(feature_views.to_pandas())
-
-# Get specific Feature View details
-fv = fs.get_feature_view(name="USER_ORDER_FV", version="V01")
-print(f"Name: {fv.name}")
-print(f"Entities: {fv.entities}")
-print(f"Refresh: {fv.refresh_freq}")
+```{python}
+# List all registered Feature Views (accumulated across guide chapters)
+fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
 ```
 
 ### SQL metadata queries
@@ -309,9 +326,7 @@ WHERE TABLE_SCHEMA = 'FEATURE_STORE';
 
 Do **not** build `INFORMATION_SCHEMA` SQL with f-strings from user input. Use Snowpark DataFrame filters with `F.lit()` for safe parameterisation:
 
-```python
-import snowflake.snowpark.functions as F
-
+```{python}
 def search_feature_columns(session, search_term: str, limit: int = 50):
     """Search Feature Store columns by name pattern (case-insensitive)."""
     cols_df = session.table("FEATURE_STORE_DEMO.INFORMATION_SCHEMA.COLUMNS").filter(
@@ -333,7 +348,7 @@ def search_feature_columns(session, search_term: str, limit: int = 50):
 
 rows = search_feature_columns(session, "ORDER")
 for r in rows:
-    print(r["FEATURE_VIEW"], r["FEATURE_NAME"], r["DESCRIPTION"])
+    print(f"  {r['FEATURE_VIEW']:45s}  {r['FEATURE_NAME']}")
 ```
 
 ### Avoiding Duplicate Features
@@ -412,7 +427,7 @@ lineage = fv.lineage()
 print(lineage)
 ```
 
-This returns the lineage graph showing which source tables feed into the Feature View and which models or datasets consume it. Use this before deprecating or deleting a Feature View version to confirm there are no active consumers (see also [Chapter 04: Managing Versions](../04_feature_views/index.qmd#sec-versioning)).
+This returns the lineage graph showing which source tables feed into the Feature View and which models or datasets consume it. Use this before deprecating or deleting a Feature View version to confirm there are no active consumers (see also [Chapter 4: Managing Versions](../04_feature_views/index.qmd#sec-versioning)).
 
 ### Object Dependencies (SQL)
 
@@ -582,7 +597,7 @@ WHERE TABLE_CATALOG = 'FEATURE_STORE_DEMO'
 ORDER BY LAST_COMPLETED_REFRESH_START_TIME DESC;
 ```
 
-Pay particular attention to the `REFRESH_MODE` column. If a Dynamic Table shows **`FULL`** when you expected **`INCREMENTAL`**, the underlying SQL contains a pattern the engine cannot track incrementally. The most common cause is **aggregations on `FLOAT`-typed columns combined with a JOIN in the same query block** (SUM, AVG, MIN, MAX, VAR, STD on FLOATs). The workaround is to cast float columns to fixed-point (`NUMBER(38, 6)`) before aggregating, or to split the query into a base DT (aggregation only) and a View layer that joins the results. See [Chapter 04: Feature Views](../04_feature_views/index.qmd) for the Base + Presentation pattern.
+Pay particular attention to the `REFRESH_MODE` column. If a Dynamic Table shows **`FULL`** when you expected **`INCREMENTAL`**, the underlying SQL contains a pattern the engine cannot track incrementally. The most common cause is **aggregations on `FLOAT`-typed columns combined with a JOIN in the same query block** (SUM, AVG, MIN, MAX, VAR, STD on FLOATs). The workaround is to cast float columns to fixed-point (`NUMBER(38, 6)`) before aggregating, or to split the query into a base DT (aggregation only) and a View layer that joins the results. See [Chapter 4: Feature Views](../04_feature_views/index.qmd) for the Base + Presentation pattern.
 
 ### Health Dashboard
 

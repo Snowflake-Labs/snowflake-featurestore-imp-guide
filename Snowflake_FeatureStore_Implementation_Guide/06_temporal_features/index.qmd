@@ -23,6 +23,29 @@ After completing this chapter, you will be able to:
 - Run manual refresh / backfill for Dynamic Table-backed Feature Views
 - Recognize when derived time-dependent features must be computed after retrieval (or via snapshot materialization)
 
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+```
+
 ---
 
 ## Why Temporal Correctness Matters
@@ -81,9 +104,7 @@ After completing this chapter, you will be able to:
 
 The training spine uses **`SESSIONS`**: `SESSION_START_TS` is the instant you want features "as of"; `IS_CONVERTED` is the label. User-level features come from **`EVENTS`**, aggregated into **daily snapshots** — one row per user per active day. This gives the ASOF join multiple timestamps per entity to choose from, so different spine events retrieve different historical snapshots.
 
-```python
-from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
-
+```{python}
 user_entity = Entity(name="USER", join_keys=["USER_ID"], desc="Clickstream user")
 
 # 1. Feature View: daily event snapshots — one row per user per active day
@@ -109,9 +130,7 @@ user_event_fv = FeatureView(
 
 # 2. Register at version V01
 registered_fv = fs.register_feature_view(
-    feature_view=user_event_fv,
-    version="V01",
-    block=True,
+    feature_view=user_event_fv, version="V01", block=True, overwrite=True,
 )
 
 # 3. Spine: entity + when + label (SESSIONS)
@@ -127,10 +146,18 @@ training_spine = session.sql("""
 # 4. Training set: ASOF join — for each session, retrieve the user's most
 #    recent daily snapshot on or before PREDICTION_TS
 training_set = fs.generate_dataset(
+    name="CH06_PIT_DEMO",
     spine_df=training_spine,
     features=[registered_fv],
     spine_timestamp_col="PREDICTION_TS",
+    output_type="dataset",
 )
+
+# Show a sample — note how different PREDICTION_TS values for the same user
+# retrieve different daily snapshots via the ASOF join
+training_set.read.to_snowpark_dataframe().select(
+    "USER_ID", "PREDICTION_TS", "LABEL", "EVENT_CNT", "PRODUCT_DISTINCT_CNT"
+).limit(8).show()
 ```
 
 ### How ASOF Joins Work
@@ -278,7 +305,7 @@ The `timestamp_col` should represent when the feature **row** is valid for ASOF 
 For ASOF joins to be meaningful, the Feature View must produce **multiple rows per entity over time**. A single row per entity (e.g., `GROUP BY USER_ID` with `MAX(EVENT_TS)`) always returns the same record regardless of spine timestamp -- it's a latest-state lookup, not a temporal one.
 
 ::: {.callout-tip}
-**Standardise `timestamp_col` with aliasing.** Just as entity join keys are aliased to a consistent name (see [Chapter 01](../01_concepts/index.qmd)), adopt a **standard timestamp column name** across all Feature Views -- for example `FV_TS`. Alias the source timestamp in the Feature View SQL:
+**Standardise `timestamp_col` with aliasing.** Just as entity join keys are aliased to a consistent name (see [Chapter 1](../01_concepts/index.qmd)), adopt a **standard timestamp column name** across all Feature Views -- for example `FV_TS`. Alias the source timestamp in the Feature View SQL:
 
 ```sql
 -- Every Feature View aliases its temporal column to the same name
@@ -347,7 +374,7 @@ user_snapshot_fv = FeatureView(
 
 # Pattern 4: Tiled temporal aggregations (Feature class API)
 # The tiling engine automatically creates time-bucketed rows per entity
-# See Chapter 05 and Chapter 07 for details
+# See Chapter 5 and Chapter 7 for details
 ```
 
 ::: {.callout-important}
@@ -470,7 +497,7 @@ AS
 Updating the config table row changes the history window on the **next DT refresh** without any DDL change. This same principle applies to any configurable parameter in DT SQL: date ranges, numeric thresholds, feature toggles, or environment-specific values. Keeping literals out of the DT definition makes the pipeline environment-agnostic and operationally flexible.
 
 ::: {.callout-warning}
-Adding a JOIN to a config table may affect the DT engine's ability to use incremental refresh, depending on the query pattern. Test `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration to verify incremental behaviour is preserved. See [Chapter 05: Pitfall 2](../05_feature_pipelines/index.qmd) for diagnostics.
+Adding a JOIN to a config table may affect the DT engine's ability to use incremental refresh, depending on the query pattern. Test `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration to verify incremental behaviour is preserved. See [Chapter 5: Pitfall 2](../05_feature_pipelines/index.qmd) for diagnostics.
 :::
 
 ---
@@ -654,7 +681,7 @@ This is a form of **data leakage** in reverse: rather than future data leaking i
 `CURRENT_TIMESTAMP()` is non-deterministic and forces FULL refresh. Source gating with `TIME_SLICE(CURRENT_TIMESTAMP(), ...)` must be applied in a Task or ingestion pipeline *outside* the DT — never in the DT definition.
 :::
 
-See [Chapter 05: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) for the full pipeline-level mitigation pattern and [Chapter 07](../07_aggregations_api/index.qmd#sec-partial-interval-tiling) for the tiling-specific safeguard.
+See [Chapter 5: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) for the full pipeline-level mitigation pattern and [Chapter 7](../07_aggregations_api/index.qmd#sec-partial-interval-tiling) for the tiling-specific safeguard.
 
 ---
 
@@ -674,4 +701,4 @@ See [Chapter 05: Partial Leading-Edge Interval](../05_feature_pipelines/index.qm
 
 ## Next Steps
 
-Continue to [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) to learn about the Feature class for declarative time-windowed aggregations.
+Continue to [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd) to learn about the Feature class for declarative time-windowed aggregations.

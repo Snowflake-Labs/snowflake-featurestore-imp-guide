@@ -393,7 +393,7 @@ GRANT ROLE FS_ADMIN_ROLE TO ROLE SYSADMIN;
 
 ## Cross-Environment Promotion {#sec-promotion}
 
-Moving features from development to production requires a controlled promotion process. For the Feature View version lifecycle that underpins promotion (V01 → V02 → deprecation), see [Chapter 04: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
+Moving features from development to production requires a controlled promotion process. For the Feature View version lifecycle that underpins promotion (V01 → V02 → deprecation), see [Chapter 4: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
 ### Promotion Workflow
 
@@ -528,7 +528,7 @@ Scale to:
 | Feature View | `<ENTITY>_<DOMAIN>_FV` | `USER_ORDER_FV`, `SESSION_EVENT_FV` |
 | Entity | SCREAMING_SNAKE singular | `USER`, `PRODUCT`, `SESSION`, `ORDER` |
 
-For detailed versioning conventions, `$`-delimited object naming, and programmatic version helpers, see [Chapter 04: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
+For detailed versioning conventions, `$`-delimited object naming, and programmatic version helpers, see [Chapter 4: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
 ### 3. Separate Compute by Environment
 
@@ -607,4 +607,4 @@ This is not yet exposed through the Feature Store Python API's `FeatureView` con
 
 ## Next Steps
 
-Continue to [Chapter 03: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) to learn about entity design patterns, compound keys, and entity relationships.
+Continue to [Chapter 3: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) to learn about entity design patterns, compound keys, and entity relationships.

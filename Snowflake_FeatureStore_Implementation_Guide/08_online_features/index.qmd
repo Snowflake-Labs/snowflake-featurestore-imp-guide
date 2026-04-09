@@ -569,4 +569,4 @@ Run Feature Store sessions used for **online** reads on a warehouse sized for **
 
 ## Next Steps
 
-Continue to [Chapter 09: Preprocessing](../09_preprocessing/index.qmd) to learn about model-dependent transformations and preprocessing patterns.
+Continue to [Chapter 9: Preprocessing](../09_preprocessing/index.qmd) to learn about model-dependent transformations and preprocessing patterns.

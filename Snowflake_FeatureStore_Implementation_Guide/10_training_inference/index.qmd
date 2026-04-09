@@ -169,7 +169,7 @@ The Feature Store LEFT-JOINs each Feature View on its entity keys. **Higher-leve
 | Finer than FV | N:1 (parent) | Parent features **duplicated** per child row |
 | Coarser than FV | 1:N (child) | **Multiple matches** -- training data expands; use with care |
 
-If the spine is **coarser** than the Feature View (e.g., spine at order level, FV at lineitem level), the LEFT JOIN produces multiple rows per spine entry. This is usually undesirable -- prefer an **aggregated rollup Feature View** at the spine grain instead (see [Chapter 04: Hierarchical Feature Views](../04_feature_views/index.qmd#sec-hierarchy-fvs)).
+If the spine is **coarser** than the Feature View (e.g., spine at order level, FV at lineitem level), the LEFT JOIN produces multiple rows per spine entry. This is usually undesirable -- prefer an **aggregated rollup Feature View** at the spine grain instead (see [Chapter 4: Hierarchical Feature Views](../04_feature_views/index.qmd#sec-hierarchy-fvs)).
 
 ---
 
@@ -222,7 +222,7 @@ training_df = fs.generate_training_set(
 
 ## Model Registry integration
 
-Use **open-source libraries** (scikit-learn, XGBoost, LightGBM, etc.) when your training data fits in memory, or **`snowflake.ml.modeling`** estimators when you need distributed fitting inside the warehouse. Both produce a trained object you can log with **`Registry.log_model()`**. See [Chapter 09: Preprocessing -- Pipeline Classes](../09_preprocessing/index.qmd#pipeline-classes-scikit-learn-vs-snowflake-ml) for guidance on choosing between the two.
+Use **open-source libraries** (scikit-learn, XGBoost, LightGBM, etc.) when your training data fits in memory, or **`snowflake.ml.modeling`** estimators when you need distributed fitting inside the warehouse. Both produce a trained object you can log with **`Registry.log_model()`**. See [Chapter 9: Preprocessing -- Pipeline Classes](../09_preprocessing/index.qmd#pipeline-classes-scikit-learn-vs-snowflake-ml) for guidance on choosing between the two.
 
 > 📁 **Full code:** [`_code/model_registry.py`](_code/model_registry.py)
 
@@ -440,7 +440,7 @@ For datasets exceeding ~100M rows or ~500 features, writing to Parquet and readi
 
 ### 1. Spine design
 
-If your Feature Views follow the recommended convention of aliasing their timestamp column to a standard name (e.g., `FV_TS` -- see [Chapter 06: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements)), name the spine timestamp to match:
+If your Feature Views follow the recommended convention of aliasing their timestamp column to a standard name (e.g., `FV_TS` -- see [Chapter 6: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements)), name the spine timestamp to match:
 
 ```python
 # ✅ GOOD: Standardised timestamp name matches FV convention

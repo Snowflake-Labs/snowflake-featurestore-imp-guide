@@ -1,7 +1,8 @@
 ---
-title: "Introduction"
 subtitle: "Setup, prerequisites, and guide overview"
 ---
+
+# Introduction {.unnumbered}
 
 ## Overview
 
@@ -89,11 +90,13 @@ require `snowflake-ml-python >= 1.21.0`. This guide assumes 1.21.0 as the minimu
 
 ### Session Configuration
 
-The following code establishes a Snowpark session and verifies the environment. You will need to adjust the values for `SOURCE_DATABASE`, `SOURCE_SCHEMA`, `FS_NAME`, and `WAREHOUSE` to match your environment and needs.
+The following code establishes a Snowpark session and verifies the environment. Adjust `SOURCE_DATABASE`, `SOURCE_SCHEMA`, `FS_NAME`, and `WAREHOUSE` to match your environment and needs.
 
 > 📁 **Full code:** [`_code/setup_session.py`](_code/setup_session.py)
 
-```python
+```{python}
+#| output: false
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -121,8 +124,8 @@ from snowflake.snowpark import types as T
 from snowflake.snowpark.context import get_active_session
 
 from snowflake.ml.feature_store import (
-    FeatureStore, 
-    FeatureView, 
+    FeatureStore,
+    FeatureView,
     Entity,
     CreationMode,
 )
@@ -142,11 +145,13 @@ except Exception:
 session.sql_simplifier_enabled = True
 ```
 
-### Verify Environment
+### Verify Environment {#sec-verify-environment}
 
 > 📁 **Full code:** [`_code/verify_environment.py`](_code/verify_environment.py)
 
-```python
+```{python}
+#| output: false
+
 # Capture environment details
 snowflake_environment = session.sql('SELECT current_user(), current_version()').collect()
 snowpark_version = VERSION
@@ -174,7 +179,7 @@ print(f'Snowpark Version       : {snowpark_version[0]}.{snowpark_version[1]}.{sn
 print('=' * 70)
 ```
 
-Expected output:
+Expected output (values depend on your environment):
 
 ```
 ======================================================================
@@ -188,7 +193,7 @@ Schema                 : CLICKSTREAM_DATA
 Warehouse              : FS_DEV_WH
 Warehouse Size         : X-SMALL
 Warehouse State        : STARTED
-Snowflake Version      : 8.x.x
+Snowflake Version      : 9.x.x
 Snowpark Version       : 1.25.0
 ======================================================================
 ```
@@ -197,12 +202,11 @@ Snowpark Version       : 1.25.0
 
 > 📁 **Full code:** [`_code/create_feature_store.py`](_code/create_feature_store.py)
 
-```python
+```{python}
 # Create working schema for sample data
 session.sql(f'CREATE SCHEMA IF NOT EXISTS {SOURCE_DATABASE}.{SOURCE_SCHEMA}').collect()
 
 # Initialize Feature Store
-# This creates a schema with Feature Store metadata tags
 fs = FeatureStore(
     session=session,
     database=SOURCE_DATABASE,
@@ -266,11 +270,9 @@ session_features_df = (
 
 For simple examples, we use self-contained data that you can copy-paste directly:
 
-```python
-# Example: Create sample events for quick testing
-from snowflake.snowpark import Session, Row
+```{python}
+from snowflake.snowpark import Row
 
-# Assumes session is already created
 sample_events = session.create_dataframe([
     Row(USER_ID='usr_001', EVENT_TS='2025-01-01 10:00:00', EVENT_TYPE='page_view', VALUE=1.0),
     Row(USER_ID='usr_001', EVENT_TS='2025-01-01 10:05:00', EVENT_TYPE='click', VALUE=1.0),
@@ -280,6 +282,7 @@ sample_events = session.create_dataframe([
 ])
 
 sample_events.write.save_as_table("SAMPLE_EVENTS", mode="overwrite")
+sample_events.show()
 ```
 
 ::: {.callout-tip}
@@ -314,7 +317,7 @@ df = session.table(f"{SOURCE_DATABASE}.{SOURCE_SCHEMA}.EVENTS")
 fs = FeatureStore(session=session, database=SOURCE_DATABASE, name=FS_NAME, ...)
 ```
 
-Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from configuration files, environment variables, CI/CD secrets, or templating engines (e.g., Jinja, Terraform, [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview)). See [Chapter 02: Multi-Environment Deployment](../02_design_organization/index.qmd) for full parameterisation patterns.
+Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from configuration files, environment variables, CI/CD secrets, or templating engines (e.g., Jinja, Terraform, [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview)). See [Chapter 2: Multi-Environment Deployment](../02_design_organization/index.qmd) for full parameterisation patterns.
 :::
 
 ### Feature Naming Conventions {#sec-naming-conventions}
@@ -329,6 +332,19 @@ Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from config
 | `_AVG` | Average | `ORDER_VALUE_AVG` |
 | `_AMT` | Amount (currency) | `TOTAL_AMT`, `DISCOUNT_AMT` |
 | `IS_` | Boolean flag | `IS_CONVERTED`, `IS_CURRENT` |
+| `_LST` | Last | `LAST_ORDER_TS` |
+| `_FST` | First | `FIRST_ORDER_TS` |
+| `_MAX` | Maximum | `MAX_ORDER_VALUE` |
+| `_MIN` | Minimum | `MIN_ORDER_VALUE` |
+| `_STD` | Standard deviation | `ORDER_VALUE_STD` |
+| `_VAR` | Variance | `ORDER_VALUE_VAR` |
+| `_MED` | Median | `ORDER_VALUE_MED` |
+| `_PCT` | Percentile | `ORDER_VALUE_PCT_90` |
+
+::: {.callout-tip}
+## Establish naming conventions early
+Agreeing on feature naming conventions at the start of a project prevents inconsistency, reduces refactoring, and makes features discoverable across teams. The table above is a starting point — adapt it to your organisation and enforce it through code review and automation. See [Chapter 2: Establish Naming Conventions Early](../02_design_organization/index.qmd) for object-level conventions (databases, schemas, Feature Views, Entities) and [Chapter 7: Naming Conventions](../07_aggregations_api/index.qmd) for aggregation-specific prefixing patterns.
+:::
 
 ### Version Callouts
 
@@ -344,4 +360,4 @@ Description of the new feature and how it improves on previous approaches.
 
 ## Next Steps
 
-Continue to [Chapter 01: Concepts](../01_concepts/index.qmd) to learn about the core Feature Store objects and terminology.
+Continue to [Chapter 1: Concepts](../01_concepts/index.qmd) to learn about the core Feature Store objects and terminology.

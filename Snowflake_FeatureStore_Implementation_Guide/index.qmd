@@ -1,7 +1,8 @@
 ---
-title: "Snowflake Feature Store Implementation Guide"
 subtitle: "Best Practices for Building Production ML Feature Platforms"
 ---
+
+# Snowflake Feature Store Implementation Guide {.unnumbered}
 
 ## Welcome {.unnumbered}
 
@@ -60,7 +61,7 @@ In the example above, the feature store schema will be created in the `ML_DB` da
 
 | Your Goal | Start Here |
 |-----------|------------|
-| New to Feature Store | [Chapter 0: Introduction](00_introduction/index.qmd) |
+| New to Feature Store | [Introduction](00_introduction/index.qmd) |
 | Design a Feature Store | [Chapter 2: Design & Organization](02_design_organization/index.qmd) |
 | Design Entities & hierarchies | [Chapter 3: Entities & Hierarchies](03_entities_hierarchies/index.qmd) |
 | Creating Feature Views | [Chapter 4: Feature Views](04_feature_views/index.qmd) |
@@ -82,7 +83,7 @@ All code examples in this guide are:
 ::: {.callout-note}
 ## Hard-coded names are for illustration only
 
-Throughout this guide, code examples use literal database, schema, and table names such as `FEATURE_STORE_DEMO`, `FEATURE_STORE`, and `CLICKSTREAM_DATA`. In production code, these should **never be hard-coded**. Instead, resolve them at execution time via environment variables, configuration files, CI/CD parameter injection, or Snowflake session context. See [Chapter 02: Design & Organization -- Environment Strategies](02_design_organization/index.qmd#sec-environments) for patterns and examples.
+Throughout this guide, code examples use literal database, schema, and table names such as `FEATURE_STORE_DEMO`, `FEATURE_STORE`, and `CLICKSTREAM_DATA`. In production code, these should **never be hard-coded**. Instead, resolve them at execution time via environment variables, configuration files, CI/CD parameter injection, or Snowflake session context. See [Chapter 2: Design & Organization -- Environment Strategies](02_design_organization/index.qmd#sec-environments) for patterns and examples.
 :::
 
 ## Feedback & Contributions {.unnumbered}

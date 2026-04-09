@@ -24,6 +24,31 @@ After completing this chapter, you will be able to:
 - Apply feature column prefixing for disambiguation
 - Name aggregated features following best practices
 
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Feature, Entity, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+user_entity = Entity(name="USER", join_keys=["USER_ID"])
+```
+
 ---
 
 ## The Feature Class
@@ -32,9 +57,7 @@ After completing this chapter, you will be able to:
 
 > 📁 **Full code:** [`_code/feature_class.py`](_code/feature_class.py)
 
-```python
-from snowflake.ml.feature_store import FeatureStore, Feature, FeatureView, Entity
-
+```{python}
 # Define time-windowed aggregations declaratively (aliases: _SUM, _CNT, _AVG, …)
 features = [
     Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_7D"),
@@ -52,12 +75,15 @@ user_agg_fv = FeatureView(
     feature_df=session.table(orders_fqn),
     timestamp_col="ORDER_TS",
     refresh_freq="1 hour",
-    feature_granularity="1 hour",  # Tile size
+    feature_granularity="1 hour",
     features=features,
 )
 
-# After creation, register with a zero-padded version string, e.g. V01
-# fs.register_feature_view(feature_view=user_agg_fv, version="V01", block=True)
+registered_agg_fv = fs.register_feature_view(
+    feature_view=user_agg_fv, version="V01", block=True, overwrite=True,
+)
+print(f"Registered: {registered_agg_fv.name}/V01  (tiled={registered_agg_fv.is_tiled})")
+print(f"Granularity: {registered_agg_fv.feature_granularity}")
 ```
 
 ### Available Aggregation Functions
@@ -596,8 +622,8 @@ The source Feature View **must** be a registered, tiled Feature View (one with `
 - **Define entities** that match the grain of each Feature View (for example, visitor-level tiles on `EVENTS`, user-level aggregates on `ORDERS` keyed by `USER_ID`).
 - **Reuse the same aggregation patterns** (`Feature.sum`, `Feature.count`, …) at each level; change the spine entity and join keys when moving from visitor to user to household.
 - **Keep aliases explicit** (`VISITOR_PAGE_VIEWS_7D` vs `USER_PAGE_VIEWS_7D`) so rolled-up datasets remain interpretable when multiple hierarchy levels appear in one training set.
-- **Design mapping tables carefully.** The `mapping_df` determines which fine-grained entities roll up to which coarse-grained entities. For static relationships a simple `DISTINCT` mapping suffices; for time-varying relationships (visitors identified as subscribers over time), consider SCD-Type2 patterns or `MAPPED_AT` timestamps. See [Chapter 03: Entity Mapping Tables](../03_entities_hierarchies/index.qmd#sec-mapping-tables) for patterns and PIT correctness implications.
-- **Watch for late-arriving mappings.** If entity mappings are added retroactively, the rollup may aggregate historical tile data under a mapping that did not exist at the original event time, creating subtle data leakage. See the mapping table PIT warning in [Chapter 03](../03_entities_hierarchies/index.qmd#sec-mapping-tables) and [Chapter 06](../06_temporal_features/index.qmd#sec-mapping-leakage).
+- **Design mapping tables carefully.** The `mapping_df` determines which fine-grained entities roll up to which coarse-grained entities. For static relationships a simple `DISTINCT` mapping suffices; for time-varying relationships (visitors identified as subscribers over time), consider SCD-Type2 patterns or `MAPPED_AT` timestamps. See [Chapter 3: Entity Mapping Tables](../03_entities_hierarchies/index.qmd#sec-mapping-tables) for patterns and PIT correctness implications.
+- **Watch for late-arriving mappings.** If entity mappings are added retroactively, the rollup may aggregate historical tile data under a mapping that did not exist at the original event time, creating subtle data leakage. See the mapping table PIT warning in [Chapter 3](../03_entities_hierarchies/index.qmd#sec-mapping-tables) and [Chapter 6](../06_temporal_features/index.qmd#sec-mapping-leakage).
 
 ---
 
@@ -674,7 +700,7 @@ GROUP BY 1, 2, 3;
 `CURRENT_TIMESTAMP()` is non-deterministic and forces FULL refresh. The `TIME_SLICE` gating filter must be applied in a Task or ingestion pipeline *outside* the DT — never in the DT definition SQL or the `feature_df` passed to a Feature View. Even when passed via `session.sql(...)`, the non-deterministic expression flows through to the DT and prevents incremental refresh.
 :::
 
-For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` (excluding `CURRENT ROW`) as the DT-safe equivalent. See [Chapter 05: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) and [Chapter 06: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage).
+For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` (excluding `CURRENT ROW`) as the DT-safe equivalent. See [Chapter 5: Partial Leading-Edge Interval](../05_feature_pipelines/index.qmd#sec-partial-interval) and [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage).
 
 ---
 
@@ -695,4 +721,4 @@ For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN
 
 ## Next Steps
 
-Continue to [Chapter 08: Online Features](../08_online_features/index.qmd) to learn about Online Feature Tables for real-time serving.
+Continue to [Chapter 8: Online Features](../08_online_features/index.qmd) to learn about Online Feature Tables for real-time serving.

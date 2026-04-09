@@ -21,6 +21,35 @@ After completing this chapter, you will be able to:
 - Manage Feature View lifecycle: create, register new versions, validate lineage, deprecate, and remove
 - Configure refresh strategies for freshness vs. cost, understanding that the DT scheduler incurs no compute when source data is unchanged
 
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark import functions as F
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+# Retrieve entity references registered in earlier chapters
+user_entity = Entity(name="USER", join_keys=["USER_ID"])
+product_entity = Entity(name="PRODUCT", join_keys=["PRODUCT_ID"])
+session_entity = Entity(name="SESSION", join_keys=["SESSION_ID"])
+```
+
 ---
 
 ## How `refresh_freq` Controls Materialization {#sec-refresh-freq-modes}
@@ -162,7 +191,7 @@ This Feature View produces **one row per user per order**. When the spine reques
 
 If you only need the **current** totals (e.g., for online serving or batch inference at "now"), a single-row aggregate is simpler and cheaper to maintain:
 
-```python
+```{python}
 # Latest-state lifetime order aggregates -- one row per USER
 user_order_latest_df = session.sql("""
     SELECT
@@ -184,10 +213,16 @@ user_order_latest_fv = FeatureView(
     desc="USER latest-state order aggregates: lifetime total spend, order count, "
          "and average order value from CLICKSTREAM_DATA.ORDERS",
 )
+
+user_order_latest_fv = fs.register_feature_view(
+    feature_view=user_order_latest_fv, version="V01", block=True, overwrite=True,
+)
+print(f"Registered: {user_order_latest_fv.name}/V01  ({user_order_latest_fv.status})")
+user_order_latest_df.limit(5).show()
 ```
 
 ::: {.callout-note}
-Pattern B produces one row per user. The ASOF join always returns this single row for any spine timestamp >= `LAST_ORDER_TS`. This means every training example sees the **same** (current) totals regardless of when the training event occurred -- it does not provide true point-in-time correctness for historical training. Use Pattern A when temporal accuracy matters. See [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) for details.
+Pattern B produces one row per user. The ASOF join always returns this single row for any spine timestamp >= `LAST_ORDER_TS`. This means every training example sees the **same** (current) totals regardless of when the training event occurred -- it does not provide true point-in-time correctness for historical training. Use Pattern A when temporal accuracy matters. See [Chapter 6: Temporal Features](../06_temporal_features/index.qmd) for details.
 :::
 
 **Characteristics**:
@@ -536,13 +571,12 @@ This pattern adds operational complexity and is best suited to organisations wit
 
 ### Managing Versions
 
+```{python}
+# List all registered Feature Views
+all_fvs = fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
+```
+
 ```python
-# List all versions of a Feature View
-versions = fs.list_feature_views(feature_view_name="USER_ORDER_FV")
-
-# Get a specific version
-v2_fv = fs.get_feature_view(name="USER_ORDER_FV", version="V02")
-
 # Delete an old version only after all consumers have migrated
 fs.delete_feature_view(name="USER_ORDER_FV", version="V01")
 ```
@@ -671,7 +705,7 @@ fv = FeatureView(
 
 ---
 
-## Feature View Ownership & SLAs
+## Feature View Ownership & SLAs {#sec-ownership}
 
 The Feature Store API provides `desc` on Feature Views and Entities, plus Snowflake [object tags](https://docs.snowflake.com/en/sql-reference/sql/create-tag) on the underlying Dynamic Tables and Views. For many teams, this is sufficient. However, the API does not natively track ownership, consumer lists, SLA targets, or other operational metadata that mature ML platform users might need for governance and compliance.
 
@@ -793,7 +827,7 @@ These approaches are complementary. A common pattern is to use **Contacts** for 
 When source data exists at a **child grain** (e.g., line items, events) but the model operates at a **parent grain** (e.g., orders, users), create **aggregated rollup Feature Views** that project child-level data up to the parent entity.
 
 ::: {.callout-warning title="Do not stack tiled Feature Views"}
-If you need to roll up from a finer-grained tiled (Time Aggregation) Feature View to a coarser entity, use `RollupConfig` (see [Chapter 07: Rollup Feature Views](../07_aggregations_api/index.qmd#sec-rollup)). **Do not** create a new tiled Feature View that reads from another tiled Feature View -- this causes duplicate internal `_PARTIAL_*` column names and SQL compilation errors. The correct hierarchy pattern for tiled FVs is: raw events → tiled FV (fine entity) → Rollup FV (coarse entity) via `RollupConfig`.
+If you need to roll up from a finer-grained tiled (Time Aggregation) Feature View to a coarser entity, use `RollupConfig` (see [Chapter 7: Rollup Feature Views](../07_aggregations_api/index.qmd#sec-rollup)). **Do not** create a new tiled Feature View that reads from another tiled Feature View -- this causes duplicate internal `_PARTIAL_*` column names and SQL compilation errors. The correct hierarchy pattern for tiled FVs is: raw events → tiled FV (fine entity) → Rollup FV (coarse entity) via `RollupConfig`.
 :::
 
 
@@ -833,7 +867,7 @@ If denormalization is undesirable (e.g., the model expects one row per order), e
 - Use a **spine at the parent grain** and only include parent-level Feature Views, or
 - Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children.
 
-See [Chapter 03: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design.
+See [Chapter 3: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design.
 
 ---
 
@@ -857,12 +891,12 @@ When many Feature Views share the same entity (common in large deployments -- 50
 - **Use short `.with_name()` prefixes** per domain (e.g., `"ord"`, `"sess"`, `"eng"`) for more concise column names.
 - **Embed the domain prefix in the `.alias()` call** on each `Feature` definition (e.g., `Feature.count("ORDER_ID", "7d").alias("ORD_ORDER_ID_CNT_7D")`).
 
-The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardising before the Feature View count grows large. See [Chapter 07: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
+The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardising before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
 :::
 
 ### 2. Consolidate Feature Views from the Same Source
 
-When multiple tiled Feature Views share the same source table, entity, and tile granularity, consolidate them into a single Feature View. Separate Feature Views over identical sources create independent tile DTs, duplicating compute. See [Chapter 07: Consolidate Feature Views](../07_aggregations_api/index.qmd#sec-consolidate) for detailed guidance and exceptions.
+When multiple tiled Feature Views share the same source table, entity, and tile granularity, consolidate them into a single Feature View. Separate Feature Views over identical sources create independent tile DTs, duplicating compute. See [Chapter 7: Consolidate Feature Views](../07_aggregations_api/index.qmd#sec-consolidate) for detailed guidance and exceptions.
 
 ### 3. Document Feature Definitions
 
@@ -958,4 +992,4 @@ registered_fv.list_columns().show()
 
 ## Next Steps
 
-Continue to [Chapter 05: Feature Pipelines](../05_feature_pipelines/index.qmd) to learn about pipeline architectures and orchestration patterns.
+Continue to [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) to learn about pipeline architectures and orchestration patterns.

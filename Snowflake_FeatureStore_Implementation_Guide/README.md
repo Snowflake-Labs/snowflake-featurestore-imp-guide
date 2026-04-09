@@ -225,7 +225,7 @@ This guide uses a **synthetic clickstream dataset** designed for demonstrating F
 | Version | Date | Changes |
 |---------|------|---------|
 | 2.0 | 2026-04-09 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API, benchmark framework, Streamlit dashboard, local build instructions |
-| 1.0 | 2025-05-22 | [Initial PDF release]() |
+| 1.0 | 2025-05-22 | [Initial PDF release](https://github.com/Snowflake-Labs/sfguide-getting-started-with-snowflake-feature-store/tree/main/best_practice_guide) |
 
 ---
 

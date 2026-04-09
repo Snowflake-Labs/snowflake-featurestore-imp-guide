@@ -16,6 +16,31 @@ After completing this chapter, you will be able to:
 - Model entity hierarchies for multi-level aggregations
 - Make informed decisions using the entity design framework
 
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+session.sql_simplifier_enabled = True
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+```
+
 ---
 
 ## Entity Fundamentals
@@ -67,7 +92,7 @@ Simple entities use a single column as the join key. This is the most common pat
 
 ### Examples
 
-```python
+```{python}
 # Visitor (pre-login identity)
 visitor_entity = Entity(
     name="VISITOR",
@@ -107,6 +132,16 @@ session_entity = Entity(
     join_keys=["SESSION_ID"],
     desc="User browsing session"
 )
+
+# Register all entities
+for entity in [visitor_entity, user_entity, household_entity,
+               product_entity, category_entity, session_entity]:
+    fs.register_entity(entity)
+
+print(f"Registered {len(fs.list_entities().collect())} entities:")
+for e in fs.list_entities().collect():
+    keys = e["JOIN_KEYS"]
+    print(f"  {e['NAME']:20s}  keys: {keys}")
 ```
 
 ### When to Use Simple Entities
@@ -147,7 +182,7 @@ Compound entities use multiple columns together as the join key. Essential for m
 
 > 📁 **Full code:** [`_code/compound_entities.py`](_code/compound_entities.py)
 
-```python
+```{python}
 # Primary compound entity: product–supplier (sourcing / many-to-many)
 product_supplier_entity = Entity(
     name="PRODUCT_SUPPLIER",
@@ -168,6 +203,11 @@ order_item_entity = Entity(
     join_keys=["ORDER_ID", "LINE_NUMBER"],
     desc="Individual line item within an order"
 )
+
+# Register compound entities
+for entity in [product_supplier_entity, user_product_entity, order_item_entity]:
+    fs.register_entity(entity)
+    print(f"  {entity.name:20s}  keys: {entity.join_keys}")
 ```
 
 ### When to Use Compound Entities
@@ -250,7 +290,7 @@ session_fv = FeatureView(
 
 ### Entity Mapping Tables for Rollup Feature Views {#sec-mapping-tables}
 
-Rollup Feature Views (see [Chapter 07](../07_aggregations_api/index.qmd#sec-rollup)) aggregate features from a finer-grained entity to a coarser-grained entity using a **mapping DataFrame**. The design of this mapping table significantly affects both correctness and performance.
+Rollup Feature Views (see [Chapter 7](../07_aggregations_api/index.qmd#sec-rollup)) aggregate features from a finer-grained entity to a coarser-grained entity using a **mapping DataFrame**. The design of this mapping table significantly affects both correctness and performance.
 
 **Basic mapping table** (static, 1:1 or N:1):
 
@@ -286,7 +326,7 @@ Mitigation strategies:
 - **Accept the approximation** if the mapping lag is consistently small relative to the feature windows (e.g., mappings arrive within minutes but feature windows are 7+ days).
 - **Use the fine-grained entity** (visitor) for training if mapping timeliness cannot be guaranteed, and only use the coarser entity (subscriber) for inference.
 
-See [Chapter 06: PIT Correctness with Entity Mappings](../06_temporal_features/index.qmd#sec-mapping-leakage) for a detailed discussion.
+See [Chapter 6: PIT Correctness with Entity Mappings](../06_temporal_features/index.qmd#sec-mapping-leakage) for a detailed discussion.
 :::
 
 **Performance at scale:** For entity hierarchies with very high cardinality (e.g., 500M+ visitors mapping to 100M+ subscribers), the mapping table join is the most expensive part of the rollup. Ensure the mapping table is well-clustered on the fine-grained entity key (`VISITOR_ID`) and avoid including unnecessary columns in the mapping DataFrame.
@@ -537,4 +577,4 @@ Entity(name="USER", join_keys=["USER_ID"])
 
 ## Next Steps
 
-Continue to [Chapter 04: Feature Views](../04_feature_views/index.qmd) to learn about Feature View types, versioning, and lifecycle management.
+Continue to [Chapter 4: Feature Views](../04_feature_views/index.qmd) to learn about Feature View types, versioning, and lifecycle management.

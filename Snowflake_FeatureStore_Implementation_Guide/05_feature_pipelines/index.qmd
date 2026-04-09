@@ -12,8 +12,8 @@ This chapter covers four pipeline patterns and a hierarchical extension:
 1. **External Orchestration** -- DBT, Airflow, or other tools managing transformations
 2. **Internal Management** -- Dynamic Table-based pipelines fully managed by Snowflake
 3. **Chained Feature Views** -- Using Feature Views as sources for downstream Feature Views (multi-stage DT → DT or DT → View pipelines)
-4. **Temporal Aggregation API** -- The `Feature` class for time-windowed features with tiling (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd))
-5. **Rollup Feature Views** -- Hierarchical aggregation from fine- to coarse-grained entities (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd#sec-rollup))
+4. **Temporal Aggregation API** -- The `Feature` class for time-windowed features with tiling (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd))
+5. **Rollup Feature Views** -- Hierarchical aggregation from fine- to coarse-grained entities (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd#sec-rollup))
 
 ## Learning Objectives
 
@@ -23,8 +23,34 @@ After completing this chapter, you will be able to:
 - Implement DBT-managed feature pipelines with View-based Feature Views
 - Build internally-managed pipelines using Dynamic Tables (SQL and Snowpark DataFrame API)
 - Chain Feature Views into multi-stage pipelines (DT → DT, DT → View) and understand refresh cascading
-- Use the Temporal Aggregation API and rollup Feature Views (summary; full reference in [Chapter 07](../07_aggregations_api/index.qmd))
+- Use the Temporal Aggregation API and rollup Feature Views (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd))
 - Configure refresh strategies for optimal freshness vs. cost
+
+```{python}
+#| output: false
+#| echo: false
+
+from snowflake.snowpark import Session
+from snowflake.snowpark import functions as F
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Feature, Entity, CreationMode
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+fs = FeatureStore(
+    session=session,
+    database="FEATURE_STORE_DEMO",
+    name="FEATURE_STORE",
+    default_warehouse="FS_DEV_WH",
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+user_entity = Entity(name="USER", join_keys=["USER_ID"])
+```
 
 ---
 
@@ -428,7 +454,7 @@ This also allows the inclusion of **context or timestamp functions** (`CURRENT_T
 ::: {.callout-important}
 ## PIT caveat for context-time features
 
-Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **query execution time**, not a historical point-in-time. This is correct for **online serving** (the prediction is happening *now*), but breaks point-in-time correctness for **training data generation** via ASOF joins -- the join retrieves a feature value relative to the spine timestamp, yet the `DATEDIFF` was computed against "today," not the historical event date. If you need these features in training, compute them in the spine or training pipeline relative to the spine timestamp rather than relying on a View-based derivation. See [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) for details on ASOF semantics.
+Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **query execution time**, not a historical point-in-time. This is correct for **online serving** (the prediction is happening *now*), but breaks point-in-time correctness for **training data generation** via ASOF joins -- the join retrieves a feature value relative to the spine timestamp, yet the `DATEDIFF` was computed against "today," not the historical event date. If you need these features in training, compute them in the spine or training pipeline relative to the spine timestamp rather than relying on a View-based derivation. See [Chapter 6: Temporal Features](../06_temporal_features/index.qmd) for details on ASOF semantics.
 :::
 
 ### Trade-offs
@@ -444,7 +470,7 @@ Features derived from `CURRENT_TIMESTAMP()` or `CURRENT_DATE()` reflect the **qu
 ### Refresh and Dependency Considerations
 
 - **Version coupling:** The derived Feature View's SQL references specific base FV versions (e.g., `USER_ORDER_BASE_FV$V01`). When you create a new base version (`$V02`), update the derived FV to reference the new version and register a new derived version.
-- **Lineage tracking:** Use the Feature Store API's `.lineage()` method or SQL `OBJECT_DEPENDENCIES` to identify which downstream Feature Views depend on a base version before deprecating it (see [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-versioning)).
+- **Lineage tracking:** Use the Feature Store API's `.lineage()` method or SQL `OBJECT_DEPENDENCIES` to identify which downstream Feature Views depend on a base version before deprecating it (see [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-versioning)).
 - **Depth limits:** Snowflake supports up to **10 levels** of Dynamic Table dependency depth. For most Feature Store pipelines, 2-3 levels is typical. Deep chains increase end-to-end latency and complicate debugging.
 
 ---
@@ -459,7 +485,7 @@ The primary motivation for the Feature Aggregation API is **correctness**, not j
 
 Tiling solves this by storing **partial aggregates per time grain** (tiles) in the DT. At retrieval time, the Feature Store **reassembles** the correct window by combining tiles backwards from the spine's ASOF timestamp. This produces the correct windowed value **regardless of source data sparsity**. Without tiling, the only alternatives are to densify the data first (see [Gap-Filling Pipelines](#sec-gap-filling) below) or to accept that window boundaries may be misaligned.
 
-For a summary of this problem, see [Chapter 01: Core Concepts](../01_concepts/index.qmd). For the full `Feature` class API reference, see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd).
+For a summary of this problem, see [Chapter 1: Core Concepts](../01_concepts/index.qmd). For the full `Feature` class API reference, see [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd).
 :::
 
 **When to use the Temporal API:**
@@ -471,9 +497,7 @@ For a summary of this problem, see [Chapter 01: Core Concepts](../01_concepts/in
 
 **Quick example:**
 
-```python
-from snowflake.ml.feature_store import Feature, FeatureView
-
+```{python}
 features = [
     Feature.sum("TOTAL_AMT", "7d").alias("SPEND_SUM_7D"),
     Feature.count("ORDER_ID", "30d").alias("ORDER_CNT_30D"),
@@ -490,6 +514,12 @@ user_temporal_fv = FeatureView(
     features=features,
     desc="User purchase aggregations with multiple time windows",
 )
+
+user_temporal_fv = fs.register_feature_view(
+    feature_view=user_temporal_fv, version="V01", block=True, overwrite=True,
+)
+print(f"Registered: {user_temporal_fv.name}/V01  (tiled={user_temporal_fv.is_tiled})")
+print(f"Features: SPEND_SUM_7D, ORDER_CNT_30D, SPEND_PREV_7D")
 ```
 
 The `feature_df` can be an arbitrarily complex query (joins, filters, CASE expressions) -- the tiling engine wraps it as a CTE.
@@ -497,9 +527,9 @@ The `feature_df` can be an arbitrarily complex query (joins, filters, CASE expre
 **Rollup Feature Views** extend tiled pipelines with hierarchical aggregation -- creating coarser-grained features from finer-grained tiled Feature Views without recomputing from raw data (e.g., visitor → subscriber). Use `RollupConfig(source=registered_tiled_fv, mapping_df=entity_mapping_df)`.
 
 ::: {.callout-note}
-## Full reference: Chapter 07
+## Full reference: Chapter 7
 
-For the complete `Feature` class API -- all 14 aggregation functions, the `"lifetime"` window, `offset` for comparative features, `.alias()` and `case_sensitive` for column naming, tile size recommendations, column prefixing for disambiguation, and the full `RollupConfig` example -- see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd).
+For the complete `Feature` class API -- all 14 aggregation functions, the `"lifetime"` window, `offset` for comparative features, `.alias()` and `case_sensitive` for column naming, tile size recommendations, column prefixing for disambiguation, and the full `RollupConfig` example -- see [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd).
 :::
 
 ---
@@ -620,7 +650,7 @@ dense_fv = FeatureView(
 )
 ```
 
-If materialisation is needed (high read volume), consider splitting the pipeline: a pre-built **table or DT** for the date spine (refreshed periodically), joined to the sparse data in a downstream DT. Be aware that `GENERATOR(...)` and `CURRENT_DATE` in DT SQL can prevent incremental refresh -- see [Chapter 06: Lookup Tables for Dynamic History](../06_temporal_features/index.qmd) for a workaround using reference tables instead of hardcoded dates.
+If materialisation is needed (high read volume), consider splitting the pipeline: a pre-built **table or DT** for the date spine (refreshed periodically), joined to the sparse data in a downstream DT. Be aware that `GENERATOR(...)` and `CURRENT_DATE` in DT SQL can prevent incremental refresh -- see [Chapter 6: Lookup Tables for Dynamic History](../06_temporal_features/index.qmd) for a workaround using reference tables instead of hardcoded dates.
 
 ---
 
@@ -645,11 +675,11 @@ daily_fv = FeatureView(
 )
 ```
 
-A shorter `refresh_freq` than the source update rate incurs near-zero cost -- the DT scheduler checks for upstream changes and skips the refresh cycle if nothing has changed. See [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-refresh) for details.
+A shorter `refresh_freq` than the source update rate incurs near-zero cost -- the DT scheduler checks for upstream changes and skips the refresh cycle if nothing has changed. See [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-refresh) for details.
 
 ### 2. Match Tile Size to Data Frequency
 
-When using the Temporal Aggregation API, choose `feature_granularity` to match your data arrival rate. See [Chapter 07: Aggregations API -- Tile Size Recommendations](../07_aggregations_api/index.qmd#sec-tiling) for detailed guidance.
+When using the Temporal Aggregation API, choose `feature_granularity` to match your data arrival rate. See [Chapter 7: Aggregations API -- Tile Size Recommendations](../07_aggregations_api/index.qmd#sec-tiling) for detailed guidance.
 
 ### 3. Pipeline Ownership & SLAs
 
@@ -717,10 +747,10 @@ fs.get_refresh_history(fv).show()
 When the DT engine assigns `AUTO` refresh mode, it uses internal heuristics to decide between `INCREMENTAL` and `FULL` on each refresh cycle. These heuristics can be overly conservative (forcing `FULL` when `INCREMENTAL` would work), inconsistent across engine versions, and opaque to monitoring. For production Feature Views, explicitly design your SQL to be incremental-compatible and verify the DT shows `INCREMENTAL` mode after registration. If the engine selects `FULL`, fix the SQL pattern rather than relying on `AUTO` to eventually choose correctly.
 :::
 
-A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR, STD) in the same query block as a JOIN**. The DT engine cannot prove incremental correctness for floating-point aggregate diffs across joins, so it forces full refresh. **Workaround:** cast to fixed-point before aggregating (`CAST(float_col AS NUMBER(38, 6))`), or split the query into a base DT (aggregation, no join) and a View layer that joins. See [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation pattern.
+A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR, STD) in the same query block as a JOIN**. The DT engine cannot prove incremental correctness for floating-point aggregate diffs across joins, so it forces full refresh. **Workaround:** cast to fixed-point before aggregating (`CAST(float_col AS NUMBER(38, 6))`), or split the query into a base DT (aggregation, no join) and a View layer that joins. See [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation pattern.
 
 ::: {.callout-tip title="Fix FLOAT at the source"}
-Rather than casting in every Feature View query, consider altering the source column type to `NUMBER`/`DECIMAL`. This is a one-time change that benefits all downstream DTs and eliminates the risk of forgetting a cast in a new Feature View. The ML precision impact is negligible -- see [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for details.
+Rather than casting in every Feature View query, consider altering the source column type to `NUMBER`/`DECIMAL`. This is a one-time change that benefits all downstream DTs and eliminates the risk of forgetting a cast in a new Feature View. The ML precision impact is negligible -- see [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd) for details.
 :::
 
 ### ❌ Pitfall 3: Partial Leading-Edge Interval in Streaming/Continuous Sources {#sec-partial-interval}
@@ -773,7 +803,7 @@ GROUP BY 1, 2, 3;
 
 Strategies 1 and 2 are the most practical for Feature Views because they work entirely within the DT. Strategy 3 is appropriate when you control the source ingestion pipeline and want to fix the problem once for all downstream consumers.
 
-See also: [Chapter 06: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage), [Chapter 07: Window Offset as Safeguard](../07_aggregations_api/index.qmd#sec-partial-interval-tiling).
+See also: [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_features/index.qmd#sec-partial-interval-leakage), [Chapter 7: Window Offset as Safeguard](../07_aggregations_api/index.qmd#sec-partial-interval-tiling).
 
 ### ❌ Pitfall 4: Mismatched Freshness Expectations
 
@@ -803,4 +833,4 @@ See also: [Chapter 06: Data Leakage from Partial Intervals](../06_temporal_featu
 
 ## Next Steps
 
-Continue to [Chapter 06: Temporal Features](../06_temporal_features/index.qmd) to learn about point-in-time correctness, ASOF joins, and preventing data leakage.
+Continue to [Chapter 6: Temporal Features](../06_temporal_features/index.qmd) to learn about point-in-time correctness, ASOF joins, and preventing data leakage.

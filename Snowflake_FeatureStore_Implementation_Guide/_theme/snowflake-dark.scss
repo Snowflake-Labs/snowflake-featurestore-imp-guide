@@ -1,0 +1,164 @@
+/*-- scss:defaults --*/
+
+// ---------------------------------------------------------------------------
+// Snowflake Brand Colours (dark mode — tertiary "serious" palette)
+// ---------------------------------------------------------------------------
+$sf-blue:           #29B5E8;
+$sf-mid-blue:       #11567F;
+$sf-star-blue:      #71D3DC;
+$sf-valencia:       #FF9F36;
+$sf-purple-moon:    #7D44CF;
+$sf-first-light:    #D45B90;
+$sf-windy-city:     #8A999E;
+$sf-iceberg:        #003545;
+$sf-winter:         #24323D;
+$sf-ruby-sky:       #3C0045;
+
+// ---------------------------------------------------------------------------
+// Bootstrap variable overrides (dark)
+// ---------------------------------------------------------------------------
+$primary:       $sf-blue;
+$secondary:     $sf-windy-city;
+$info:          $sf-star-blue;
+$success:       #3BCC82;
+$warning:       $sf-valencia;
+$danger:        $sf-first-light;
+
+$link-color:    $sf-star-blue;
+$link-hover-color: $sf-blue;
+
+$body-color:    #d8dfe3;
+$body-bg:       #0d1f29;
+
+$font-family-sans-serif: "Lato", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+$headings-font-family:   "Montserrat", "Lato", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+$headings-font-weight:   700;
+$headings-color:         $sf-star-blue;
+
+$code-color:     $sf-star-blue;
+$code-bg:        #0a1920;
+
+$toc-color:      $sf-windy-city;
+$toc-active-border: $sf-blue;
+
+/*-- scss:rules --*/
+
+@import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,400&family=Montserrat:wght@600;700;800&display=swap');
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+.sidebar-navigation {
+  background-color: #081820 !important;
+  border-right: 3px solid $sf-mid-blue;
+}
+
+.sidebar-title {
+  color: $sf-star-blue !important;
+  font-family: $headings-font-family;
+  font-weight: 800;
+}
+
+.sidebar-navigation .sidebar-item .sidebar-item-text,
+.sidebar-navigation .sidebar-item a {
+  color: rgba(216, 223, 227, 0.8) !important;
+}
+
+.sidebar-navigation .sidebar-item a:hover,
+.sidebar-navigation .sidebar-item a.active {
+  color: $sf-blue !important;
+}
+
+.sidebar-navigation .sidebar-section .sidebar-item-text {
+  color: $sf-windy-city !important;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+// ---------------------------------------------------------------------------
+// Navbar
+// ---------------------------------------------------------------------------
+.navbar {
+  background-color: #081820 !important;
+  border-bottom: 3px solid $sf-mid-blue;
+}
+
+.navbar .navbar-brand,
+.navbar .navbar-nav .nav-link {
+  color: #d8dfe3 !important;
+}
+
+.navbar .navbar-nav .nav-link:hover {
+  color: $sf-blue !important;
+}
+
+// ---------------------------------------------------------------------------
+// Headings
+// ---------------------------------------------------------------------------
+h1, .h1 {
+  border-bottom: 3px solid $sf-mid-blue;
+  padding-bottom: 0.4em;
+  margin-bottom: 0.8em;
+}
+
+h2, .h2 {
+  border-bottom: 1px solid rgba($sf-mid-blue, 0.4);
+  padding-bottom: 0.25em;
+}
+
+// ---------------------------------------------------------------------------
+// Code blocks
+// ---------------------------------------------------------------------------
+div.sourceCode {
+  border-left: 4px solid $sf-mid-blue;
+  border-radius: 0.375rem;
+  background-color: #0a1920;
+  font-size: 0.82rem;
+}
+
+pre.sourceCode {
+  background-color: transparent;
+}
+
+.cell-output-stdout pre,
+.cell-output pre {
+  background-color: #0e211a;
+  border-left: 4px solid $success;
+  border-radius: 0.375rem;
+  font-size: 0.88em;
+}
+
+// ---------------------------------------------------------------------------
+// Tables
+// ---------------------------------------------------------------------------
+.table thead th {
+  background-color: $sf-iceberg;
+  color: $sf-star-blue;
+  font-weight: 700;
+  font-size: 0.92em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid $sf-mid-blue;
+}
+
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+.nav-footer {
+  background-color: #081820;
+  color: rgba(216, 223, 227, 0.6);
+  border-top: 2px solid $sf-mid-blue;
+}
+
+.nav-footer a {
+  color: $sf-star-blue;
+}
+
+// ---------------------------------------------------------------------------
+// Misc
+// ---------------------------------------------------------------------------
+::selection {
+  background-color: rgba($sf-blue, 0.3);
+}

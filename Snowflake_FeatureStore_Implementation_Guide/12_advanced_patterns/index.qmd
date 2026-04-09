@@ -236,7 +236,7 @@ for fs_name in ["SHARED_FS", "MARKETING_FS", "FRAUD_FS"]:
 
 ## External Data Sources
 
-Feature Views can wrap tables managed by external systems. For **DBT integration** (View-based Feature Views backed by DBT-managed tables), see [Chapter 05: Feature Pipelines -- External Orchestration](../05_feature_pipelines/index.qmd#sec-dbt).
+Feature Views can wrap tables managed by external systems. For **DBT integration** (View-based Feature Views backed by DBT-managed tables), see [Chapter 5: Feature Pipelines -- External Orchestration](../05_feature_pipelines/index.qmd#sec-dbt).
 
 ### Iceberg Tables
 
@@ -313,7 +313,7 @@ def deploy_feature_view(
 ```
 
 ::: {.callout-tip title="Environment promotion"}
-Combine this with the environment-strategy patterns from [Chapter 02](../02_design_organization/index.qmd#sec-environments). Parameterise database and schema names so that the same deployment script works across DEV, QA, and PROD by changing environment variables.
+Combine this with the environment-strategy patterns from [Chapter 2](../02_design_organization/index.qmd#sec-environments). Parameterise database and schema names so that the same deployment script works across DEV, QA, and PROD by changing environment variables.
 :::
 
 ---
@@ -687,7 +687,7 @@ SELECT entity_id, ts,
 FROM my_features__bundled;
 ```
 
-Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 05: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behaviour). Only create DT3 (the KV materialisation) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
+Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behaviour). Only create DT3 (the KV materialisation) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
 
 ::: {.callout-note}
 The SQL examples above use `CREATE DYNAMIC TABLE` / `CREATE VIEW` for clarity, but each stage can equally be implemented through the **Feature Store API** (register a View-based or DT-backed Feature View). Using the API makes the objects discoverable within the Feature Store and ensures entity/timestamp metadata is tracked.
@@ -738,7 +738,7 @@ This "expand at the last moment" principle minimises transfer costs and memory u
 | **Ignoring sparsity when values are zeros** | Standard wide tables store zeros explicitly; at 90% sparsity, 90% of storage is wasted | Use `NULLIF(col, 0)` before `OBJECT_CONSTRUCT` to convert zeros to NULLs; reconstitute via `COALESCE(..., 0)` in the expansion View |
 
 ::: {.callout-note title="Further reading"}
-See also [Chapter 09: Preprocessing -- Pre-Encoding Categoricals](../09_preprocessing/index.qmd) for OBJECT-column strategies specific to one-hot encoded features, and [Chapter 04: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation Layer Model which complements the two-tier approach.
+See also [Chapter 9: Preprocessing -- Pre-Encoding Categoricals](../09_preprocessing/index.qmd) for OBJECT-column strategies specific to one-hot encoded features, and [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation Layer Model which complements the two-tier approach.
 :::
 
 ---
@@ -840,7 +840,7 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 
 **Problem**: Each team uses different naming conventions, version strategies, and refresh configurations. This creates confusion when cross-domain models attempt to join Feature Views from different schemas.
 
-**Solution**: Establish organisation-wide standards early: `V01`-style versioning, consistent naming conventions (see [Chapter 02](../02_design_organization/index.qmd)), and shared Entity definitions. A "Feature Store working group" or a shared manifest format prevents divergence before it becomes entrenched.
+**Solution**: Establish organisation-wide standards early: `V01`-style versioning, consistent naming conventions (see [Chapter 2](../02_design_organization/index.qmd)), and shared Entity definitions. A "Feature Store working group" or a shared manifest format prevents divergence before it becomes entrenched.
 
 ### Pitfall 3: No testing beyond "it runs"
 
@@ -852,7 +852,7 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 
 **Problem**: A Dynamic Table Feature View that should be refreshing incrementally is instead performing **full refresh** every cycle, causing unexpectedly high compute costs. This often goes unnoticed until the bill arrives.
 
-**Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 04](../04_feature_views/index.qmd), [Chapter 05](../05_feature_pipelines/index.qmd), and [Chapter 11](../11_operations/index.qmd) for detailed guidance and workarounds.
+**Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 4](../04_feature_views/index.qmd), [Chapter 5](../05_feature_pipelines/index.qmd), and [Chapter 11](../11_operations/index.qmd) for detailed guidance and workarounds.
 
 ---
 

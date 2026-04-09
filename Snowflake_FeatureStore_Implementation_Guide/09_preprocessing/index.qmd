@@ -43,7 +43,7 @@ Is the transformation reusable across multiple models?
 
 ---
 
-## Pipeline Classes: scikit-learn vs Snowflake ML
+## Pipeline Classes: scikit-learn vs Snowflake ML {#pipeline-classes-scikit-learn-vs-snowflake-ml}
 
 Two different classes are both named `Pipeline`; they are **not** interchangeable.
 
@@ -415,7 +415,7 @@ registry.log_model(
 
 Preprocessing transforms are persisted **inside** the logged model artifact (the sklearn pipeline or Snowflake ML pipeline). This means the Model Registry entry is the authoritative record of which transforms were applied and with which fitted parameters.
 
-If your team maintains a **YAML manifest** for Feature View ownership and SLAs (see [Chapter 04: Feature Views -- Ownership & SLAs](../04_feature_views/index.qmd#sec-ownership)), you can extend the same manifest to record which model consumes which Feature Views and what preprocessing is applied. This is purely a team convention for documentation and CI/CD -- Snowflake does not create or consume the file:
+If your team maintains a **YAML manifest** for Feature View ownership and SLAs (see [Chapter 4: Feature Views -- Ownership & SLAs](../04_feature_views/index.qmd#sec-ownership)), you can extend the same manifest to record which model consumes which Feature Views and what preprocessing is applied. This is purely a team convention for documentation and CI/CD -- Snowflake does not create or consume the file:
 
 ```yaml
 # feature_manifest.yaml (extended with model preprocessing metadata)

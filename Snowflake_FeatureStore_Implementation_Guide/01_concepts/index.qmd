@@ -17,6 +17,60 @@ After completing this chapter, you will be able to:
 - Apply the correct transformation taxonomy (MIT/MDT/ODT) to your use cases
 - Map Snowflake terminology to industry-standard terms
 
+```{python}
+#| output: false
+#| echo: false
+
+# Session setup (shared across chapter cells)
+from snowflake.snowpark import Session, Row
+from snowflake.snowpark import functions as F
+from snowflake.snowpark import types as T
+from snowflake.snowpark.context import get_active_session
+from snowflake.ml.feature_store import (
+    FeatureStore, FeatureView, Entity, CreationMode,
+)
+
+try:
+    session = get_active_session()
+except Exception:
+    from snowflake.ml.utils import connection_params
+    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+
+session.sql_simplifier_enabled = True
+
+SOURCE_DATABASE = "FEATURE_STORE_DEMO"
+FS_NAME = "FEATURE_STORE"
+WAREHOUSE = "FS_DEV_WH"
+
+fs = FeatureStore(
+    session=session,
+    database=SOURCE_DATABASE,
+    name=FS_NAME,
+    default_warehouse=WAREHOUSE,
+    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,
+)
+
+# Create sample ORDERS table for chapter examples
+from datetime import datetime
+orders_data = [
+    ("usr_001", "ord_001", datetime(2025, 1, 10, 9, 0), 49.99),
+    ("usr_001", "ord_002", datetime(2025, 1, 12, 14, 30), 129.50),
+    ("usr_001", "ord_003", datetime(2025, 1, 15, 11, 0), 25.00),
+    ("usr_002", "ord_004", datetime(2025, 1, 11, 10, 15), 89.99),
+    ("usr_002", "ord_005", datetime(2025, 1, 14, 16, 45), 199.00),
+    ("usr_003", "ord_006", datetime(2025, 1, 13, 8, 30), 15.50),
+]
+orders_schema = T.StructType([
+    T.StructField("USER_ID", T.StringType()),
+    T.StructField("ORDER_ID", T.StringType()),
+    T.StructField("ORDER_TS", T.TimestampType()),
+    T.StructField("TOTAL_AMT", T.FloatType()),
+])
+orders_df = session.create_dataframe(orders_data, orders_schema)
+ORDERS_TABLE = f"{SOURCE_DATABASE}.CLICKSTREAM_DATA.ORDERS"
+orders_df.write.save_as_table(ORDERS_TABLE, mode="overwrite")
+```
+
 ---
 
 ## What is a Feature Store?
@@ -91,6 +145,8 @@ Tracking where features come from and how they're used is essential for regulato
 
 **With Feature Store**: Full lineage from source data through feature transformations to model predictions.
 
+Snowflake Feature Store addresses all of these challenges by providing a centralized repository for features, a way to compute features, and a way to serve features.
+
 ---
 
 ## Key Components
@@ -103,9 +159,7 @@ An **Entity** represents a business object that features describe. It defines th
 
 > 📁 **Full code:** [`_code/entity_examples.py`](_code/entity_examples.py)
 
-```python
-from snowflake.ml.feature_store import Entity
-
+```{python}
 # Simple entity with single key
 user_entity = Entity(
     name="USER",
@@ -119,6 +173,11 @@ product_supplier_entity = Entity(
     join_keys=["PRODUCT_ID", "SUPPLIER_ID"],
     desc="Product-Supplier relationship for supplier-specific features"
 )
+
+# Register entities
+fs.register_entity(user_entity)
+fs.register_entity(product_supplier_entity)
+print(f"Registered entities: {[e['NAME'] for e in fs.list_entities().collect()]}")
 ```
 
 **Key Concepts**:
@@ -134,7 +193,7 @@ Entities enable features from different Feature Views to be joined together when
 
 ::: {.callout-important}
 ## Join key names must match exactly
-The Feature Store does not support synonyms or aliases for join keys. The column names defined in the Entity's `join_keys` must appear **with the same name** in every Feature View's `feature_df` and in every spine DataFrame. If your source column has a different name, alias it in the SQL or Snowpark DataFrame that defines the Feature View (e.g., `SELECT CUST_KEY AS USER_ID ...` or `.with_column_renamed("CUST_KEY", "USER_ID")`). See [Chapter 03: Consistent Key Naming](../03_entities_hierarchies/index.qmd#sec-consistent-keys) for details.
+The Feature Store does not support synonyms or aliases for join keys. The column names defined in the Entity's `join_keys` must appear **with the same name** in every Feature View's `feature_df` and in every spine DataFrame. If your source column has a different name, alias it in the SQL or Snowpark DataFrame that defines the Feature View (e.g., `SELECT CUST_KEY AS USER_ID ...` or `.with_column_renamed("CUST_KEY", "USER_ID")`). See [Chapter 3: Consistent Key Naming](../03_entities_hierarchies/index.qmd#sec-consistent-keys) for details.
 :::
 
 ::: {.callout-tip}
@@ -149,21 +208,21 @@ FROM ...
 GROUP BY USER_ID, ORDER_TS
 ```
 
-When every Feature View uses the same `timestamp_col` name, the spine only needs a single `spine_timestamp_col` value, `include_feature_view_timestamp_col=True` output is predictable, and leakage-validation code does not need per-FV column mappings. See [Chapter 06: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements) for details.
+When every Feature View uses the same `timestamp_col` name, the spine only needs a single `spine_timestamp_col` value, `include_feature_view_timestamp_col=True` output is predictable, and leakage-validation code does not need per-FV column mappings. See [Chapter 6: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements) for details.
 :::
 
 ::: {.callout-note}
 ## 📖 Deep Dive
-See [Chapter 03: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) for entity design patterns, hierarchies, and compound key strategies.
+See [Chapter 3: Entities & Hierarchies](../03_entities_hierarchies/index.qmd) for entity design patterns, hierarchies, and compound key strategies.
 :::
 
 ---
 
 ### Feature View {#sec-featureview}
 
-A **Feature View** is a collection of related features computed from one or more source dataframe. It defines:
+A **Feature View** is a collection of related features computed from one or more source dataframe (tables, views, etc.). It defines:
 
-- Which entity the features belong to
+- Which entity/ies the features belong to
 - How features are computed (the transformation logic)
 - How features are materialized (Dynamic Table vs View)
 
@@ -210,7 +269,7 @@ user_features_fv = fs.register_feature_view(
 
 ::: {.callout-note}
 ## 📖 Deep Dive
-See [Chapter 04: Feature Views](../04_feature_views/index.qmd) for detailed coverage of Feature View types, versioning, and lifecycle management.
+See [Chapter 4: Feature Views](../04_feature_views/index.qmd) for detailed coverage of Feature View types, versioning, and lifecycle management.
 :::
 
 ---
@@ -225,12 +284,10 @@ Use Snowpark DataFrame operations to define features declaratively:
 
 > 📁 **Full code:** [`_code/feature_dataframe_api.py`](_code/feature_dataframe_api.py)
 
-```python
-from snowflake.snowpark import functions as F
-
+```{python}
 # Define features using Snowpark DataFrame transformations
 user_purchase_df = (
-    session.table("ORDERS")
+    session.table(ORDERS_TABLE)
     .group_by("USER_ID")
     .agg(
         F.sum("TOTAL_AMT").alias("SPEND_SUM"),
@@ -240,14 +297,32 @@ user_purchase_df = (
     )
 )
 
-# Create Feature View with DataFrame-defined features
+user_purchase_df.show()
+```
+
+Create and register a Feature View using the DataFrame above:
+
+```{python}
+# Create a Feature View backed by a Dynamic Table
 user_purchase_fv = FeatureView(
     name="USER_PURCHASE_FEATURES",
     entities=[user_entity],
-    feature_df=user_purchase_df,  # DataFrame defines the features
+    feature_df=user_purchase_df,
     timestamp_col="LAST_ORDER_TS",
     refresh_freq="1 hour",
+    desc="User purchase behavior features",
 )
+
+# Register in Feature Store (creates the Dynamic Table)
+user_purchase_fv = fs.register_feature_view(
+    feature_view=user_purchase_fv,
+    version="V01",
+    block=True,
+    overwrite=True,
+)
+
+print(f"Registered: {user_purchase_fv.name}/V01")
+print(f"Status: {user_purchase_fv.status}")
 ```
 
 #### Method 2: Pure SQL via session.sql()
@@ -292,7 +367,7 @@ SQL window functions such as `RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURR
 
 **Example:** A spine row requests features as of **Jan 15**, but the nearest pre-computed row in the DT has a timestamp of **Jan 10** (no source activity between Jan 10-15). The returned "7-day sum" covers **Jan 3-10**, not the expected **Jan 8-15**.
 
-This is an inherent limitation of pre-computing fixed windows and retrieving them via ASOF: the window boundaries are baked into the row at materialisation time and cannot shift to match an arbitrary query timestamp. For time-windowed aggregations, use the **Feature Aggregation API** (@sec-aggregations-api) instead. Its tiling mechanism stores partial aggregates per time grain and reassembles the correct window from the spine timestamp backwards at retrieval time -- regardless of source sparsity. See [Chapter 05: Temporal Aggregation Pipelines](../05_feature_pipelines/index.qmd#sec-temporal-api) for the detailed motivation and [Chapter 07](../07_aggregations_api/index.qmd) for API reference.
+This is an inherent limitation of pre-computing fixed windows and retrieving them via ASOF: the window boundaries are baked into the row at materialisation time and cannot shift to match an arbitrary query timestamp. For time-windowed aggregations, use the **Feature Aggregation API** (@sec-aggregations-api) instead. Its tiling mechanism stores partial aggregates per time grain and reassembles the correct window from the spine timestamp backwards at retrieval time -- regardless of source sparsity. See [Chapter 5: Temporal Aggregation Pipelines](../05_feature_pipelines/index.qmd#sec-temporal-api) for the detailed motivation and [Chapter 7](../07_aggregations_api/index.qmd) for API reference.
 :::
 
 #### Method 3: Feature Aggregation Class (Time-Windowed) {#sec-aggregations-api}
@@ -327,7 +402,7 @@ tiled_fv = FeatureView(
 ::: {.callout-note}
 ## 🆕 New in snowflake-ml 1.21+
 The `Feature` aggregation class provides declarative syntax for time-windowed aggregations with automatic tiling for efficient incremental computation.
-See [Chapter 07: Aggregations API](../07_aggregations_api/index.qmd) for the complete API reference.
+See [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd) for the complete API reference.
 :::
 
 #### Choosing the Right Method
@@ -613,4 +688,4 @@ How Snowflake Feature Store terminology aligns with other platforms and industry
 
 ## Next Steps
 
-Continue to [Chapter 02: Design & Organization](../02_design_organization/index.qmd) to learn how to structure your Feature Store for scale and maintainability.
+Continue to [Chapter 2: Design & Organization](../02_design_organization/index.qmd) to learn how to structure your Feature Store for scale and maintainability.

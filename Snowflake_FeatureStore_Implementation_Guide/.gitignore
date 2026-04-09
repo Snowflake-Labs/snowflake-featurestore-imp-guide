@@ -1,6 +1,5 @@
 /.quarto/
 _site/
-_freeze/
 
 # LaTeX / Quarto build artifacts
 *.tex
@@ -9,3 +8,5 @@ _freeze/
 
 # Benchmark output (generated at runtime)
 benchmark_results/
+
+**/*.quarto_ipynb
