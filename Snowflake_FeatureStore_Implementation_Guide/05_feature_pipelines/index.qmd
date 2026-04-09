@@ -656,8 +656,7 @@ If materialisation is needed (high read volume), consider splitting the pipeline
 
 ## Best Practices
 
-### 1. Match Refresh to Consumer Freshness Needs
-
+### 1. Match Refresh to Consumer Freshness Needs {.unnumbered}
 ```python
 # GOOD: Source updates hourly, consumers need hourly freshness
 hourly_source_fv = FeatureView(
@@ -677,12 +676,10 @@ daily_fv = FeatureView(
 
 A shorter `refresh_freq` than the source update rate incurs near-zero cost -- the DT scheduler checks for upstream changes and skips the refresh cycle if nothing has changed. See [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-refresh) for details.
 
-### 2. Match Tile Size to Data Frequency
-
+### 2. Match Tile Size to Data Frequency {.unnumbered}
 When using the Temporal Aggregation API, choose `feature_granularity` to match your data arrival rate. See [Chapter 7: Aggregations API -- Tile Size Recommendations](../07_aggregations_api/index.qmd#sec-tiling) for detailed guidance.
 
-### 3. Pipeline Ownership & SLAs
-
+### 3. Pipeline Ownership & SLAs {.unnumbered}
 Define clear ownership for each pipeline. The example below shows a **team-maintained manifest file** -- this is a documentation and CI/CD convention, not something consumed by the Feature Store API. Teams can use YAML, JSON, or any format that fits their toolchain:
 
 ```yaml
@@ -697,8 +694,7 @@ feature_views:
       max_latency_minutes: 90
 ```
 
-### 4. Pipeline Health Monitoring
-
+### 4. Pipeline Health Monitoring {.unnumbered}
 ```sql
 -- Create alerting for stale features
 CREATE ALERT feature_staleness_alert

@@ -876,8 +876,7 @@ See [Chapter 3: Modeling at a Different Grain](../03_entities_hierarchies/index.
 
 ## Best Practices
 
-### 1. Use Consistent Naming
-
+### 1. Use Consistent Naming {.unnumbered}
 ```python
 # Pattern: <ENTITY>_<DOMAIN>_FV (SCREAMING_SNAKE_CASE)
 "USER_ORDER_FV"
@@ -897,12 +896,10 @@ When many Feature Views share the same entity (common in large deployments -- 50
 The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardising before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
 :::
 
-### 2. Consolidate Feature Views from the Same Source
-
+### 2. Consolidate Feature Views from the Same Source {.unnumbered}
 When multiple tiled Feature Views share the same source table, entity, and tile granularity, consolidate them into a single Feature View. Separate Feature Views over identical sources create independent tile DTs, duplicating compute. See [Chapter 7: Consolidate Feature Views](../07_aggregations_api/index.qmd#sec-consolidate) for detailed guidance and exceptions.
 
-### 3. Document Feature Definitions
-
+### 3. Document Feature Definitions {.unnumbered}
 ```python
 fv = FeatureView(
     name="USER_ORDER_FV",
@@ -936,8 +933,7 @@ registered_fv = fs.register_feature_view(fv, "V01")
 registered_fv.list_columns().show()
 ```
 
-### 4. Version on Any Consumer-Visible Change
-
+### 4. Version on Any Consumer-Visible Change {.unnumbered}
 ```python
 # V01: Initial column set
 # V02: Added ORDERS_7D_CNT

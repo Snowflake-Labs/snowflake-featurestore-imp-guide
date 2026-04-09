@@ -461,8 +461,7 @@ features = (
 
 ## Best Practices
 
-### 1. Use Consistent Naming Conventions
-
+### 1. Use Consistent Naming Conventions {.unnumbered}
 ```python
 # Pattern: <COL_OR_ENTITY>_<ROLE>_<WINDOW> (roles: _SUM, _CNT, _AVG, …)
 features = [
@@ -473,8 +472,7 @@ features = [
 ]
 ```
 
-### 2. Match Tile Size to Data Frequency
-
+### 2. Match Tile Size to Data Frequency {.unnumbered}
 ```python
 # High-frequency: smaller tiles
 clickstream_fv = FeatureView(
@@ -489,8 +487,7 @@ weekly_metrics_fv = FeatureView(
 )
 ```
 
-### 3. Group Related Features and Consolidate Feature Views {#sec-consolidate}
-
+### 3. Group Related Features and Consolidate Feature Views {#sec-consolidate .unnumbered}
 When multiple Feature Views share the **same source table, entity, and tile granularity**, they automatically share the same underlying tile computation. Consolidating them into a single Feature View reduces operational overhead (fewer DTs to monitor) and ensures tile computation happens once:
 
 ```python
@@ -536,8 +533,7 @@ mixed_features = [
 ]
 ```
 
-### 4. Tile Sharing Across Feature Views {#sec-tile-sharing}
-
+### 4. Tile Sharing Across Feature Views {#sec-tile-sharing .unnumbered}
 When two Feature Views use the **same source, entity, and `feature_granularity`**, the underlying tile DTs compute identical partial aggregates. Today, the Feature Store does not automatically share tiles between separately registered Feature Views -- each creates its own tile DT. This means:
 
 - **Consolidating features** into fewer Feature Views (per best practice #3 above) is the primary mechanism for avoiding duplicate tile computation.

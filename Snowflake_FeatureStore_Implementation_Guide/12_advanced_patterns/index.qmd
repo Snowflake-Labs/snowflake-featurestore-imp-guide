@@ -323,8 +323,7 @@ Combine this with the environment-strategy patterns from [Chapter 2](../02_desig
 Reliable Feature Store operations depend on tests that go beyond "the job finished." The patterns below are the minimum bar for advanced deployments. Most can be implemented with **pytest** and Snowpark's local testing framework or a dedicated Snowflake test account.
 
 
-### 1. Unit tests for feature logic
-
+### 1. Unit tests for feature logic {.unnumbered}
 Test **DataFrame or Snowpark transformations in isolation**: build small fixtures (or sampled tables from `FEATURE_STORE_DEMO.CLICKSTREAM_DATA`), run the same logic your Feature View uses, and assert **row counts, column names, and values**—including naming conventions (`ORDER_CNT`, `TOTAL_AMT_SUM`, `LAST_ORDER_TS`).
 
 ```python
@@ -341,8 +340,7 @@ def test_user_order_aggregates_schema_and_totals(order_stats_df):
     assert row[0]["ORDER_CNT"] == 3
 ```
 
-### 2. PIT correctness tests (no future leakage)
-
+### 2. PIT correctness tests (no future leakage) {.unnumbered}
 After `generate_dataset`, assert that **feature view timestamps never exceed** the spine’s event time for the same row.
 
 ```python
@@ -361,8 +359,7 @@ def test_no_future_leakage(fs, test_spine, fv):
 
 Extend this pattern with **spot checks** on known entities and times (golden spines) and with **multiple Feature Views** joined on the same spine.
 
-### 3. Schema validation
-
+### 3. Schema validation {.unnumbered}
 Before or after `register_feature_view`, assert that outputs match an **expected schema**: column set, types, and (where your contracts require it) order. Options include:
 
 - `DESCRIBE TABLE` or `DESCRIBE VIEW` on the underlying object (see [Chapter 11](../11_operations/index.qmd) for how to identify the object type), compared to a checked-in manifest
@@ -371,8 +368,7 @@ Before or after `register_feature_view`, assert that outputs match an **expected
 
 Keep **one manifest** (YAML/JSON) as the source of truth shared by registration scripts and tests.
 
-### 4. Freshness and quality hooks
-
+### 4. Freshness and quality hooks {.unnumbered}
 Combine the above with **operational checks** (lag, null rates) as in Chapter 11—those belong in monitoring as well as in **smoke tests** after deploy.
 
 ```python
@@ -793,8 +789,7 @@ These patterns are most relevant for customers with 500+ features. For most depl
 
 ## Best practices
 
-### 1. Partition Feature Views by refresh cadence
-
+### 1. Partition Feature Views by refresh cadence {.unnumbered}
 Features that change every minute should not share a Dynamic Table with features that change daily. Mixing cadences forces the entire table to refresh at the fastest rate, wasting compute:
 
 ```python
@@ -804,8 +799,7 @@ slow_features_fv = FeatureView(name="SLOW_FEATURES_FV", refresh_freq="1 day", ..
 
 Separate Feature Views by update frequency, then combine them at training time via `generate_dataset` or `generate_training_set`.
 
-### 2. Document feature ownership and dependencies
-
+### 2. Document feature ownership and dependencies {.unnumbered}
 As the number of Feature Views grows, it becomes critical to track which source tables feed each Feature View and which models consume them. A simple dependency manifest (YAML, JSON, or a database table) prevents orphaned features and simplifies impact analysis when source schemas change:
 
 ```yaml
@@ -822,8 +816,7 @@ features:
 
 Combine this with the `FeatureView.lineage()` API and SQL lineage queries described in [Chapter 11: Operations](../11_operations/index.qmd).
 
-### 3. Automate testing in CI
-
+### 3. Automate testing in CI {.unnumbered}
 Run **pytest** (unit + PIT + schema contracts) on every change to feature definitions; gate deploys on green builds. See the **Testing strategies** section above for the minimum test categories.
 
 ---

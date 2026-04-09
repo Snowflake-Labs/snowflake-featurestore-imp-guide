@@ -438,8 +438,7 @@ For datasets exceeding ~100M rows or ~500 features, writing to Parquet and readi
 
 ## Best practices
 
-### 1. Spine design
-
+### 1. Spine design {.unnumbered}
 If your Feature Views follow the recommended convention of aliasing their timestamp column to a standard name (e.g., `FV_TS` -- see [Chapter 6: timestamp_col Requirements](../06_temporal_features/index.qmd#sec-timestamp-col-requirements)), name the spine timestamp to match:
 
 ```python
@@ -472,8 +471,7 @@ spine = session.sql("""
 """)
 ```
 
-### 2. Feature selection
-
+### 2. Feature selection {.unnumbered}
 Registered Feature Views expose **`.slice(["col1", "col2"])`** to restrict columns. Do not assume `.select()` on the Feature View object.
 
 ```python
@@ -486,8 +484,7 @@ training_df = fs.generate_training_set(
 )
 ```
 
-### 3. Validate before training
-
+### 3. Validate before training {.unnumbered}
 ```python
 # Check for data issues (column names depend on your spine / FVs)
 assert training_df.filter(F.col("LABEL").isNull()).count() == 0

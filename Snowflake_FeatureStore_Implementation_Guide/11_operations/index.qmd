@@ -631,15 +631,13 @@ GROUP BY STATUS;
 
 ## Best Practices
 
-### 1. Monitor Proactively
-
+### 1. Monitor Proactively {.unnumbered}
 ```sql
 -- Set up alerts before issues impact users
 CREATE ALERT ...
 ```
 
-### 2. Track Lineage
-
+### 2. Track Lineage {.unnumbered}
 Document feature sources and consumers:
 
 ```python
@@ -653,8 +651,7 @@ fv = FeatureView(
 )
 ```
 
-### 3. Regular Health Checks
-
+### 3. Regular Health Checks {.unnumbered}
 Schedule weekly reviews:
 
 - Feature View refresh status
@@ -662,8 +659,7 @@ Schedule weekly reviews:
 - Compute costs
 - Unused features
 
-### 4. Pin SDK Versions Across Environments {#sec-sdk-versioning}
-
+### 4. Pin SDK Versions Across Environments {#sec-sdk-versioning .unnumbered}
 Using different versions of `snowflake-ml-python` to create and retrieve Feature Views can cause inconsistent behaviour, metadata mismatches, and retrieval errors. Feature Views registered with one SDK version may use internal formats that a different version cannot correctly interpret.
 
 **Recommendations:**

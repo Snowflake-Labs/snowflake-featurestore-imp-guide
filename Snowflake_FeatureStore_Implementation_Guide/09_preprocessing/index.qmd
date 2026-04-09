@@ -557,20 +557,17 @@ WHERE RN <= STRATUM_SIZE * 0.1;
 
 ## Best Practices
 
-### 1. Fit on Training Data Only
-
+### 1. Fit on Training Data Only {.unnumbered}
 ```python
 scaler.fit(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
 train_scaled = scaler.transform(train_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
 test_scaled = scaler.transform(test_df[["TOTAL_AMT", "DURATION_SEC", "ITEM_CNT"]])
 ```
 
-### 2. Store Transformations with Model
-
+### 2. Store Transformations with Model {.unnumbered}
 Log the full sklearn `Pipeline` (preprocessing + estimator) with `Registry.log_model()` so that the same fitted transforms are replayed at inference time automatically.
 
-### 3. Match Transformation to Model Requirements
-
+### 3. Match Transformation to Model Requirements {.unnumbered}
 Tree-based models (XGBoost, Random Forest, LightGBM) do not require scaling. Linear models, SVMs, and neural networks benefit from normalised inputs. Choose accordingly to avoid unnecessary compute.
 
 ---

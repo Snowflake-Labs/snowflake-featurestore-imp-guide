@@ -502,8 +502,7 @@ DCM Projects is in Public Preview (March 2026) and is still a relatively new cap
 
 ## Best Practices
 
-### 1. Start Simple, Scale as Needed
-
+### 1. Start Simple, Scale as Needed {.unnumbered}
 ```
 Start with:
 ├── Single database (`FEATURE_STORE_DEMO`)
@@ -518,8 +517,7 @@ Scale to:
 └── CI/CD automated promotion
 ```
 
-### 2. Establish Naming Conventions Early
-
+### 2. Establish Naming Conventions Early {.unnumbered}
 | Object Type | Convention | Example |
 |-------------|------------|---------|
 | Database | `FEATURE_STORE_DEMO` (guide) | `FEATURE_STORE_DEMO` |
@@ -531,8 +529,7 @@ Scale to:
 
 For detailed versioning conventions, `$`-delimited object naming, and programmatic version helpers, see [Chapter 4: Versioning Strategies](../04_feature_views/index.qmd#sec-versioning).
 
-### 3. Separate Compute by Environment
-
+### 3. Separate Compute by Environment {.unnumbered}
 ```sql
 -- Environment-specific warehouses with appropriate sizing
 CREATE WAREHOUSE FS_DEV_WH      WITH WAREHOUSE_SIZE = 'XSMALL' AUTO_SUSPEND = 60;

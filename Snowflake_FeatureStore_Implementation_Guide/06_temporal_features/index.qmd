@@ -590,8 +590,7 @@ If any `leakage_count` is non-zero, either the Feature View's `timestamp_col` se
 
 ## Best Practices
 
-### 1. Always Define timestamp_col
-
+### 1. Always Define timestamp_col {.unnumbered}
 ```python
 # ✅ GOOD: timestamp_col defined
 fv = FeatureView(
@@ -606,8 +605,7 @@ fv = FeatureView(
 )
 ```
 
-### 2. Use Timestamps That Produce Multiple Rows Per Entity
-
+### 2. Use Timestamps That Produce Multiple Rows Per Entity {.unnumbered}
 ```python
 # ✅ GOOD: Daily snapshots — many rows per entity over time
 timestamp_col="ACTIVITY_DATE"    # daily event snapshot (GROUP BY USER_ID, DATE)
@@ -623,12 +621,10 @@ timestamp_col="LAST_EVENT_TS"    # from GROUP BY USER_ID with MAX(EVENT_TS)
 timestamp_col="ROW_INSERTED_TS"  # unless ingest-time semantics are intentional
 ```
 
-### 3. Validate Before Training
-
+### 3. Validate Before Training {.unnumbered}
 Always run leakage detection before training models on generated datasets.
 
-### 4. Version Feature Views consistently
-
+### 4. Version Feature Views consistently {.unnumbered}
 Use **`V01`, `V02`, …** when registering so promotions and rollbacks stay explicit.
 
 ---

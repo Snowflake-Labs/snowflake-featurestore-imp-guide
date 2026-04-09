@@ -111,8 +111,7 @@ A **feature** is a measurable property or characteristic used as input to an ML 
 
 Feature Stores solve critical challenges in production ML systems:
 
-### 1. Feature Reusability
-
+### 1. Feature Reusability {.unnumbered}
 Without a Feature Store, teams often recreate the same features independently, leading to:
 
 - Duplicated effort across data scientists
@@ -121,26 +120,22 @@ Without a Feature Store, teams often recreate the same features independently, l
 
 **With Feature Store**: Features are defined once, stored centrally, and reused across models and teams.
 
-### 2. Training-Serving Skew
-
+### 2. Training-Serving Skew {.unnumbered}
 One of the most common causes of ML model degradation is when features computed during training differ from those used during inference.
 
 **With Feature Store**: The same feature definitions serve both training and inference, eliminating skew.
 
-### 3. Point-in-Time Correctness
-
+### 3. Point-in-Time Correctness {.unnumbered}
 Using future data to train models (data leakage) produces artificially good training metrics but poor production performance.
 
 **With Feature Store**: Built-in temporal joins ensure features are computed using only data available at the prediction time, preventing data leakage.
 
-### 4. Feature Discovery
-
+### 4. Feature Discovery {.unnumbered}
 As organizations scale ML, finding existing features becomes challenging.
 
 **With Feature Store**: Searchable catalog of features with metadata, lineage, and documentation.
 
-### 5. Governance & Compliance
-
+### 5. Governance & Compliance {.unnumbered}
 Tracking where features come from and how they're used is essential for regulatory compliance.
 
 **With Feature Store**: Full lineage from source data through feature transformations to model predictions.

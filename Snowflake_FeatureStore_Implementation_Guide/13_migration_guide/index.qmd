@@ -217,8 +217,7 @@ Tecton migration is prioritized given Databricks Online Tables EOL.
 
 ## Best Practices
 
-### 1. Migrate Incrementally
-
+### 1. Migrate Incrementally {.unnumbered}
 ```
 Week 1: Entities + 2-3 simple Feature Views
 Week 2: Remaining batch features
@@ -226,8 +225,7 @@ Week 3: Online serving setup
 Week 4: Consumer cutover
 ```
 
-### 2. Run in Parallel
-
+### 2. Run in Parallel {.unnumbered}
 Operate both systems during migration:
 
 ```python
@@ -243,8 +241,7 @@ sf_training_df = snowflake_fs.generate_training_set(
 validate_migration(source_features, sf_training_df, entity_cols=["USER_ID"])
 ```
 
-### 3. Validate PIT Correctness
-
+### 3. Validate PIT Correctness {.unnumbered}
 ```python
 # Ensure point-in-time retrieval produces same results
 def test_pit_correctness(spine, source_fs, snowflake_fs):

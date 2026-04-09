@@ -494,8 +494,7 @@ Treat an external serving store as a **temporary optimisation** rather than the 
 
 ## Best practices
 
-### 1. Right-size `target_lag`
-
+### 1. Right-size `target_lag` {.unnumbered}
 ```python
 # Tight online sync for high-stakes scoring
 fraud_online = feature_view.OnlineConfig(enable=True, target_lag="30 seconds")
@@ -504,8 +503,7 @@ fraud_online = feature_view.OnlineConfig(enable=True, target_lag="30 seconds")
 reco_online = feature_view.OnlineConfig(enable=True, target_lag="5 minutes")
 ```
 
-### 2. Monitor OFT health
-
+### 2. Monitor OFT health {.unnumbered}
 ```sql
 -- Refresh / sync history (names may vary by release; use INFORMATION_SCHEMA as documented for your account)
 SELECT *
@@ -514,8 +512,7 @@ ORDER BY SYNC_START_TIME DESC
 LIMIT 10;
 ```
 
-### 3. Use a serving warehouse appropriately
-
+### 3. Use a serving warehouse appropriately {.unnumbered}
 Run Feature Store sessions used for **online** reads on a warehouse sized for **latency and concurrency** (often `FS_DEV_WH` in development, a dedicated production warehouse in real deployments). The **TARGET_LAG** Task uses the warehouse you configure on the OFT / Feature Store setup.
 
 ---

@@ -490,8 +490,7 @@ See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for s
 
 ## Best Practices
 
-### 1. Use Descriptive Names
-
+### 1. Use Descriptive Names {.unnumbered}
 ```python
 # ✅ GOOD: Clear business meaning (SCREAMING_SNAKE_CASE, singular)
 Entity(name="USER", join_keys=["USER_ID"])
@@ -502,8 +501,7 @@ Entity(name="ENTITY1", join_keys=["ID"])
 Entity(name="TBL_KEY", join_keys=["K1", "K2"])
 ```
 
-### 2. Document Business Context
-
+### 2. Document Business Context {.unnumbered}
 ```python
 Entity(
     name="HOUSEHOLD",
@@ -512,8 +510,7 @@ Entity(
 )
 ```
 
-### 3. Consistent Key Naming {#sec-consistent-keys}
-
+### 3. Consistent Key Naming {#sec-consistent-keys .unnumbered}
 The Feature Store **does not support synonyms or aliases** for join keys. The column names in the Entity's `join_keys` must appear with exactly the same name in every Feature View's `feature_df` and in every spine DataFrame. There is no mapping layer that translates `USER_KEY` to `USER_ID` at runtime -- a name mismatch will cause registration or dataset generation to fail.
 
 While this is a constraint, it is also a **conformance benefit**: it enforces a single, consistent vocabulary for entity keys across all Feature Views and consumers. Teams cannot accidentally use different column names for the same logical concept, which eliminates a common source of silent join errors.
