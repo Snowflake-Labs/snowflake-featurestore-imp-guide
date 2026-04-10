@@ -75,7 +75,7 @@ format:
     colorlinks: true
 
 execute:
-  freeze: auto
+  freeze: true
   error: false
   warning: false
   

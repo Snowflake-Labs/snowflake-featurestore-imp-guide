@@ -289,7 +289,7 @@ inference_df.write.save_as_table("FEATURE_STORE_DEMO.FEATURE_STORE.PREDICTIONS_L
 
 For frameworks that consume a Snowflake ML Dataset instead, build a spine the same way and use `generate_dataset()` with an appropriate `version`.
 
-### Continuous Batch Inference with Dynamic Tables
+### Continuous Batch Inference with Dynamic Tables {#sec-continuous-batch}
 
 For **single-Feature-View models** where all features come from one table (no ASOF join required), you can use a Dynamic Table (or DT-backed Feature View) to persist predictions that refresh automatically. Reference the Model Registry's SQL function directly in the DT definition:
 
@@ -309,11 +309,75 @@ FROM FEATURE_STORE.USER_PURCHASE_STATS$V01;
 
 This pattern works well when the model reads directly from a single Feature View's columns. Each DT refresh re-scores all entities with the latest feature values.
 
+The Model Registry's `!PREDICT` SQL function is automatically registered as **IMMUTABLE**, which makes it eligible for DT incremental refresh. If you create your own scoring UDF/UDTF outside of Model Registry, you must declare it immutable for the same reason -- see [UDF immutability for incremental refresh](#sec-udf-immutability) below.
+
 ::: {.callout-warning}
 ## ASOF join limitation
 
 At this time, ASOF join is **not supported for incremental DT refresh**. If your model requires features from multiple Feature Views joined via ASOF (point-in-time correctness), you cannot embed that join in a Dynamic Table definition. Instead, use the ad-hoc scoring pattern above or schedule batch inference via a Task or external orchestrator.
 :::
+
+::: {.callout-warning}
+## Pipeline lag affects batch inference too
+
+The scoring DT above reads from `USER_PURCHASE_STATS$V01`, which is itself a Dynamic Table with its own `refresh_freq`. The features the model scores against are subject to cumulative lag: **source pipeline delay + upstream FV refresh + scoring DT target_lag**. A Stream/Task/Stored Procedure batch pattern has the same issue -- the Task schedule determines when scoring runs, but the upstream features may already be stale.
+
+If the model was trained on point-in-time-perfect features (no lag), it may perform worse in production where features are always somewhat stale. To avoid this **training-serving skew**, train with a [conservative spine](../06_temporal_features/index.qmd#solutions) that bakes in realistic lag. See [Chapter 8: Feature Freshness and Training-Serving Skew](../08_online_features/index.qmd#sec-training-serving-skew) for detailed guidance on measuring actual lag and alternative mitigation strategies.
+:::
+
+### UDF Immutability for Incremental Refresh {#sec-udf-immutability}
+
+Dynamic Tables in **incremental** refresh mode require every function in the `SELECT` to be deterministic. The Model Registry's `!PREDICT` function is registered as **IMMUTABLE** automatically, but if you build your own scoring UDF/UDTF outside of Model Registry, you must explicitly declare it immutable. A `VOLATILE` UDF forces the DT to use **full refresh** on every cycle, negating the performance benefits of incremental refresh.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION FEATURE_STORE.SCORE_CHURN(
+    order_cnt NUMBER, spend_sum NUMBER, avg_order_amt NUMBER
+)
+RETURNS FLOAT
+LANGUAGE PYTHON
+IMMUTABLE
+RUNTIME_VERSION = '3.11'
+HANDLER = 'run'
+AS $$
+def run(order_cnt, spend_sum, avg_order_amt):
+    # Your scoring logic here
+    ...
+$$;
+```
+
+**Snowpark (decorator):**
+
+```python
+from snowflake.snowpark.functions import udf
+from snowflake.snowpark.types import FloatType, IntegerType
+
+@udf(
+    name="FEATURE_STORE.SCORE_CHURN",
+    input_types=[IntegerType(), FloatType(), FloatType()],
+    return_type=FloatType(),
+    immutable=True,
+    replace=True,
+)
+def score_churn(order_cnt: int, spend_sum: float, avg_order_amt: float) -> float:
+    ...
+```
+
+**Snowpark (`session.udf.register`):**
+
+```python
+session.udf.register(
+    func=score_churn,
+    name="FEATURE_STORE.SCORE_CHURN",
+    input_types=[IntegerType(), FloatType(), FloatType()],
+    return_type=FloatType(),
+    immutable=True,
+    replace=True,
+)
+```
+
+Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volatility in SQL. The DT can then treat it as eligible for incremental refresh. See the [Dynamic Table supported queries](https://docs.snowflake.com/en/user-guide/dynamic-tables-tasks-create#supported-queries) documentation for the full list of incremental refresh requirements.
 
 ---
 
@@ -518,6 +582,12 @@ assert training_df.count() > 1000
 **Problem**: Expecting a Snowpark DataFrame from `generate_dataset()` or Dataset Parquet from `generate_training_set()`.
 
 **Solution**: Use the comparison table above; match the method to DL (Dataset) vs classic ML (DataFrame / `save_as`).
+
+### ❌ Pitfall 5: Training-serving skew from pipeline lag {#sec-pitfall-skew}
+
+**Problem**: The model is trained on point-in-time-perfect features (ASOF join returns the exact values available at each event), but at inference time -- whether via an OFT, a DT-based scoring pipeline, or a scheduled Task/Sproc -- the features are subject to cumulative lag: source ETL delay + upstream Feature View `refresh_freq` + inference-layer lag (`target_lag`, Task schedule, etc.). The model sees feature distributions at inference that differ from training, degrading prediction accuracy.
+
+**Solution**: Train with a **conservative spine** that shifts the ASOF cutoff back by the expected end-to-end pipeline lag (see [Chapter 6: Late-Arriving Data](../06_temporal_features/index.qmd#solutions)). This ensures the training features reflect realistic staleness. For detailed guidance on measuring actual lag and alternative mitigation strategies, see [Chapter 8: Feature Freshness and Training-Serving Skew](../08_online_features/index.qmd#sec-training-serving-skew).
 
 ---
 

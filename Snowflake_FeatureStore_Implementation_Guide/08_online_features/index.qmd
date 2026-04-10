@@ -384,6 +384,32 @@ For single-user or low-QPS testing, an **XS** warehouse is sufficient. For produ
 
 Match **offline** `refresh_freq` to upstream **CLICKSTREAM_DATA** landing latency so online sync is not chasing data that does not exist yet.
 
+### Feature Freshness and Training-Serving Skew {#sec-training-serving-skew}
+
+The features a model receives at inference time are subject to **cumulative lag** from multiple stages. The exact formula depends on the inference pattern:
+
+| Inference pattern | Lag components | Typical total |
+|---|---|---|
+| **Online (OFT)** | Source pipeline + offline `refresh_freq` + online `target_lag` | Seconds to hours |
+| **Batch (DT-based inference FV)** | Source pipeline + upstream FV `refresh_freq` + inference DT `target_lag` | Minutes to hours |
+| **Batch (Task/Sproc)** | Source pipeline + upstream FV `refresh_freq` + Task schedule interval | Minutes to hours |
+
+If the source data pipeline itself has variable execution times (e.g., an ETL that sometimes finishes at 2 AM and sometimes at 6 AM), the effective staleness is even less predictable. A model trained on **point-in-time-perfect** features -- where the ASOF join retrieves the exact feature values available at each event -- may never have seen feature values with this degree of staleness during training. At inference time, the model receives features that are minutes to hours behind reality, creating a **training-serving skew** (a distribution shift) that can degrade prediction accuracy.
+
+This applies equally to **batch inference**. A DT-based scoring pipeline (see [Chapter 10: Continuous Batch Inference](../10_training_inference/index.qmd#sec-continuous-batch)) reads from upstream Feature Views that have their own refresh lag, compounded by the scoring DT's own `target_lag`. A Stream/Task/Stored Procedure pattern has the same issue: the Task schedule determines how often scoring runs, but the features it reads may already be stale by the time the Task fires.
+
+::: {.callout-important}
+## Account for realistic lag during training
+
+To minimise training-serving skew, the training dataset should reflect the **same feature freshness** the model will experience in production. Techniques include:
+
+- **Conservative spine** ([Chapter 6: Late-Arriving Data](../06_temporal_features/index.qmd#solutions)): Shift the spine timestamp back by the expected pipeline lag (e.g., `DATEADD('hour', -2, EVENT_TS) AS FEATURE_CUTOFF_TS`). The ASOF join then returns features as they would have looked given realistic staleness.
+- **Measure actual lag**: Query DT refresh history and OFT sync history to quantify real-world end-to-end staleness. Use this measurement to size the conservative spine buffer rather than guessing.
+- **Feature freshness as a model input**: For models that are sensitive to feature age, include a **recency feature** (e.g., `DATEDIFF('minute', LAST_ORDER_TS, PREDICTION_TS)`) as an explicit model input. This lets the model learn to discount stale features rather than treating all feature values as equally current. See [Chapter 6: Returning the FV Timestamp](../06_temporal_features/index.qmd#sec-include-fv-timestamp) for how to surface the Feature View's timestamp column for this purpose.
+
+Without these adjustments, a model can appear well-calibrated in offline evaluation (where features are perfectly fresh) but perform poorly once deployed -- whether against an OFT, a DT-based scoring pipeline, or a scheduled batch job -- with real-world pipeline lag.
+:::
+
 ### High-Cardinality OFTs {#sec-high-cardinality}
 
 OFT row count directly affects **initial population time**, **MERGE refresh cost**, and **Hybrid Table storage**. Guidelines:
