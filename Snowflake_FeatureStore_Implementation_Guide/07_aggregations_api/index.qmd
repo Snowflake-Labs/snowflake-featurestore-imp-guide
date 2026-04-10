@@ -914,12 +914,15 @@ A **hybrid** approach keeps the dict in code as the source of truth and syncs it
 
 Many useful features are **derived from base aggregations** — conversion rates, averages-per-order, or period-over-period growth. The `Feature` class supports base aggregation functions only; ratios and formulas must be computed separately.
 
-**Approaches:**
+::: {.callout-warning}
+## Tiled Feature Views store partial aggregates
 
-1. **Post-retrieval** — Compute ratios after `generate_dataset` in your training pipeline
-2. **Downstream Feature View** — Create a second Feature View whose `feature_df` reads the first Feature View's output and computes derived columns
+The underlying Dynamic Table of a tiled Feature View contains internal `_PARTIAL` columns — tile-level fragments, not final values. You **cannot** compute ratios by reading the DT directly (e.g., `session.table("FEATURE_STORE.USER_ORDER_FV$V01")`). You must use the Feature Store API to reassemble tiles into final aggregated values first.
+:::
 
-**Programmatic ratio generation with safe division:**
+**Approach A: Post-retrieval (recommended for training pipelines)**
+
+`generate_dataset` and `retrieve_feature_values` handle tile reassembly automatically. Compute ratios on the returned DataFrame:
 
 ```python
 RATIOS = [
@@ -927,12 +930,41 @@ RATIOS = [
     ("DISCOUNT_AMT_SUM_30D",   "TOTAL_AMT_SUM_30D", "DISCOUNT_RATE_30D"),
 ]
 
-ratio_df = aggregated_fv_df  # output of the base aggregation Feature View
+dataset_df = fs.generate_dataset(
+    name="TRAINING_SET",
+    spine_df=spine,
+    features=[base_fv],
+    output_type="dataset",
+).read.to_snowpark_dataframe()
+
 for num, denom, alias in RATIOS:
-    ratio_df = ratio_df.with_column(
+    dataset_df = dataset_df.with_column(
         alias,
         F.iff(F.col(denom) != 0, F.col(num) / F.col(denom), F.lit(None))
     )
+```
+
+**Approach B: Downstream View-based Feature View**
+
+Use `read_feature_view` to get the reassembled values, then build a non-tiled Feature View that computes derived columns:
+
+```python
+base_fv = fs.get_feature_view("USER_ORDER_METRICS", "V01")
+reassembled_df = fs.read_feature_view(base_fv)
+
+for num, denom, alias in RATIOS:
+    reassembled_df = reassembled_df.with_column(
+        alias,
+        F.iff(F.col(denom) != 0, F.col(num) / F.col(denom), F.lit(None))
+    )
+
+ratio_fv = FeatureView(
+    name="USER_ORDER_RATIOS",
+    entities=[user_entity],
+    feature_df=reassembled_df,
+    # No refresh_freq — View-based, recomputes on read
+)
+fs.register_feature_view(ratio_fv, version="V01")
 ```
 
 ::: {.callout-note}
@@ -983,6 +1015,33 @@ With 5 numeric columns this generates 10 interaction features; with 10 columns i
 | **Registration** | Same | Same — schema fixed at `register_feature_view` |
 
 **Guidance:** Start static for small, stable feature sets (under ~10 features). Switch to dynamic when you find yourself copying and renaming feature definitions, when dimension values evolve, or when you need to experiment with many metric/window combinations rapidly.
+
+### Consuming Data-Driven Features with OBJECT_CONSTRUCT {.unnumbered}
+
+The factory patterns above enforce a naming convention — `{DIMENSION}_{METRIC}_{AGG}_{WINDOW}` — that becomes a **queryable contract**. Snowflake's [`OBJECT_CONSTRUCT`](https://docs.snowflake.com/en/sql-reference/functions/object_construct) with `ILIKE` and `EXCLUDE` filtering can slice dynamically generated columns by any naming axis without hard-coding column lists:
+
+```sql
+-- Slice features by dimension, window, or collect everything — no column list needed
+SELECT
+    USER_ID,
+    OBJECT_CONSTRUCT(* ILIKE 'AUTOMATED_%')             AS automated_features,
+    OBJECT_CONSTRUCT(* ILIKE '%_7D')                     AS window_7d_features,
+    OBJECT_CONSTRUCT(* ILIKE '%_30D')                    AS window_30d_features,
+    OBJECT_CONSTRUCT(* EXCLUDE (USER_ID, ORDER_TS))      AS all_features
+FROM FEATURE_STORE.USER_CHANNEL_METRICS$V01
+```
+
+This is particularly valuable when the factory generates dozens of columns — consumers can dynamically group features by dimension, window, or metric type without knowing every column name. The resulting OBJECTs are well-suited for:
+
+- **Feature serving APIs** that return JSON payloads
+- **Feature exploration** — `OBJECT_KEYS(all_features)` lists what was generated
+- **Selective retrieval** — extract specific features with `all_features:"AUTOMATED_ORDER_ID_COUNT_7D"` path syntax
+
+**Two-tier Feature View pattern:** Combine this with a lightweight View-based Feature View that repackages the flat columns from a tiled DT-backed Feature View into structured OBJECTs. The tiled FV handles efficient incremental computation; the View FV provides the structured consumption interface. See [Chapter 12: Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for the full two-tier architecture.
+
+::: {.callout-note}
+`OBJECT_CONSTRUCT` operates at the **consumption layer** — downstream queries and serving. The `Feature` class still requires flat scalar columns as inputs during definition. The naming convention from the factory is what bridges the two: structured names at definition time enable wildcard grouping at consumption time.
+:::
 
 ---
 

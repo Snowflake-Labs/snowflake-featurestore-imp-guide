@@ -29,7 +29,7 @@
         "- Run manual refresh / backfill for Dynamic Table-backed Feature Views\n",
         "- Recognize when derived time-dependent features must be computed after retrieval (or via snapshot materialization)"
       ],
-      "id": "5c681ebf"
+      "id": "331b8e16"
     },
     {
       "cell_type": "code",
@@ -55,7 +55,7 @@
         "    creation_mode=CreationMode.CREATE_IF_NOT_EXIST,\n",
         ")"
       ],
-      "id": "a4f1f459",
+      "id": "41c49c87",
       "execution_count": null,
       "outputs": []
     },
@@ -121,7 +121,7 @@
         "\n",
         "The training spine uses **`SESSIONS`**: `SESSION_START_TS` is the instant you want features \"as of\"; `IS_CONVERTED` is the label. User-level features come from **`EVENTS`**, aggregated into **daily snapshots** — one row per user per active day. This gives the ASOF join multiple timestamps per entity to choose from, so different spine events retrieve different historical snapshots."
       ],
-      "id": "effb5cb6"
+      "id": "f93c8ad6"
     },
     {
       "cell_type": "code",
@@ -181,7 +181,7 @@
         "    \"USER_ID\", \"PREDICTION_TS\", \"LABEL\", \"EVENT_CNT\", \"PRODUCT_DISTINCT_CNT\"\n",
         ").limit(8).show()"
       ],
-      "id": "39b3f404",
+      "id": "fad9ee6c",
       "execution_count": null,
       "outputs": []
     },
@@ -807,14 +807,15 @@
         "\n",
         "Continue to [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd) to learn about the Feature class for declarative time-windowed aggregations."
       ],
-      "id": "ef98cbdc"
+      "id": "144b7bd6"
     }
   ],
   "metadata": {
     "kernelspec": {
-      "display_name": "Python 3",
+      "name": "python3",
       "language": "python",
-      "name": "python3"
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/Users/sfield/Documents/_SnowCAT_Projects/FS_Eng/FEATURESTORE_BESTPRACTICE/.venv/share/jupyter/kernels/python3"
     }
   },
   "nbformat": 4,
