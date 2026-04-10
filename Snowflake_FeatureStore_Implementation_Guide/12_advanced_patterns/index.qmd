@@ -319,7 +319,11 @@ def deploy_feature_view(
 ```
 
 ::: {.callout-tip title="Environment promotion"}
-Combine this with the environment-strategy patterns from [Chapter 2](../02_design_organization/index.qmd#sec-environments). Parameterise database and schema names so that the same deployment script works across DEV, QA, and PROD by changing environment variables.
+Combine this with the environment-strategy patterns from [Chapter 2](../02_design_organization/index.qmd#sec-environments). Parameterize database and schema names so that the same deployment script works across DEV, QA, and PROD by changing environment variables.
+:::
+
+::: {.callout-note title="Config-driven definitions vs config-driven deployment"}
+This section covers **deployment-time** config: which Feature Views to register, in which environment, at what version. For **definition-time** config — programmatically generating the `Feature` objects and `feature_df` columns from data or specification tables — see [Chapter 7: Data-Driven Feature Definitions](../07_aggregations_api/index.qmd#sec-data-driven). The two patterns complement each other: data-driven definitions produce the Feature View content, and config-driven deployment pushes it through environments.
 :::
 
 ---

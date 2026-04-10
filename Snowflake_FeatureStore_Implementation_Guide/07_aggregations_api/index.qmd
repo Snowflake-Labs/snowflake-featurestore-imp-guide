@@ -23,6 +23,7 @@ After completing this chapter, you will be able to:
 - Configure feature granularity and refresh frequencies
 - Apply feature column prefixing for disambiguation
 - Name aggregated features following best practices
+- Generate features programmatically using data-driven patterns (categorical pivots, cross-product factories, config-driven specs)
 
 ```{python}
 #| output: false
@@ -175,6 +176,8 @@ features = [
 ```
 
 This approach keeps all related features in a **single Feature View**, which means they share tiles and refresh together -- significantly more efficient than creating separate Feature Views per filter condition. The `CASE WHEN` produces `NULL` for non-matching rows, and aggregation functions skip NULLs, giving the correct filtered result.
+
+The static approach above works well when the filter values are stable and few. When dimension values change over time (new channels, product categories, regions), see [Data-Driven Feature Definitions](#sec-data-driven) for a programmatic alternative that discovers values from data and generates the CASE columns and `Feature` objects automatically.
 
 ### Window Specifications
 
@@ -699,6 +702,290 @@ For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN
 
 ---
 
+## Data-Driven Feature Definitions {#sec-data-driven}
+
+The examples earlier in this chapter define features with hard-coded column names, filter values, and window periods. That works well for a handful of stable features, but becomes brittle and verbose as feature sets grow. This section introduces **data-driven patterns** that generate `Feature` objects and the corresponding `feature_df` columns programmatically.
+
+::: {.callout-important}
+## Schema Is Fixed at Registration
+
+The Feature View schema is fixed at registration time. Data-driven generation makes the **code path** adaptive, not the registered Feature View itself. When underlying data changes (e.g., a new channel appears), re-run the generation code and register a **new version** of the Feature View.
+:::
+
+### Pattern 1: Categorical Pivot — Static vs Dynamic {.unnumbered}
+
+[Filter Expressions Within Features](#sec-filter-expr) shows how `CASE WHEN` decomposes a metric by a single hard-coded dimension value. When the set of values is large or evolving, generate the columns programmatically:
+
+**Static (2 known channels):**
+
+```python
+source_df = session.sql("""
+    SELECT USER_ID, ORDER_TS, ORDER_ID, TOTAL_AMT,
+           CASE WHEN CHANNEL = 'AUTOMATED' THEN ORDER_ID END AS AUTOMATED_ORDER_ID,
+           CASE WHEN CHANNEL = 'WEB'       THEN ORDER_ID END AS WEB_ORDER_ID
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+""")
+features = [
+    Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
+    Feature.count("AUTOMATED_ORDER_ID", "7d").alias("AUTOMATED_ORDER_CNT_7D"),
+    Feature.count("WEB_ORDER_ID", "7d").alias("WEB_ORDER_CNT_7D"),
+]
+```
+
+**Dynamic (discovers all channels from data):**
+
+```python
+from snowflake.snowpark import functions as F
+
+channels = [row["CHANNEL"] for row in
+    session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+    .select("CHANNEL").distinct().collect()]
+
+source_df = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS") \
+    .select("USER_ID", "ORDER_TS", "ORDER_ID", "TOTAL_AMT", "CHANNEL")
+
+for ch in channels:
+    tag = ch.upper().replace(" ", "_")
+    source_df = source_df.with_column(
+        f"{tag}_ORDER_ID",
+        F.when(F.col("CHANNEL") == ch, F.col("ORDER_ID"))
+    )
+
+feature_df = source_df.drop("CHANNEL")
+
+features = [Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D")]
+for ch in channels:
+    tag = ch.upper().replace(" ", "_")
+    features.append(
+        Feature.count(f"{tag}_ORDER_ID", "7d").alias(f"{tag}_ORDER_CNT_7D")
+    )
+```
+
+**When to prefer dynamic:** Dimension values change over time (new channels, product categories, regions). Adding a value requires only a data change and a new Feature View version — no code edits.
+
+### Pattern 2: Multi-Window Sweep {.unnumbered}
+
+The [Multi-Window Features](#multi-window-features) section above shows a `build_features` helper that loops over columns and windows. This is already a data-driven pattern: the `columns` and `windows` lists are the configuration, and the helper generates `Feature` objects with consistent naming. Refer to that helper as the starting point for more complex patterns.
+
+### Pattern 3: Metric × Dimension × Window Factory {.unnumbered}
+
+Patterns 1 and 2 combine naturally into a full cross-product: for every *(metric, dimension value, window)* triple, generate a filtered column and a `Feature`. With 3 metrics, 4 channels, and 3 windows, this produces 36 features from a single function call instead of 36 hand-written definitions.
+
+```python
+from itertools import product as cartesian
+from snowflake.snowpark import functions as F
+from snowflake.ml.feature_store import Feature
+
+AGG_DISPATCH = {
+    "count": Feature.count,
+    "sum":   Feature.sum,
+    "avg":   Feature.avg,
+    "max":   Feature.max,
+    "min":   Feature.min,
+}
+
+def build_pivot_features(
+    session,
+    source_table: str,
+    entity_col: str,
+    ts_col: str,
+    pivot_col: str,
+    metrics: dict[str, str],      # {"ORDER_ID": "count", "TOTAL_AMT": "sum"}
+    windows: list[str],           # ["7d", "30d", "90d"]
+) -> tuple:
+    """Return (feature_df, features_list) with full cross-product."""
+    pivots = [r[0] for r in session.sql(
+        f"SELECT DISTINCT {pivot_col} FROM {source_table} ORDER BY 1"
+    ).collect()]
+
+    df = session.table(source_table) \
+        .select(entity_col, ts_col, pivot_col, *metrics.keys())
+
+    features = []
+
+    # Base (unfiltered) features across all windows
+    for col, fn_name in metrics.items():
+        for w in windows:
+            features.append(
+                AGG_DISPATCH[fn_name](col, w).alias(f"{col}_{fn_name.upper()}_{w.upper()}")
+            )
+
+    # Per-pivot filtered features
+    for pv in pivots:
+        tag = pv.upper().replace(" ", "_")
+        for col in metrics:
+            derived = f"{tag}_{col}"
+            df = df.with_column(
+                derived, F.when(F.col(pivot_col) == pv, F.col(col))
+            )
+            for w in windows:
+                fn_name = metrics[col]
+                features.append(
+                    AGG_DISPATCH[fn_name](derived, w)
+                    .alias(f"{tag}_{col}_{fn_name.upper()}_{w.upper()}")
+                )
+
+    return df.drop(pivot_col), features
+```
+
+Usage:
+
+```python
+feature_df, features = build_pivot_features(
+    session,
+    source_table="FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS",
+    entity_col="USER_ID",
+    ts_col="ORDER_TS",
+    pivot_col="CHANNEL",
+    metrics={"ORDER_ID": "count", "TOTAL_AMT": "sum"},
+    windows=["7d", "30d"],
+)
+
+fv = FeatureView(
+    name="USER_CHANNEL_METRICS",
+    entities=[user_entity],
+    feature_df=feature_df,
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 day",
+    features=features,
+    feature_granularity="1 day",
+)
+```
+
+### Pattern 4: Config-Driven Feature Specifications {.unnumbered}
+
+Instead of embedding feature logic in code, define feature specifications as data — either a Python dict for version-controlled config or a Snowflake table for runtime flexibility.
+
+**Python dict (version-controlled):**
+
+```python
+FEATURE_SPECS = [
+    {"col": "TOTAL_AMT", "agg": "sum",   "windows": ["7d", "30d", "90d"]},
+    {"col": "ORDER_ID",  "agg": "count", "windows": ["7d", "30d"]},
+    {"col": "TOTAL_AMT", "agg": "avg",   "windows": ["30d"]},
+]
+
+features = []
+for spec in FEATURE_SPECS:
+    fn = AGG_DISPATCH[spec["agg"]]
+    for w in spec["windows"]:
+        features.append(
+            fn(spec["col"], w).alias(f"{spec['col']}_{spec['agg'].upper()}_{w.upper()}")
+        )
+```
+
+**Snowflake table (runtime-configurable):**
+
+```sql
+CREATE TABLE IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.FEATURE_SPECS (
+    DOMAIN      VARCHAR,   -- e.g. 'ORDERS', 'SESSIONS'
+    SOURCE_COL  VARCHAR,   -- column to aggregate
+    AGG_FN      VARCHAR,   -- 'sum', 'count', 'avg', etc.
+    WINDOW_SIZE VARCHAR,   -- '7d', '30d', etc.
+    ENABLED     BOOLEAN DEFAULT TRUE
+);
+```
+
+```python
+specs = session.table("FEATURE_STORE_DEMO.FEATURE_STORE.FEATURE_SPECS") \
+    .filter(F.col("DOMAIN") == "ORDERS") \
+    .filter(F.col("ENABLED") == True) \
+    .collect()
+
+features = []
+for row in specs:
+    fn = AGG_DISPATCH[row["AGG_FN"]]
+    features.append(
+        fn(row["SOURCE_COL"], row["WINDOW_SIZE"])
+        .alias(f"{row['SOURCE_COL']}_{row['AGG_FN'].upper()}_{row['WINDOW_SIZE'].upper()}")
+    )
+```
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Python dict** | Version-controlled, reviewable in PRs, easy to test | Requires code deployment to change |
+| **Snowflake table** | Non-developers can manage; takes effect on next FV version | State split between git (code) and table (config); harder to reproduce; audit trail needed |
+
+::: {.callout-tip}
+A **hybrid** approach keeps the dict in code as the source of truth and syncs it to a Snowflake table for discoverability. This gives you version control *and* runtime queryability.
+:::
+
+### Pattern 5: Ratio and Derived Features {.unnumbered}
+
+Many useful features are **derived from base aggregations** — conversion rates, averages-per-order, or period-over-period growth. The `Feature` class supports base aggregation functions only; ratios and formulas must be computed separately.
+
+**Approaches:**
+
+1. **Post-retrieval** — Compute ratios after `generate_dataset` in your training pipeline
+2. **Downstream Feature View** — Create a second Feature View whose `feature_df` reads the first Feature View's output and computes derived columns
+
+**Programmatic ratio generation with safe division:**
+
+```python
+RATIOS = [
+    ("AUTOMATED_ORDER_CNT_7D", "ORDER_CNT_7D", "AUTOMATION_RATE_7D"),
+    ("DISCOUNT_AMT_SUM_30D",   "TOTAL_AMT_SUM_30D", "DISCOUNT_RATE_30D"),
+]
+
+ratio_df = aggregated_fv_df  # output of the base aggregation Feature View
+for num, denom, alias in RATIOS:
+    ratio_df = ratio_df.with_column(
+        alias,
+        F.iff(F.col(denom) != 0, F.col(num) / F.col(denom), F.lit(None))
+    )
+```
+
+::: {.callout-note}
+Safe division (`F.iff(denom != 0, ...)`) prevents `NaN` / divide-by-zero errors that can silently corrupt model training. Always guard ratio features.
+:::
+
+### Pattern 6: Interaction Features {.unnumbered}
+
+Interaction features capture non-linear relationships by combining pairs of columns — typically products (`a × b`) or ratios (`a / b`). These apply to **any Feature View source DataFrame**, not just aggregation Feature Views.
+
+**Static (hand-picked pairs):**
+
+```python
+source_df = source_df.with_column(
+    "AMT_X_QTY", F.col("TOTAL_AMT") * F.col("QUANTITY")
+).with_column(
+    "PRICE_PER_UNIT", F.iff(F.col("QUANTITY") != 0,
+                            F.col("TOTAL_AMT") / F.col("QUANTITY"),
+                            F.lit(None))
+)
+```
+
+**Dynamic (all pairwise products from a list):**
+
+```python
+from itertools import combinations
+
+NUMERIC_COLS = ["TOTAL_AMT", "QUANTITY", "DISCOUNT_AMT"]
+
+for a, b in combinations(NUMERIC_COLS, 2):
+    source_df = source_df.with_column(
+        f"{a}_X_{b}", F.col(a) * F.col(b)
+    )
+```
+
+With 5 numeric columns this generates 10 interaction features; with 10 columns it generates 45. **Use this for exploratory model experiments**, then prune non-contributing interactions after feature importance evaluation to avoid unnecessary compute.
+
+### Static vs Dynamic — Trade-Off Summary {.unnumbered}
+
+| Dimension | Static | Dynamic |
+|-----------|--------|---------|
+| **Readability** | Immediately clear; each feature visible in code | Requires understanding the generation logic |
+| **Verbosity** | High — repetitive definitions | Low — DRY, loop-based |
+| **Testability** | Each feature testable individually | Test the generator + spot-check outputs |
+| **Adaptability** | Manual edit per new value/metric/window | Adapts to data changes; new FV version only |
+| **Debugging** | Straightforward — read the code | Inspect generated DataFrame schema |
+| **Git diffs** | Explicit per-feature changes | Changes to generator logic only |
+| **Registration** | Same | Same — schema fixed at `register_feature_view` |
+
+**Guidance:** Start static for small, stable feature sets (under ~10 features). Switch to dynamic when you find yourself copying and renaming feature definitions, when dimension values evolve, or when you need to experiment with many metric/window combinations rapidly.
+
+---
+
 ## Summary
 
 | Concept | Description |
@@ -711,6 +998,7 @@ For non-tiled DT Feature Views with explicit window functions, use `ROWS BETWEEN
 | **auto_prefix** | Automatic column prefixing with FV name |
 | `.with_name()` | Custom column prefixing |
 | **RollupConfig** | Hierarchical aggregation from fine-grained to coarse-grained entities via `RollupConfig(source, mapping_df)` |
+| **Data-driven definitions** | Programmatic generation of `Feature` objects and source columns from data or config; patterns include categorical pivot, cross-product factory, config-driven specs, ratio features, and interaction features |
 
 ---
 

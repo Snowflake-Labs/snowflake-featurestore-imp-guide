@@ -326,6 +326,10 @@ fs.refresh_feature_view(registered_fv)
 Feature tables with hundreds or thousands of columns (sensor data, one-hot encodings, time-windowed aggregations) introduce SQL compilation overhead, micro-partition bloat, and can hit Snowflake's ~2,000-column practical limit. If your Feature View exceeds ~100 columns, consider **hybrid storage** -- entity keys and timestamp as native columns, remaining features packed into a single `OBJECT` column using `OBJECT_CONSTRUCT`. This reduces storage overhead, eliminates column-limit concerns, and improves compile time. An expansion View on top can reconstitute the wide schema for consumers that need it. See [Chapter 12: Advanced Patterns -- Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for detailed architecture, column count thresholds, and the two-tier Feature View pattern.
 :::
 
+::: {.callout-tip title="Data-Driven Feature Definitions"}
+When feature columns are generated programmatically — categorical pivots, multi-window sweeps, config-driven specifications — the `feature_df` and `Feature` list are built by code rather than written by hand. The Feature View schema is still fixed at registration time, but the code path becomes data-driven. See [Chapter 7: Data-Driven Feature Definitions](../07_aggregations_api/index.qmd#sec-data-driven) for patterns, factory functions, and static vs dynamic trade-offs.
+:::
+
 ---
 
 ## Versioning Strategies {#sec-versioning}
