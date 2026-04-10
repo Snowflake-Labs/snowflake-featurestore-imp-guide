@@ -34,8 +34,7 @@ from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity, Creati
 try:
     session = get_active_session()
 except Exception:
-    from snowflake.ml.utils import connection_params
-    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+    session = Session.builder.config("connection_name", "default").create()
 
 fs = FeatureStore(
     session=session,
@@ -216,6 +215,29 @@ The Feature Store uses **ASOF joins** (temporal joins) to retrieve the most rece
 - **Centralized SQL UDFs or Model Registry wrappers:** Keep governed, versioned logic in Snowflake or the registry, still applied **after** retrieval if the spine timestamp is required.
 
 This pattern matches production lessons from large Feature Store deployments (slow-changing dimensions and time-relative attributes).
+
+::: {.callout-tip}
+## Include the Feature View timestamp for post-retrieval derivations
+Both `generate_training_set` and `generate_dataset` accept `include_feature_view_timestamp_col=True` (default `False`). When enabled, the output includes the Feature View's `timestamp_col` value for the ASOF-matched row alongside the spine timestamp. This is useful when you need to derive features that depend on the **gap** between the spine time and the feature time -- for example, "days since last order at prediction time":
+
+```python
+dataset = fs.generate_dataset(
+    name="TRAINING_WITH_RECENCY",
+    spine_df=spine_df,
+    features=[user_order_fv],
+    spine_timestamp_col="EVENT_TS",
+    include_feature_view_timestamp_col=True,
+)
+
+training_df = dataset.read.to_snowpark_dataframe()
+training_df = training_df.with_column(
+    "DAYS_SINCE_LAST_ORDER",
+    F.datediff("day", F.col("LAST_ORDER_TS"), F.col("EVENT_TS"))
+)
+```
+
+This also supports **data quality checks** -- a large gap between the spine and FV timestamps indicates stale features for that entity, which may warrant filtering or flagging before training.
+:::
 
 ---
 

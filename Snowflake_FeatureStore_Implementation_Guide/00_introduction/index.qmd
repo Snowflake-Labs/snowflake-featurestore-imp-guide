@@ -138,9 +138,8 @@ from snowflake.ml.feature_store import (
 try:
     session = get_active_session()
 except Exception:
-    # Option 2: Running locally with connection config
-    from snowflake.ml.utils import connection_params
-    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+    # Option 2: Running locally — reads ~/.snowflake/connections.toml [default]
+    session = Session.builder.config("connection_name", "default").create()
 
 session.sql_simplifier_enabled = True
 ```
@@ -303,6 +302,7 @@ All code examples follow these conventions:
 - **SQL**: UPPERCASE keywords, lowercase identifiers
 - **Python**: PEP 8 style, type hints where helpful
 - **Naming**: `SCREAMING_SNAKE_CASE` for Snowflake objects, `snake_case` for Python
+- **DataFrames via `session.sql()`**: Feature View definitions, spines, and other DataFrames are primarily constructed using `session.sql("SELECT ...")` rather than the Snowpark DataFrame API. Both approaches produce identical lazy Snowpark DataFrames, but `session.sql()` is used throughout because SQL is more widely known and easier to read for the transformations involved. Where the Snowpark DataFrame API offers a notable advantage (e.g., programmatic column building), both forms are shown side by side.
 
 ::: {.callout-important}
 ## Adapting Code for Your Environment

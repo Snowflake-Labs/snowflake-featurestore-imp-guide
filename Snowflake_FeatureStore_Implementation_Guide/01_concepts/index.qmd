@@ -33,8 +33,7 @@ from snowflake.ml.feature_store import (
 try:
     session = get_active_session()
 except Exception:
-    from snowflake.ml.utils import connection_params
-    session = Session.builder.configs(connection_params.SnowflakeLoginOptions()).create()
+    session = Session.builder.config("connection_name", "default").create()
 
 session.sql_simplifier_enabled = True
 

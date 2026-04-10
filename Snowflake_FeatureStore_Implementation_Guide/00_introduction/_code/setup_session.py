@@ -58,7 +58,7 @@ def create_session(connection_params: dict = None) -> Session:
     Args:
         connection_params: Optional dict with connection parameters.
                           If None, attempts to get active session (Snowflake Notebook)
-                          or use SnowflakeLoginOptions.
+                          or reads ~/.snowflake/connections.toml [default].
     
     Returns:
         Active Snowpark Session
@@ -66,13 +66,10 @@ def create_session(connection_params: dict = None) -> Session:
     if connection_params:
         session = Session.builder.configs(connection_params).create()
     else:
-        # Option 1: Running in Snowflake Notebook
         try:
             session = get_active_session()
         except Exception:
-            # Option 2: Running locally with connection config
-            from snowflake.ml.utils import connection_params as cp
-            session = Session.builder.configs(cp.SnowflakeLoginOptions()).create()
+            session = Session.builder.config("connection_name", "default").create()
     
     # Enable SQL simplifier for cleaner generated SQL
     session.sql_simplifier_enabled = True
