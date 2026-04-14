@@ -1,0 +1,14 @@
+flowchart TB
+  subgraph Start[Start simple]
+    s1[Single DB]
+    s2[Schema DEV TEST PROD]
+    s3[Basic RBAC roles]
+    s4[Manual promotion]
+  end
+  subgraph Scale[Scale to]
+    x1[Multi DB by domain]
+    x2[Multi-account compliance]
+    x3[Granular RBAC]
+    x4[CI/CD promotion]
+  end
+  Start --> Scale

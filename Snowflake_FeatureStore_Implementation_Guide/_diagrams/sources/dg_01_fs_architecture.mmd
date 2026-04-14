@@ -1,0 +1,10 @@
+flowchart TB
+  SD[Source Data] --> SFS[Feature Store Schema]
+  subgraph SFS
+    FV[Feature Views DT + View]
+    MD[Metadata Tags]
+  end
+  FV --> T[Training Datasets]
+  FV --> B[Batch Inference]
+  FV --> O[Online Serving OFT]
+  MD -.-> FV

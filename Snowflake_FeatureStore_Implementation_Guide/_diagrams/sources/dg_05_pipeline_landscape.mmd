@@ -1,0 +1,13 @@
+flowchart TB
+  subgraph INT[INTERNAL MANAGEMENT]
+    direction LR
+    ST1[Source Tables] --> FV1[Dynamic Table Feature View]
+  end
+  subgraph TEM[TEMPORAL AGGREGATION API]
+    direction LR
+    ST2[Source Tables] --> FV2[Tiled FV + aggregations]
+  end
+  subgraph EXT[EXTERNAL ORCHESTRATION]
+    direction LR
+    ST3[Source Tables] --> DBT[dbt] --> TV[Tables Views] --> FV3[View-based FV]
+  end

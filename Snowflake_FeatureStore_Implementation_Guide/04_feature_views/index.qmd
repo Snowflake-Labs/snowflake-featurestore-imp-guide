@@ -476,34 +476,7 @@ CREATE SCHEMA FEATURE_STORE_BASE;
 CREATE SCHEMA FEATURE_STORE_PRESENTATION;
 ```
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                  BASE + PRESENTATION LAYER MODEL                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  BASE LAYER (physical, immutable)                                       │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │ USER_ORDER_BASE  │  │ USER_ENGAGE_BASE │  │ USER_PROMO_BASE  │       │
-│  │ (DT — V01)       │  │ (DT — V01)       │  │ (DT — V02)       │       │
-│  │                  │  │                  │  │                  │       │
-│  │ ORDER_TOTAL_SUM  │  │ SESSION_CNT      │  │ PROMO_RESP_RATE  │       │
-│  │ ORDER_CNT        │  │ AVG_DURATION_SEC │  │ LAST_PROMO_TS    │       │
-│  │ LAST_ORDER_TS    │  │ LAST_SESSION_TS  │  │                  │       │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘       │
-│           │                     │                     │                 │
-│  PRESENTATION LAYER (virtual, composable)             |                 │
-│           └─────────────┬───────┴─────────────────────┘                 │
-│                         ▼                                               │
-│           ┌──────────────────────┐                                      │
-│           │ USER_COMBINED_FV     │                                      │
-│           │ (View — joins bases) │                                      │
-│           │                      │                                      │
-│           │ All features from    │                                      │
-│           │ base DTs combined    │                                      │
-│           └──────────────────────┘                                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Base layer Dynamic Table feature views feeding a presentation View](../_diagrams/png/dg_04_presentation_layer.png){fig-alt="Three base feature views combine into one combined view"}
 
 **How it works:**
 
@@ -556,24 +529,7 @@ This pattern adds operational complexity and is best suited to organizations wit
 
 ### Version Lifecycle
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    FEATURE VIEW VERSION LIFECYCLE                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  V01 (Initial)         V02 (Update)          V03 (Current)              │
-│  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐    │
-│  │ORDER_TOTAL_AMT_SUM│  │ORDER_TOTAL_AMT_SUM│  │ORDER_TOTAL_AMT_SUM│    │
-│  │ ORDER_CNT         │  │ ORDER_CNT         │  │ ORDER_CNT         │    │
-│  │                   │  │ORDER_TOTAL_AMT_AVG│  │ORDER_TOTAL_AMT_AVG│    │
-│  │                   │  │                   │  │ ORDERS_7D_CNT     │    │
-│  └───────────────────┘  └───────────────────┘  └───────────────────┘    │
-│                                                                         │
-│  Status: DEPRECATED    Status: ACTIVE      Status: ACTIVE               │
-│  Models: legacy_v1     Models: prod_v2     Models: new_models           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Feature View version lifecycle V01 through V03](../_diagrams/png/dg_04_version_lifecycle.png){fig-alt="Three versions of a feature view from initial to current"}
 
 ### Managing Versions
 

@@ -32,9 +32,14 @@ def verify_environment(session: Session) -> dict:
     session_schema = session.get_current_schema().replace('"', "")
     session_warehouse = session.get_current_warehouse().replace('"', "")
     
-    # Check warehouse status
-    wh_status = session.sql(f"SHOW WAREHOUSES LIKE '{session_warehouse}'").collect()[0]
-    
+    # Check warehouse status (size/state can be NULL for some warehouse types)
+    wh_sql = f"SHOW WAREHOUSES LIKE '{session_warehouse}'"
+    wh_status = session.sql(wh_sql).collect()[0]
+    wh_size = wh_status["size"]
+    wh_state = wh_status["state"]
+    warehouse_size = wh_size.upper() if wh_size else "N/A"
+    warehouse_state = wh_state if wh_state is not None else "N/A"
+
     env_info = {
         "account": session.sql("SELECT current_account()").collect()[0][0],
         "user": snowflake_env[0][0],
@@ -42,8 +47,8 @@ def verify_environment(session: Session) -> dict:
         "database": session_database,
         "schema": session_schema,
         "warehouse": session_warehouse,
-        "warehouse_size": wh_status["size"].upper(),
-        "warehouse_state": wh_status["state"],
+        "warehouse_size": warehouse_size,
+        "warehouse_state": warehouse_state,
         "snowflake_version": snowflake_env[0][1],
         "snowpark_version": f"{snowpark_version[0]}.{snowpark_version[1]}.{snowpark_version[2]}",
     }

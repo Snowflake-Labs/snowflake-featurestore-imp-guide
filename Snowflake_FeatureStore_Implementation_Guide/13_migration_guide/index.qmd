@@ -74,24 +74,7 @@ After completing this chapter, you will be able to:
 
 ### Three-Phase Migration
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        MIGRATION WORKFLOW                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  Phase 1: ASSESSMENT          Phase 2: MIGRATION       Phase 3: VALID  │
-│  ┌───────────────────┐       ┌─────────────────────┐   ┌────────────┐  │
-│  │                   │       │                     │   │            │  │
-│  │ • Inventory       │       │ • Recreate entities │   │ • Compare  │  │
-│  │   existing        │──────▶│ • Port feature defs │──▶│   outputs  │  │
-│  │   features        │       │ • Setup pipelines   │   │ • Validate │  │
-│  │ • Map terminology │       │ • Migrate consumers │   │   PIT      │  │
-│  │ • Plan phases     │       │                     │   │ • Cutover  │  │
-│  │                   │       │                     │   │            │  │
-│  └───────────────────┘       └─────────────────────┘   └────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Three-phase migration: assessment migration validation](../_diagrams/png/dg_13_migration_phases.png){fig-alt="Assessment then migration then validation phases"}
 
 ### Phase 1: Assessment
 

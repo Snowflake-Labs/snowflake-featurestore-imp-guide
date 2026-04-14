@@ -33,13 +33,7 @@ After completing this chapter, you will be able to:
 
 ### Decision Guide
 
-```
-Is the transformation reusable across multiple models?
-├── YES → MIT (store in Feature View)
-└── NO  → Does it depend on training data statistics?
-          ├── YES → MDT (store with model)
-          └── NO  → ODT (compute at inference)
-```
+![MIT MDT ODT preprocessing decision tree](../_diagrams/png/dg_09_preprocessing_tree.png){fig-alt="Reusable transforms in feature view else model-dependent or on-demand"}
 
 ---
 

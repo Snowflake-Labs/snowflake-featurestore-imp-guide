@@ -1,0 +1,8 @@
+flowchart LR
+  subgraph PROD[FEATURE_STORE_DEMO]
+    P1[CLICKSTREAM_DATA]
+  end
+  subgraph DEV[FEATURE_STORE_DEMO_DEV]
+    D1[CLICKSTREAM_DATA sampled]
+  end
+  PROD --- DEV

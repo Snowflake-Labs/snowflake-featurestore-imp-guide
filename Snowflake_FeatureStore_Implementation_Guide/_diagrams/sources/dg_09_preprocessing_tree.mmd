@@ -1,0 +1,8 @@
+flowchart TD
+  Q1{Reusable across models?}
+  Q1 -->|YES| MIT[MIT in Feature View]
+  Q1 -->|NO| Q2{Training data statistics?}
+  Q2 -->|YES| MDT[MDT with model]
+  Q2 -->|NO| Q3{Request context?}
+  Q3 -->|YES| ODT[ODT at inference]
+  Q3 -->|NO| MIT2[Probably MIT]

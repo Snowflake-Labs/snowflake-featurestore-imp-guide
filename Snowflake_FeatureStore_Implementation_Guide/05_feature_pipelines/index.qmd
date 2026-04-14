@@ -57,46 +57,11 @@ user_entity = Entity(name="USER", join_keys=["USER_ID"])
 
 ### The Feature Pipeline Landscape
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                     FEATURE PIPELINE ARCHITECTURES                         │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    INTERNAL MANAGEMENT                              │   │
-│  │                                                                     │   │
-│  │  ┌──────────┐              ┌──────────────────────────────────────┐ │   │
-│  │  │  Source  │─────────────▶│   Dynamic Table-based Feature View   │ │   │
-│  │  │  Tables  │              │    (transformation + storage)        │ │   │
-│  │  └──────────┘              └──────────────────────────────────────┘ │   │
-│  │                                                                     │   │
-│  │  Managed by: Snowflake (automatic refresh, incremental compute)     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    TEMPORAL AGGREGATION API                         │   │
-│  │                                                                     │   │
-│  │  ┌──────────┐    ┌──────────────────────────────────────────────┐   │   │
-│  │  │  Source  │───▶│ Tiled Feature View with Feature aggregations │   │   │
-│  │  │  Tables  │    │  (automatic window computation + tiling)     │   │   │
-│  │  └──────────┘    └──────────────────────────────────────────────┘   │   │
-│  │                                                                     │   │
-│  │  Managed by: Snowflake (optimized temporal aggregation engine)      │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    EXTERNAL ORCHESTRATION                           │   │
-│  │                                                                     │   │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐   │   │
-│  │  │  Source  │───▶│   dbt    │───▶│  Tables/ │───▶│ View-based   │   │   │
-│  │  │  Tables  │    │  Models  │    │  Views   │    │ Feature View │   │   │
-│  │  └──────────┘    └──────────┘    └──────────┘    └──────────────┘   │   │
-│  │                                                                     │   │
-│  │  Orchestrated by: dbt Projects on Snowflake, Airflow, Dagster       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+![Feature pipeline architectures: internal temporal and external patterns](../_diagrams/png/dg_05_pipeline_landscape.png){fig-alt="Three pipeline patterns from source tables to feature views"}
+
+- **INTERNAL:** Snowflake-managed automatic refresh and incremental compute.
+- **TEMPORAL API:** Snowflake-managed optimized temporal aggregation (windows + tiling).
+- **EXTERNAL:** Orchestrated by dbt Projects on Snowflake, Airflow, Dagster, or similar.
 
 ### Architecture Comparison
 
@@ -233,35 +198,7 @@ In Feature Store terms: if a downstream Feature View is DT-backed (`refresh_freq
 
 ### How Chaining Works
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                   CHAINED FEATURE VIEW PIPELINE                          │
-├──────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Source Tables                                                           │
-│  ┌──────────┐  ┌──────────┐                                              │
-│  │  ORDERS  │  │  EVENTS  │                                              │
-│  └─────┬────┘  └────┬─────┘                                              │
-│        │             │                                                   │
-│  BASE LAYER (DT Feature Views)                                           │
-│        ▼             ▼                                                   │
-│  ┌───────────┐ ┌───────────┐                                             │
-│  │USER_ORDER │ │USER_EVENT │    refresh_freq="1 hour"                    │
-│  │ _BASE_FV  │ │ _BASE_FV  │    Materialized from source tables          │
-│  │  (DT)     │ │  (DT)     │                                             │
-│  └─────┬─────┘ └─────┬─────┘                                             │
-│        │              │                                                  │
-│  DERIVED LAYER (downstream FVs)                                          │
-│        └──────┬───────┘                                                  │
-│               ▼                                                          │
-│         ┌───────────┐                                                    │
-│         │USER_COMBI │    Joins base FVs; DT or View                      │
-│         │ _FV       │    Refreshes after upstream DTs complete           │
-│         │           │                                                    │
-│         └───────────┘                                                    │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+![Chained Feature View pipeline from source tables to combined FV](../_diagrams/png/dg_05_chained_fv.png){fig-alt="Orders and events feed base feature views then a combined feature view"}
 
 ### Example: Base + Derived Feature Views
 
@@ -566,26 +503,7 @@ fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
 
 ### Decision Tree
 
-```
-What is your primary requirement?
-│
-├── Are features time-windowed aggregations?
-│   ├── YES → Temporal Aggregation API
-│   └── NO  → Continue below
-│
-├── Need real-time features (<1 min latency)?
-│   ├── YES → Dynamic Tables + Online Feature Tables
-│   └── NO  → Continue below
-│
-├── Already have dbt / Airflow infrastructure?
-│   ├── YES → Do you need sub-hour freshness?
-│   │         ├── YES → Consider migrating critical features to DT
-│   │         └── NO  → External Orchestration (dbt Projects on Snowflake)
-│   │
-│   └── NO  → Internal Management (Dynamic Tables)
-│
-└── Default → Internal Management (Dynamic Tables)
-```
+![Pipeline selection decision flowchart](../_diagrams/png/dg_05_pipeline_selection.png){fig-alt="Decision tree for temporal API OFT dbt and internal management"}
 
 ### Selection Matrix
 

@@ -1,0 +1,5 @@
+flowchart TD
+  FS[Feature Store offline FV]
+  FS --> OFT[OFT Hybrid Table]
+  FS --> CDC[CDC or sync tool]
+  CDC --> EXT[External store Redis PG Dynamo]

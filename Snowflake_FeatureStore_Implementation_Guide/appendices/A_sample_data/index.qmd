@@ -310,12 +310,6 @@ python deploy.py resume --dev-db FEATURE_STORE_DEMO_DEV
 
 ### Multi-Environment Setup
 
-```
-FEATURE_STORE_DEMO (Production)             FEATURE_STORE_DEMO_DEV (Development)
-└── CLICKSTREAM_DATA                     └── CLICKSTREAM_DATA
-    ├── USERS (100K)                        ├── USERS (10K - 10% sample)
-    ├── SESSIONS (500K)                     ├── SESSIONS (~50K)
-    └── EVENTS (4.4M)                       └── EVENTS (~440K)
-```
+![Production vs development database subset sizes](../../_diagrams/png/dg_appendix_env_trees.png){fig-alt="Production and dev databases with sampled table row counts"}
 
 See `database_subset/README.md` for complete documentation.

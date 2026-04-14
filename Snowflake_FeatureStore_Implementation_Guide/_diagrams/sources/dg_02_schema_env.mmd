@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph DEV[Schema DEV]
+    d[USER_FEATURES_FV V01-V03]
+  end
+  subgraph TST[Schema TEST]
+    t[USER_FEATURES_FV promoted]
+  end
+  subgraph PRD[Schema PROD]
+    p[USER_FEATURES_FV validated]
+  end
+  DEV -->|clone| TST -->|clone| PRD

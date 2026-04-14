@@ -157,23 +157,7 @@ Compound entities use multiple columns together as the join key. Essential for m
 
 ### Why Compound Keys?
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    PRODUCT-SUPPLIER RELATIONSHIP                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   PRODUCT_ID: P001              PRODUCT_SUPPLIER Table                  │
-│   ┌───────────────┐             ┌────────────────────────────────────┐  │
-│   │ Widget Pro    │────────────▶│ P001, S001: $10.00, 5 day lead     │  │
-│   │               │             │ P001, S002: $9.50,  7 day lead     │  │
-│   └───────────────┘             │ P001, S003: $11.00, 3 day lead     │  │
-│                                 └────────────────────────────────────┘  │
-│                                                                         │
-│   To get specific supplier pricing, you need BOTH keys:                 │
-│   (PRODUCT_ID, SUPPLIER_ID) → unique row                                │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Product-supplier compound key relationship](../_diagrams/png/dg_03_product_supplier.png){fig-alt="Product links to multiple supplier rows requiring compound key"}
 
 ### Defining Compound Entities
 
@@ -232,21 +216,7 @@ Relationships used throughout this guide (database `FEATURE_STORE_DEMO`, source 
 - **PRODUCT** (`PRODUCT_ID`) → belongs to → **CATEGORY** (`CATEGORY_ID`)
 - **PRODUCT_SUPPLIER** (`PRODUCT_ID`, `SUPPLIER_ID`) is the compound key for supplier-specific product facts
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                   CLICKSTREAM ENTITY RELATIONSHIPS                      │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   VISITOR ──identified as──▶ USER ──belongs to──▶ HOUSEHOLD             │
-│                                │                                        │
-│                    ┌───────────┴───────────┐                            │
-│                    ▼                       ▼                            │
-│              SESSION ──▶ events      ORDER ──▶ ORDER_ITEM               │
-│                                                                         │
-│   PRODUCT ──belongs to──▶ CATEGORY                                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Clickstream entity relationships](../_diagrams/png/dg_03_entity_web.png){fig-alt="Visitor user household session order and product relationships"}
 
 ### Implementing Hierarchies
 

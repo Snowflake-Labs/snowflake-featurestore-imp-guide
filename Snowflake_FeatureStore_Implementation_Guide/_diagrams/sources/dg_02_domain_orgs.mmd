@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph M[Schema MARKETING]
+    mfv[SESSION / USER_SEGMENT / EVENT_ATTRIBUTION FVs]
+  end
+  subgraph F[Schema FRAUD]
+    ffv[ORDER_VELOCITY / SESSION_ANOMALY FVs]
+  end
+  subgraph S[Schema SHARED]
+    sfv[USER_BASE / PRODUCT / SESSION FVs]
+  end
+  DB2[(FEATURE_STORE_DEMO)] --> M
+  DB2 --> F
+  DB2 --> S

@@ -244,18 +244,7 @@ reg.log_model(
 
 ### Lineage flow
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        END-TO-END LINEAGE                                │
-├──────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Source Tables → Feature Views → Training artifact → Model → Predictions │
-│                                                                          │
-│  ORDERS     →  USER_ORDER_FV     →  TRAINING_SET / Dataset  →  V01  → …  │
-│  SESSIONS   →  USER_SESSION_FV   ↗                                       │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+![End-to-end lineage from sources through feature views to model](../_diagrams/png/dg_10_lineage.png){fig-alt="Source tables feature views training dataset model predictions"}
 
 ---
 

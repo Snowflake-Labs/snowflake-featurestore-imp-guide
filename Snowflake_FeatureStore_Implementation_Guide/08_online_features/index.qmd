@@ -44,23 +44,7 @@ OFTs store only the **latest feature values** — they do not retain historical 
 `refresh_freq` on the Feature View controls how often the **offline** Dynamic Table (or related materialization) refreshes. `OnlineConfig.target_lag` controls how often the **online** sync Task runs. They are **independent**; end-to-end staleness is roughly the sum of both paths. See the [Python online features](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python) documentation.
 :::
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                 ONLINE FEATURE TABLE (OFT) — INTERNAL VIEW                 │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│   Offline Feature View              Stream  +  Task (TARGET_LAG)           │
-│   (Dynamic Table or View)      ──────────▶  MERGE into Hybrid Table        │
-│   ┌─────────────────────────┐         │                                    │
-│   │ e.g. USER order stats   │         └──▶ ┌──────────────────────────┐    │
-│   │ from CLICKSTREAM_DATA   │              │ Hybrid Table             │    │
-│   │ .ORDERS                 │              │ (latest row per key)     │    │
-│   └─────────────────────────┘              │ USER_ID │ features…      │    │
-│                                            └──────────────────────────┘    │
-│                                            Low-latency reads               │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+![Online Feature Table: offline FV to Hybrid Table via stream and task](../_diagrams/png/dg_08_oft_hybrid.png){fig-alt="Offline feature view merges into hybrid table for low latency reads"}
 
 ---
 
@@ -491,16 +475,7 @@ Some use cases have **sub-20 ms** latency requirements that exceed what Hybrid T
 
 **Pattern**: Keep the Feature Store as the **system of record** for feature definitions, lineage, and offline retrieval. Use a CDC (change data capture) or scheduled sync tool to replicate the OFT or offline Feature View to the external store:
 
-```
-Feature Store (offline FV / DT)
-    │
-    ├──▶ OFT (Hybrid Table)              ← used for moderate-latency serving
-    │
-    └──▶ CDC / sync tool (e.g., Hightouch, Fivetran, Airbyte, custom Task)
-              │
-              └──▶ External store (Redis / PostgreSQL / DynamoDB)
-                        ← ultra-low-latency serving
-```
+![External serving: Feature Store to OFT or CDC to external store](../_diagrams/png/dg_08_external_serving.png){fig-alt="Offline feature store path to hybrid OFT or to external key value store"}
 
 **Trade-offs:**
 

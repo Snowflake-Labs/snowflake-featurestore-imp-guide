@@ -1,0 +1,8 @@
+flowchart TB
+  DB[(FEATURE_STORE_DEMO)]
+  subgraph SCH[Schema FEATURE_STORE]
+    F1[USER_FEATURES_FV DT]
+    F2[PRODUCT_FV DT]
+    F3[SESSION_FV View]
+  end
+  DB --> SCH

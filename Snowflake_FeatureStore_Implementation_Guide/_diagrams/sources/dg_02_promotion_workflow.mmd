@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph DEV[DEV]
+    d1[Develop + test locally]
+  end
+  subgraph TST[TEST]
+    t1[Validate + integration tests]
+  end
+  subgraph PRD[PROD]
+    p1[Deploy + monitor]
+  end
+  DEV -->|PR CI| TST -->|gate| PRD

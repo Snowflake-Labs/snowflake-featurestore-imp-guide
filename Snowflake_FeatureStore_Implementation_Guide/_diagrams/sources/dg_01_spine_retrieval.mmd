@@ -1,0 +1,9 @@
+flowchart TB
+  SP[Spine DataFrame USER_ID + EVENT_TS]
+  FV1[USER_PURCHASE_FV features]
+  FV2[USER_SESSION_FV features]
+  SP --> FV1
+  SP --> FV2
+  RES[Result: features as-of EVENT_TS per USER_ID]
+  FV1 --> RES
+  FV2 --> RES

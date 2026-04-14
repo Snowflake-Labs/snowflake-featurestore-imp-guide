@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph DS[Data Sources]
+    d1[Tables / Streams / External / APIs]
+  end
+  subgraph FS[Feature Store]
+    f1[Pipelines / Storage / Serving / Metadata]
+  end
+  subgraph ML[ML Consumers]
+    m1[Training / Batch / Real-time / Analytics]
+  end
+  DS --> FS --> ML

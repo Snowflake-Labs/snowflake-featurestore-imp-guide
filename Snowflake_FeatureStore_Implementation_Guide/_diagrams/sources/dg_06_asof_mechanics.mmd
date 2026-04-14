@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph SP[Spine]
+    s1[usr001 Jan15]
+    s2[usr001 Jan20]
+  end
+  subgraph FV[Feature snapshots]
+    f1[Jan14 cnt 8]
+    f2[Jan18 cnt 15]
+  end
+  s1 -->|ASOF| f1
+  s2 -->|ASOF| f2

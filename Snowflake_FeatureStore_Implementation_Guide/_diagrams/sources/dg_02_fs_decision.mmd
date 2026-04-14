@@ -1,0 +1,6 @@
+flowchart TD
+  Q{Strong isolation between domains?}
+  Q -->|YES| M[Multiple Feature Stores]
+  Q -->|NO| C{Compliance requirements?}
+  C -->|YES| MR[Multiple FS + RBAC]
+  C -->|NO| S[Single Feature Store]

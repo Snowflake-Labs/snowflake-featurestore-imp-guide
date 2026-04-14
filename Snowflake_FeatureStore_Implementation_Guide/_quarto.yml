@@ -70,9 +70,16 @@ format:
     
   pdf:
     documentclass: scrreprt
+    classoption:
+      - parskip=half
     toc: true
     number-sections: true
     colorlinks: true
+    include-in-header:
+      - _pdf/preamble.tex
+    fig-dpi: 150
+    # Prefer Pandoc's flexible column widths when links skew width math (helps monospace tables)
+    tbl-colwidths: auto
 
 execute:
   freeze: true

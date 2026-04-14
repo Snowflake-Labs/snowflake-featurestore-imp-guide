@@ -113,29 +113,7 @@ Large organizations rarely run a single Feature Store schema. Different business
 
 A cross-domain model (e.g., a churn model that combines marketing engagement, fraud signals, and base demographic features) pulls Feature Views from multiple Feature Store schemas at training time via `generate_dataset` or `generate_training_set`. The diagram below illustrates the topology:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    MULTI-FEATURE STORE ARCHITECTURE                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐          │
-│  │ Marketing FS    │  │ Fraud FS        │  │ Shared FS       │          │
-│  │                 │  │                 │  │                 │          │
-│  │ CAMPAIGN_FV     │  │ TRANSACTION_FV  │  │ USER_BASE_FV    │          │
-│  │ SEGMENT_FV      │  │ DEVICE_FV       │  │ PRODUCT_FV      │          │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘          │
-│           │                    │                    │                   │
-│           └────────────────────┼────────────────────┘                   │
-│                                │                                        │
-│                                ▼                                        │
-│                    ┌─────────────────────┐                              │
-│                    │   Cross-Domain ML   │                              │
-│                    │   (Fraud + Marketing│                              │
-│                    │    + Base Features) │                              │
-│                    └─────────────────────┘                              │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Multi-Feature Store architecture feeding cross-domain ML](../_diagrams/png/dg_12_multi_fs_topology.png){fig-alt="Marketing fraud and shared feature stores feed a cross-domain model"}
 
 Each Feature Store instance points to its own schema. At training time the consumer session must have grants on all schemas involved.
 
@@ -567,20 +545,7 @@ X_sparse = coo_matrix((vals, (rows, cols)), shape=(len(records), len(feature_nam
 
 For production-grade wide Feature Views backed by Dynamic Tables, the recommended pattern is a **two-tier architecture**: a materialized bundled DT underneath, with an expansion View on top. The expansion View presents the same wide-column schema that consumers expect while the bundled DT stores data compactly.
 
-```
-User's Feature SQL (e.g. 500+ columns)
-  │
-  ▼
-MY_FEATURES__BUNDLED (Dynamic Table)
-  │   entity_id, ts,
-  │   age, income, city            ← dense features (native columns)
-  │   SPARSE_FEATURES OBJECT       ← sparse features (packed)
-  │
-  └──▶ MY_FEATURES (View)
-         entity_id, ts,
-         age, income, city,
-         ohe_cat_1, ohe_cat_2, ... ← expanded from OBJECT with type casts
-```
+![Two-tier bundled Dynamic Table with expansion View](../_diagrams/png/dg_12_two_tier_bundle.png){fig-alt="Wide SQL to bundled DT then expansion view for consumers"}
 
 | Object | Name | Type | Consumer-facing? |
 |--------|------|------|-----------------|
@@ -651,15 +616,7 @@ Maintain a metadata table or manifest that records each packed feature's origina
 
 When wide Feature Views serve multiple query patterns (parameter discovery, point lookups, full key-value scans), a **DT cascade** pre-materialises multiple representations from a single source:
 
-```
-DT1: Wide aggregated (Feature View's backing DT)
-  │
-  ├──▶ DT2: Bundled hybrid (entity keys + OBJECT column)
-  │       │
-  │       └──▶ DT3: Pre-materialized KV (LATERAL FLATTEN) [optional]
-  │
-  └──▶ Expansion View (SELECT keys, obj:col1::TYPE, ... FROM DT2)
-```
+![Dynamic Table cascade wide bundled expansion and optional KV](../_diagrams/png/dg_12_dt_cascade.png){fig-alt="DT1 wide feeds DT2 bundled and expansion view optional DT3 KV"}
 
 | Representation | Best for |
 |---------------|----------|

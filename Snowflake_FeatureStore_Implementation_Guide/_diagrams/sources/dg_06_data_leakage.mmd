@@ -1,0 +1,10 @@
+flowchart TB
+  subgraph GOOD[With PIT]
+    direction TB
+    L2[Label Jan 15 churn] --> F2[Features only through Jan 14] --> R2[Realistic metrics]
+  end
+  subgraph BAD[Without PIT]
+    direction TB
+    L1[Label Jan 15 churn] --> F1[Features include Jan 16-31 data] --> R1[Inflated metrics]
+  end
+  GOOD --> BAD

@@ -13,31 +13,7 @@ Examples that need a database and schema use the same **canonical names** as the
 
 When you define feature transformations in Python using Snowpark DataFrames, **no Python code ships to the Dynamic Table**. The pipeline works as follows:
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│               SNOWPARK DATAFRAME → DYNAMIC TABLE PATH                        │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  DEVELOPMENT TIME                                                            │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌────────────────────────┐  │
-│  │  Snowpark Python │───▶│  SQL Query Plan  │───▶│  Feature View Object   │  │
-│  │  DataFrame ops   │    │  (lazy, logical) │    │  (name, entity, freq)  │  │
-│  └──────────────────┘    └──────────────────┘    └───────────┬────────────┘  │
-│                                                              │               │
-│  REGISTRATION TIME                                           ▼               │
-│                                                  ┌────────────────────────┐  │
-│                                                  │  CREATE DYNAMIC TABLE  │  │
-│                                                  │  ... AS <generated SQL>│  │
-│                                                  └───────────┬────────────┘  │
-│                                                              │               │
-│  RUNTIME (refresh cycles)                                    ▼               │
-│                                                  ┌────────────────────────┐  │
-│                                                  │  Pure SQL execution    │  │
-│                                                  │  (no Python involved)  │  │
-│                                                  └────────────────────────┘  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+![Snowpark DataFrame to Dynamic Table translation path](../../_diagrams/png/dg_appendix_snowpark_dt.png){fig-alt="Python lazy plan registers as Feature View then Dynamic Table executes as SQL at refresh"}
 
 ### Step 1 -- Snowpark DataFrame (Lazy Evaluation)
 

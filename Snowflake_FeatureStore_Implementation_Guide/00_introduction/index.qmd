@@ -159,8 +159,12 @@ session_database = session.get_current_database().replace('"', "")
 session_schema = session.get_current_schema().replace('"', "")
 session_warehouse = session.get_current_warehouse().replace('"', "")
 
-# Check warehouse status
+# Check warehouse status (size/state can be NULL for some warehouse types)
 wh_status = session.sql(f"SHOW WAREHOUSES LIKE '{session_warehouse}'").collect()[0]
+wh_size = wh_status["size"]
+wh_state = wh_status["state"]
+warehouse_size = wh_size.upper() if wh_size else "N/A"
+warehouse_state = wh_state if wh_state is not None else "N/A"
 
 print('=' * 70)
 print('CONNECTION ESTABLISHED')
@@ -171,8 +175,8 @@ print(f'Role                   : {session_role}')
 print(f'Database               : {session_database}')
 print(f'Schema                 : {session_schema}')
 print(f'Warehouse              : {session_warehouse}')
-print(f'Warehouse Size         : {wh_status["size"].upper()}')
-print(f'Warehouse State        : {wh_status["state"]}')
+print(f'Warehouse Size         : {warehouse_size}')
+print(f'Warehouse State        : {warehouse_state}')
 print(f'Snowflake Version      : {snowflake_environment[0][1]}')
 print(f'Snowpark Version       : {snowpark_version[0]}.{snowpark_version[1]}.{snowpark_version[2]}')
 print('=' * 70)

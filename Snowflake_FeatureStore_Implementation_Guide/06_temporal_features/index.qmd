@@ -51,39 +51,7 @@ fs = FeatureStore(
 
 ### The Data Leakage Problem
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         DATA LEAKAGE PROBLEM                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ❌ WITHOUT Point-in-Time Correctness:                                      │
-│                                                                             │
-│  Training Label:                                                            │
-│  "Did user churn on Jan 15?"  ──────────────────────────┐                   │
-│                                                         │                   │
-│  Features Used:                                         │                   │
-│  ┌─────────────────────────────────────────────────────┐│                   │
-│  │ User's purchase history including Jan 16-31 data    ││ ← LEAKAGE!        │
-│  │ (Future data used to predict past event)            ││                   │
-│  └─────────────────────────────────────────────────────┘│                   │
-│                                                         │                   │
-│  Result: Model learns from "future" → inflated metrics  │                   │
-│                                                                             │
-│  ✅ WITH Point-in-Time Correctness:                                         │
-│                                                                             │
-│  Training Label:                                                            │
-│  "Did user churn on Jan 15?"  ──────────────────────────┐                   │
-│                                                         │                   │
-│  Features Used:                                         │                   │
-│  ┌─────────────────────────────────────────────────────┐│                   │
-│  │ User's purchase history ONLY through Jan 14         ││ ← CORRECT!        │
-│  │ (Only past data available at prediction time)       ││                   │
-│  └─────────────────────────────────────────────────────┘│                   │
-│                                                         │                   │
-│  Result: Model learns realistic patterns → accurate metrics                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+![Data leakage vs point-in-time correctness](../_diagrams/png/dg_06_data_leakage.png){fig-alt="Without PIT future data leaks into labels with PIT only past data is used"}
 
 ### Real-World Impact
 
@@ -163,37 +131,7 @@ training_set.read.to_snowpark_dataframe().select(
 
 The Feature Store uses **ASOF joins** (temporal joins) to retrieve the most recent feature row **on or before** each spine timestamp, per entity. This only works meaningfully when the Feature View contains **multiple rows per entity over time** (e.g., daily snapshots, periodic aggregations):
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ASOF JOIN MECHANICS                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Spine (SESSIONS)                Feature View (daily snapshots from EVENTS) │
-│  ─────────────────               ──────────────────────────────────────     │
-│                                                                             │
-│  USER_ID │ PREDICTION_TS         USER_ID │ ACTIVITY_DATE │ EVENT_CNT        │
-│  ────────┼──────────             ────────┼───────────────┼──────────        │
-│  usr_001 │ Jan 15                usr_001 │ Jan 10        │ 12               │
-│  usr_001 │ Jan 20                usr_001 │ Jan 14        │ 8                │
-│  usr_002 │ Jan 18                usr_001 │ Jan 18        │ 15               │
-│                                  usr_002 │ Jan 12        │ 3                │
-│                                  usr_002 │ Jan 17        │ 7                │
-│                                                                             │
-│  ASOF Join Result:                                                          │
-│  ─────────────────                                                          │
-│                                                                             │
-│  USER_ID │ PREDICTION_TS │ ACTIVITY_DATE │ EVENT_CNT                        │
-│  ────────┼───────────────┼───────────────┼──────────                        │
-│  usr_001 │ Jan 15        │ Jan 14        │ 8    ← latest snapshot ≤ Jan 15  │
-│  usr_001 │ Jan 20        │ Jan 18        │ 15   ← latest snapshot ≤ Jan 20  │
-│  usr_002 │ Jan 18        │ Jan 17        │ 7    ← latest snapshot ≤ Jan 18  │
-│                                                                             │
-│  usr_001's Jan 15 session gets 8 events (from the Jan 14 snapshot),         │
-│  but the Jan 20 session gets 15 events (from the Jan 18 snapshot).          │
-│  Different spine timestamps → different feature values. That is PIT.        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+![ASOF join selects latest feature snapshot on or before spine time](../_diagrams/png/dg_06_asof_mechanics.png){fig-alt="Spine rows map to the correct historical feature snapshot per entity"}
 
 ---
 

@@ -189,6 +189,8 @@ quarto render --to pdf
 
 > **Note:** PDF rendering requires a LaTeX distribution. Install [TinyTeX](https://quarto.org/docs/output-formats/pdf-engine.html) via `quarto install tinytex`, or use an existing TeX Live / MiKTeX installation.
 
+Architecture figures are committed as **PNG** under `_diagrams/png/` (generated from Mermaid sources via `python3 ../scripts/build_guide_diagrams.py` from the repo root). After editing diagram logic in `scripts/build_guide_diagrams.py`, regenerate and commit the PNGs so PDF and HTML stay aligned. See `_diagrams/README.md`.
+
 ---
 
 ## 📊 Sample Data

@@ -119,13 +119,7 @@ snowsql -a <account> -u FS_DEMO_USER -r FS_CONSUMER_ROLE -f scripts/03_consumer_
 
 ### Role Hierarchy
 
-```
-ACCOUNTADMIN
-    └── SYSADMIN
-            └── FS_ADMIN_ROLE
-                    └── FS_DEV_ROLE
-                            └── FS_CONSUMER_ROLE
-```
+![Demo role hierarchy from account admin to consumer](../../_diagrams/png/dg_appendix_role_tree.png){fig-alt="Role chain ACCOUNTADMIN through FS roles to consumer"}
 
 Each role inherits all privileges from roles below it. This means:
 

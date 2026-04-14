@@ -1,0 +1,9 @@
+flowchart TD
+  R{Primary requirement}
+  R --> T{Time-windowed aggregations?}
+  T -->|YES| TA[Temporal Aggregation API]
+  T -->|NO| RT{Sub-minute freshness?}
+  RT -->|YES| OFT[DT + Online Feature Tables]
+  RT -->|NO| DBT{Existing dbt or Airflow?}
+  DBT -->|YES| EO[External orchestration or migrate hot paths to DT]
+  DBT -->|NO| IM[Internal Management DT]

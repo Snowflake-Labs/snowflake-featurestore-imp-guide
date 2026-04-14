@@ -1,0 +1,5 @@
+flowchart TB
+  PY[Snowpark Python DataFrame lazy ops] --> PLAN[SQL query plan]
+  PLAN --> REG[Feature View registration]
+  REG --> CDT[CREATE DYNAMIC TABLE from generated SQL]
+  CDT --> RUN[Refresh cycles execute SQL only]
