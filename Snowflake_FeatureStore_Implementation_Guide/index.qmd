@@ -107,3 +107,7 @@ Found an issue or want to suggest an improvement?
 | 1.0 | May 22, 2025 | Initial PDF release with single notebook |
 
 *Last updated: April 2026*
+
+---
+
+© 2026 Snowflake Inc. All Rights Reserved.

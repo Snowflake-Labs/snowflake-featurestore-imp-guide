@@ -21,6 +21,8 @@ After completing this chapter, you will be able to:
 - Apply sampling strategies (SQL push-down, spine sampling, indicator columns, stratified) to manage large Feature Store datasets
 - Log a fitted estimator or full sklearn pipeline with `Registry.log_model()` so training and serving stay aligned
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/09_preprocessing/_code)
+
 ---
 
 ## Transformation Taxonomy

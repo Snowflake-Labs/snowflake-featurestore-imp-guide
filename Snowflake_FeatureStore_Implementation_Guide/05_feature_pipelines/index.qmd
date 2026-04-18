@@ -26,6 +26,8 @@ After completing this chapter, you will be able to:
 - Use the Temporal Aggregation API and rollup Feature Views (summary; full reference in [Chapter 7](../07_aggregations_api/index.qmd))
 - Configure refresh strategies for optimal freshness vs. cost
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/05_feature_pipelines/_code)
+
 ```{python}
 #| output: false
 #| echo: false
@@ -121,6 +123,12 @@ user_purchase_df = orders.group_by("USER_ID").agg(
 ```
 
 Both approaches produce a lazy Snowpark DataFrame -- no data moves until the Feature View is registered and the Dynamic Table is materialized.
+
+::: {.callout-tip}
+## Reading generated SQL
+
+The DataFrame API emits SQL that is sometimes dense or deeply nested. For review, debugging, or side-by-side comparison with hand-written SQL, use a dialect-aware formatter (for example **SQLGlot** with `pretty=True`, optionally hoisting derived tables to CTEs). Trade-offs, alternatives (SQLFluff, sqlfmt, IDE tools), and an R **dbplyr** note are covered in [Appendix C: Formatting machine-generated SQL](../appendices/C_snowpark_to_dynamic_table/index.md#sec-sql-formatting).
+:::
 
 ```python
 # Create Dynamic Table-backed Feature View
@@ -311,6 +319,10 @@ A DT set to `DOWNSTREAM` with **no** downstream consumers will never refresh. Al
 When the downstream Feature View is View-based (`refresh_freq=None`), it reads from the upstream DTs at **query time**. The View always reflects the latest state of the upstream DTs. This avoids latency stacking but means the combined query runs on the consumer's warehouse at read time.
 
 Beyond avoiding latency stacking, DT-to-View chaining enables **transformations that are not compatible with incremental DT refresh**. Some SQL operations prevent a DT from using incremental mode (e.g., non-deterministic functions, certain window functions, or self-referential patterns). By placing these in a View layer on top of incrementally-refreshed base DTs, you get the best of both worlds: efficient incremental refresh for the heavy data processing, with flexible transforms applied at read time.
+
+::: {.callout-tip title="DT-to-DT alternative with primary key derivation (April 2026)"}
+If the upstream full-refresh DT produces a **system-derived unique key** -- for example, its query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1` -- a downstream DT can now opt into `REFRESH_MODE = INCREMENTAL` and process only the actual row-level changes between upstream full refreshes, rather than falling back to a View layer. This is a SQL-level capability (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); the Feature Store Python API does not yet expose it, so apply the same plain-DT or post-registration `ALTER` pattern described elsewhere in this chapter. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+:::
 
 This also allows the inclusion of **context or timestamp functions** (`CURRENT_TIMESTAMP()`, `DATEDIFF(... , CURRENT_DATE())`, etc.) in feature derivations. These are non-deterministic and would force a DT into full-refresh mode, but in a View they evaluate fresh on every query -- useful for real-time serving features like "days since last order" or "time since account creation."
 
@@ -724,6 +736,47 @@ A common trigger is **aggregating `FLOAT`-typed columns (SUM, AVG, MIN, MAX, VAR
 
 ::: {.callout-tip title="Fix FLOAT at the source"}
 Rather than casting in every Feature View query, consider altering the source column type to `NUMBER`/`DECIMAL`. This is a one-time change that benefits all downstream DTs and eliminates the risk of forgetting a cast in a new Feature View. The ML precision impact is negligible -- see [Chapter 7: Aggregations API](../07_aggregations_api/index.qmd) for details.
+:::
+
+::: {.callout-tip title="Primary key-based incremental refresh (April 2026)"}
+## Rescuing incremental processing with Dynamic Table primary keys
+
+Even when a DT is stuck in full-refresh mode, **downstream** DTs can now process incrementally if the full-refresh DT has a **system-derived unique key**. This applies to two common Feature Store scenarios:
+
+**Scenario 1 — INSERT OVERWRITE / CTAS source tables.** Many production pipelines fully replace a base table on each load cycle (e.g., `INSERT OVERWRITE`, `CREATE TABLE ... AS SELECT`, or `save_as_table(..., mode="overwrite")`). Historically this broke change tracking and forced every downstream DT into full refresh. You can now declare a `RELY` primary key on the base table so Snowflake uses it for row-level change tracking across rewrites:
+
+```sql
+-- One-time: add a RELY primary key to the source table
+ALTER TABLE MY_SOURCE_TABLE ADD PRIMARY KEY (ENTITY_ID) RELY;
+
+-- Or if the constraint already exists:
+ALTER TABLE MY_SOURCE_TABLE ALTER CONSTRAINT my_pk RELY;
+```
+
+Downstream DTs reading from this table can now refresh incrementally — Snowflake compares primary key values between the old and new versions of the table rather than relying on internal change-tracking columns.
+
+**Scenario 2 — Full-refresh DTs with derived unique keys.** When a DT's query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`, Snowflake automatically derives a unique key from the query structure. A downstream DT can then opt into incremental refresh:
+
+```sql
+-- Downstream DT explicitly opts into incremental refresh
+ALTER DYNAMIC TABLE FEATURE_STORE."MY_DOWNSTREAM_FV$V01"
+  SET REFRESH_MODE = INCREMENTAL;
+```
+
+This is particularly valuable for the **Base + Presentation** pattern ([Chapter 4](../04_feature_views/index.qmd#sec-base-presentation)): if the base DT performs a `GROUP BY` aggregation that forces full refresh (e.g., the FLOAT+JOIN case above), any downstream DT reading from it can still be incremental thanks to the derived key.
+
+**Verification:**
+
+```sql
+-- Check whether the upstream DT has a derived unique key
+SHOW UNIQUE KEYS IN FEATURE_STORE."MY_BASE_FV$V01";
+```
+
+**Important caveats:**
+
+- `REFRESH_MODE = AUTO` does **not** resolve to incremental in this scenario -- you must set `INCREMENTAL` explicitly.
+- This is a **SQL-level capability**; the Feature Store Python API does not yet expose `RELY` primary keys or per-DT refresh mode overrides. Use `ALTER DYNAMIC TABLE` after API registration, or create the upstream stage as a plain DT outside the Feature Store (the same pattern recommended in [Section 3](../appendices/C_snowpark_to_dynamic_table/index.md) and the [DT-to-DT Chaining](#sec-chaining) section above for cases where the API lags behind SQL features).
+- See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys) for the full list of supported patterns.
 :::
 
 ### ❌ Pitfall 3: Partial Leading-Edge Interval in Streaming/Continuous Sources {#sec-partial-interval}

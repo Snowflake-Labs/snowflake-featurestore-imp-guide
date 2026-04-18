@@ -20,6 +20,8 @@ After completing this chapter, you will be able to:
 - Discover and search existing features to avoid duplication
 - Troubleshoot common issues
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/11_operations/_code)
+
 ```{python}
 #| output: false
 #| echo: false

@@ -4,6 +4,8 @@ subtitle: "Setup, prerequisites, and guide overview"
 
 # Introduction {.unnumbered}
 
+*Author: [Simon Field](https://www.linkedin.com/in/fieldy6961/)*
+
 ## Overview
 
 This guide provides comprehensive best practices for implementing Snowflake Feature Store in production ML systems. It covers the full lifecycle from initial design through deployment and ongoing operations.
@@ -15,6 +17,8 @@ The Snowflake Feature Store is a managed data management layer that helps ML tea
 - **Point-in-Time Feature Retrieval**: Temporally correct feature joins for ML training and batch inference, preventing data leakage
 - **Online Serving**: Low-latency feature retrieval via Online Feature Tables for real-time inference
 - **Governance & Lineage**: Full tracking from source data to model predictions
+
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/00_introduction/_code)
 
 ## What's Covered in This Guide
 
@@ -253,6 +257,8 @@ The clickstream dataset includes these core tables:
 
 The base tables above are designed to be **append-only** -- rows are inserted once and not updated. This pattern is common for source tables dealing with high scale ingestion rates, such as clickstream data. Append-only sources can also be more efficient for Dynamic Table incremental refresh, because the DT engine only needs to scan newly added micro-partitions rather than diffing existing ones for in-place row updates. However, Dynamic Tables work with any source table regardless of whether it is append-only or not.
 
+As of April 2026, source tables that are periodically **fully replaced** (e.g., via `INSERT OVERWRITE` or `CREATE TABLE ... AS SELECT`) can also support incremental downstream processing by declaring a primary key with the `RELY` property (`ALTER TABLE ... ADD PRIMARY KEY (...) RELY`). Snowflake uses the reliable PK to compare rows by key value across rewrites, computing only actual changes for downstream DTs. This is a SQL-level capability not yet exposed through the Feature Store Python API. See [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys) for details.
+
 Note that the Dynamic Tables *themselves* will insert and update rows as new source data arrives -- this is expected. For example, when a new event is appended to `EVENTS`, the DT computing `MAX(EVENT_TS)` per session updates that session's aggregated row. The DT engine handles this transparently during incremental refresh.
 
 Closing or derived timestamps (e.g., session end time, last-seen time, supplier relationship end date) are computed in downstream Feature Views rather than maintained as updated columns on the base table. For example, `SESSION_END_TS` is derived from the last event in a session:
@@ -306,7 +312,7 @@ All code examples follow these conventions:
 - **SQL**: UPPERCASE keywords, lowercase identifiers
 - **Python**: PEP 8 style, type hints where helpful
 - **Naming**: `SCREAMING_SNAKE_CASE` for Snowflake objects, `snake_case` for Python
-- **DataFrames via `session.sql()`**: Feature View definitions, spines, and other DataFrames are primarily constructed using `session.sql("SELECT ...")` rather than the Snowpark DataFrame API. Both approaches produce identical lazy Snowpark DataFrames, but `session.sql()` is used throughout because SQL is more widely known and easier to read for the transformations involved. Where the Snowpark DataFrame API offers a notable advantage (e.g., programmatic column building), both forms are shown side by side.
+- **DataFrames via `session.sql()`**: Feature View definitions, spines, and other DataFrames are primarily constructed using `session.sql("SELECT ...")` rather than the Snowpark DataFrame API. Both approaches produce identical lazy Snowpark DataFrames, but `session.sql()` is used throughout because SQL is more widely known and easier to read for the transformations involved. Where the Snowpark DataFrame API offers a notable advantage (e.g., programmatic column building), both forms are shown side by side. When you do rely on generated SQL (Snowpark, **dbplyr**, or similar), third-party pretty-printers and optional CTE hoists can make plans easier to read in Snowsight or `QUERY_HISTORY`; see [Appendix C](../appendices/C_snowpark_to_dynamic_table/index.md#sec-sql-formatting).
 
 ::: {.callout-important}
 ## Adapting Code for Your Environment

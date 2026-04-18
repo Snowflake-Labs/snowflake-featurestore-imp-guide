@@ -21,6 +21,8 @@ After completing this chapter, you will be able to:
 - Manage Feature View lifecycle: create, register new versions, validate lineage, deprecate, and remove
 - Configure refresh strategies for freshness vs. cost, understanding that the DT scheduler incurs no compute when source data is unchanged
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/04_feature_views/_code)
+
 ```{python}
 #| output: false
 #| echo: false
@@ -62,6 +64,28 @@ session_entity = Entity(name="SESSION", join_keys=["SESSION_ID"])
 ::: {.callout-note}
 ## CRON vs period strings
 Snowflake distinguishes a **schedule string** (CRON) from a **time period** (lag). If the value parses as CRON, the platform uses the Dynamic Table + Task pattern described above—not continuous TARGET_LAG refresh.
+:::
+
+::: {.callout-tip title="Iceberg-backed Feature Views (SDK 1.26+)"}
+Any DT-backed Feature View (time period or CRON) can optionally materialize as a **Dynamic Iceberg Table** by passing a `StorageConfig`:
+
+```python
+from snowflake.ml.feature_store import StorageConfig, StorageFormat
+
+storage = StorageConfig(
+    format=StorageFormat.ICEBERG,
+    external_volume='MY_EXTERNAL_VOLUME',
+    base_location='feature_store/my_fv'
+)
+fv = FeatureView(
+    name="MY_FV", entities=[e], feature_df=df,
+    refresh_freq="1 hour",
+    storage_config=storage,
+    ...
+)
+```
+
+This writes feature data as Parquet files in Iceberg format on external cloud storage, making it directly readable by any Iceberg-compatible ML framework (Ray, Spark, PyTorch) without requiring a Snowflake connector. All standard Feature Store APIs work unchanged. See [Chapter 10: Iceberg-Backed Feature Views](../10_training_inference/index.qmd#sec-iceberg-fv) for full details.
 :::
 
 ### View-based Feature View (`refresh_freq = None`)
@@ -253,6 +277,8 @@ feature_df = (
 ```
 
 If the join is unavoidable, consider splitting the query into a base DT (aggregation only, no join) and a presentation View that joins the results -- see the [Base + Presentation Layer Model](#sec-base-presentation) later in this chapter.
+
+As of April 2026, the presentation layer does not have to be a View -- it can be a **downstream DT** that refreshes incrementally. When the base DT's query uses `GROUP BY`, Snowflake derives a unique key from the grouping columns. A downstream DT can then opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`) and process only the rows that actually changed in the upstream full refresh. This is a SQL-level capability not yet exposed in the Feature Store Python API. See [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
 :::
 
 ### Dynamic Table + Task (CRON)

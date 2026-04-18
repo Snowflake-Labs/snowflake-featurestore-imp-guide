@@ -17,6 +17,8 @@ After completing this chapter, you will be able to:
 - Apply the correct transformation taxonomy (MIT/MDT/ODT) to your use cases
 - Map Snowflake terminology to industry-standard terms
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/01_concepts/_code)
+
 ```{python}
 #| output: false
 #| echo: false

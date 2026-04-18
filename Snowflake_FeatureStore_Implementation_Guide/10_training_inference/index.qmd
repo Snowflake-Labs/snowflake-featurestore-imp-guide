@@ -20,6 +20,8 @@ After completing this chapter, you will be able to:
 - Integrate with Snowflake Model Registry using open-source or Snowflake ML estimators
 - Implement batch inference workflows, including Dynamic Table (DT)-based continuous scoring
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/10_training_inference/_code)
+
 ---
 
 ## Spine Design
@@ -300,6 +302,22 @@ This pattern works well when the model reads directly from a single Feature View
 
 The Model Registry's `!PREDICT` SQL function is automatically registered as **IMMUTABLE**, which makes it eligible for DT incremental refresh. If you create your own scoring UDF/UDTF outside of Model Registry, you must declare it immutable for the same reason -- see [UDF immutability for incremental refresh](#sec-udf-immutability) below.
 
+::: {.callout-tip title="Model version rotation works seamlessly with incremental DTs (tested April 2026)"}
+When you promote a new model version via `ALTER MODEL ... SET DEFAULT_VERSION = v_new`, the DT engine **automatically detects** the change and triggers a **REINITIALIZE** (one-time full refresh) -- all rows are re-scored with the new model. After the reinitialize, **incremental mode resumes**: subsequent source data changes are processed incrementally with the new version. The DT is not broken and no `CREATE OR REPLACE` is needed.
+
+This means the full pipeline -- retrain model, register new version, promote to default, incremental scoring resumes -- works end-to-end without manual intervention.
+
+DTs pinned to a specific version (`WITH mv AS MODEL my_model VERSION V1 SELECT mv!PREDICT(...)`) are unaffected by default-version changes.
+
+**Cost implication:** Each version rotation triggers a full re-score of the entire scoring table. For very large tables, factor this into your retraining cadence -- the one-time reinitialize cost is the price of correctness (no mixed-version predictions).
+
+**This behavior is specific to Model Registry's `MODEL()!PREDICT()`.** Standard `IMMUTABLE` UDFs do *not* get this treatment -- a `CREATE OR REPLACE FUNCTION` breaks the DT rather than triggering a graceful reinitialize. See [UDF immutability](#sec-udf-immutability) below.
+:::
+
+::: {.callout-tip title="Incremental scoring downstream of full-refresh Feature Views (April 2026)"}
+If the upstream Feature View (`USER_PURCHASE_STATS$V01` above) uses **full refresh** -- for example, because its query contains a FLOAT+JOIN pattern or other unsupported incremental construct -- the scoring DT can still refresh incrementally. When the upstream DT has a **system-derived unique key** (from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`), the scoring DT only re-scores entities whose feature values actually changed, rather than re-scoring the entire population on every cycle. Opt in with `ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL` (this is a SQL-level capability; the Feature Store Python API does not yet support it). Verify with `SHOW UNIQUE KEYS IN <upstream_fv_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+:::
+
 ::: {.callout-warning}
 ## ASOF join limitation
 
@@ -366,7 +384,15 @@ session.udf.register(
 )
 ```
 
-Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volatility in SQL. The DT can then treat it as eligible for incremental refresh. See the [Dynamic Table supported queries](https://docs.snowflake.com/en/user-guide/dynamic-tables-tasks-create#supported-queries) documentation for the full list of incremental refresh requirements.
+Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volatility in SQL. The DT can then treat it as eligible for incremental refresh. See the [Dynamic Table supported queries](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries) documentation for the full list of incremental refresh requirements.
+
+::: {.callout-warning title="Standard UDF replacement breaks incremental DTs"}
+**Unlike Model Registry** (which handles version rotation gracefully via REINITIALIZE -- see above), replacing a standard `IMMUTABLE` UDF with `CREATE OR REPLACE FUNCTION` while it is referenced by an incremental DT **breaks the DT**. The DT must be fully recreated (`CREATE OR REPLACE DYNAMIC TABLE`).
+
+This is an important design consideration: if your UDF logic is expected to change over time (updated model weights, bug fixes, new feature engineering rules), prefer **Model Registry** for inference UDFs. MR's `MODEL(name)!PREDICT()` handles version rotation seamlessly -- the DT detects the default-version change, triggers a one-time full re-score, then resumes incremental mode.
+
+For UDFs that must remain outside Model Registry, plan for the DT recreation cost when the function changes. In CI/CD pipelines, this typically means including `CREATE OR REPLACE DYNAMIC TABLE` in the deployment script alongside `CREATE OR REPLACE FUNCTION`.
+:::
 
 ---
 
@@ -480,11 +506,92 @@ For training datasets that feed distributed ML frameworks (Ray, Spark, PyTorch),
 **Options for Parquet output:**
 
 1. **`generate_dataset` with `output_type="parquet"`** -- writes directly to a Snowflake stage; files are readable by Ray's `read_parquet()`.
-2. **Snowflake-managed Iceberg tables** -- queryable via both Snowflake SQL and external Parquet readers. Useful when the same training data is consumed by both Snowflake-based and external ML pipelines.
-3. **`COPY INTO` from a materialized table** -- if you need fine-grained control over Parquet file layout (row group size, compression).
+2. **Iceberg-backed Feature Views** (SDK 1.26+) -- Feature Views backed by Dynamic Iceberg Tables that expose data as standard Parquet/Iceberg on external cloud storage. ML frameworks read Iceberg natively; no Snowflake connector needed. See [Iceberg-backed Feature Views](#sec-iceberg-fv) below.
+3. **Snowflake-managed Iceberg tables** -- queryable via both Snowflake SQL and external Parquet readers. Useful when the same training data is consumed by both Snowflake-based and external ML pipelines.
+4. **`COPY INTO` from a materialized table** -- if you need fine-grained control over Parquet file layout (row group size, compression).
 
 ::: {.callout-tip title="Skip to_pandas() for large datasets"}
 For datasets exceeding ~100M rows or ~500 features, writing to Parquet and reading directly from your ML framework is both faster and more memory-efficient than `to_pandas()`. This is especially true when using the VARIANT approach, where `to_pandas()` returns JSON strings requiring single-threaded `json.loads()` deserialization.
+:::
+
+---
+
+## Iceberg-Backed Feature Views {#sec-iceberg-fv}
+
+Starting with `snowflake-ml-python` v1.26.0 (February 2026), Feature Views can be backed by **Dynamic Iceberg Tables** -- Dynamic Tables that materialize their output as Parquet files in Iceberg format on external cloud storage (S3, Azure Blob, GCS). This gives ML frameworks direct, native access to feature data without requiring a Snowflake connector or intermediate export step.
+
+### Creating an Iceberg-Backed Feature View
+
+Use `StorageConfig` to specify Iceberg storage when creating a Feature View:
+
+```python
+from snowflake.ml.feature_store import FeatureView, StorageConfig, StorageFormat
+
+storage = StorageConfig(
+    format=StorageFormat.ICEBERG,
+    external_volume='MY_EXTERNAL_VOLUME',
+    base_location='feature_store/user_purchase_stats'
+)
+
+iceberg_fv = FeatureView(
+    name="USER_PURCHASE_STATS_ICE",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+    storage_config=storage,
+    desc="User purchase statistics materialized as Iceberg"
+)
+fs.register_feature_view(feature_view=iceberg_fv, version="V01")
+```
+
+::: {.callout-note title="Prerequisites"}
+- An [external volume](https://docs.snowflake.com/en/sql-reference/sql/create-external-volume) must be configured for your cloud storage location.
+- `refresh_freq` is required -- Iceberg storage only applies to managed (DT-backed) Feature Views, not static Views.
+- The `FeatureStore` constructor accepts `default_iceberg_external_volume` to avoid repeating the volume name in every `StorageConfig`.
+:::
+
+All standard Feature Store APIs (`generate_dataset`, `generate_training_set`, `list_feature_views`, etc.) work with Iceberg-backed Feature Views. The feature data is simultaneously queryable via Snowflake SQL and via any Iceberg-compatible reader.
+
+### Training Directly from Iceberg Feature Views
+
+Because Iceberg-backed Feature Views expose standard Parquet files, ML frameworks can read them natively:
+
+```python
+import pyiceberg
+from pyiceberg.catalog import load_catalog
+
+catalog = load_catalog("snowflake", **catalog_config)
+table = catalog.load_table("feature_store_demo.feature_store.USER_PURCHASE_STATS_ICE$V01")
+df = table.scan().to_pandas()
+```
+
+This eliminates the need for `generate_dataset()` or `to_pandas()` when all you need is the feature data -- the Feature View *is* the training dataset in a standard open format.
+
+### Current Limitations
+
+| Limitation | Detail |
+|-----------|--------|
+| **Online Feature Tables** | Not supported with Iceberg storage (future work) |
+| **DT partitioning parameters** | `PARTITION_BY`, `TARGET_FILE_SIZE`, and `PATH_LAYOUT` (GA April 2026) are not yet exposed through `StorageConfig` -- use `ALTER DYNAMIC ICEBERG TABLE` after registration to set these |
+| **View-based Feature Views** | Iceberg storage requires `refresh_freq` (DT-backed); it does not apply to View-based FVs |
+
+::: {.callout-tip title="Iceberg FVs as an alternative to the Dataset API"}
+For many training workflows, an Iceberg-backed Feature View provides the same benefits as `generate_dataset()` -- versioned Parquet files accessible to distributed ML frameworks -- but in a standard open format that any Iceberg-compatible tool can read. The Feature View is also incrementally maintained by the DT scheduler, so training data stays fresh without manual regeneration.
+
+If your pipeline reads from a single Feature View (or a small number of them) and does not require spine-based ASOF joins, an Iceberg-backed Feature View may be simpler than the `generate_dataset()` → Parquet → framework path.
+:::
+
+::: {.callout-note title="Future: Fully automated incremental training with ASOF-in-DT"}
+When ASOF join support lands in Dynamic Tables (stretch goal), the combination with Iceberg-backed Feature Views will enable a fully automated incremental training pipeline:
+
+1. A DT with ASOF join pre-materializes **point-in-time correct training data** as an Iceberg table
+2. ML frameworks read the Iceberg table directly for training
+3. As new data arrives, the DT incrementally updates the training set
+4. A downstream scoring DT (using Model Registry's `MODEL()!PREDICT()`) incrementally scores new entities
+5. The entire retrain → evaluate → promote → score pipeline operates continuously with no manual orchestration
+
+This is one of the most compelling future-state patterns for Feature Store. See [Chapter 12: Advanced Patterns](../12_advanced_patterns/index.qmd) for discussion of Iceberg table integration patterns.
 :::
 
 ---
@@ -591,6 +698,7 @@ assert training_df.count() > 1000
 | `.with_name()` | Custom column prefixing |
 | `.slice([...])` | Restrict features from a registered Feature View |
 | **DT-based inference** | Single-FV models can use a Dynamic Table with Model Registry SQL functions for continuous batch scoring |
+| **Iceberg-backed FVs** | `StorageConfig(format=StorageFormat.ICEBERG)` materializes feature data as Parquet/Iceberg for native ML framework access (SDK 1.26+) |
 
 ---
 

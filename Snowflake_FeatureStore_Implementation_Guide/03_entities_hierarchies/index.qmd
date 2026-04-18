@@ -16,6 +16,8 @@ After completing this chapter, you will be able to:
 - Model entity hierarchies for multi-level aggregations
 - Make informed decisions using the entity design framework
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/03_entities_hierarchies/_code)
+
 ```{python}
 #| output: false
 #| echo: false

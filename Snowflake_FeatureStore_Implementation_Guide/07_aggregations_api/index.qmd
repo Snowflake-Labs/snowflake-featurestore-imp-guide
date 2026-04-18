@@ -25,6 +25,8 @@ After completing this chapter, you will be able to:
 - Name aggregated features following best practices
 - Generate features programmatically using data-driven patterns (categorical pivots, cross-product factories, config-driven specs)
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/07_aggregations_api/_code)
+
 ```{python}
 #| output: false
 #| echo: false

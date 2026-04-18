@@ -9,7 +9,7 @@ A common question when evaluating Snowflake Feature Store is: *"How does Python 
 
 Examples that need a database and schema use the same **canonical names** as the rest of this guide: database `FEATURE_STORE_DEMO`, Feature Store schema `FEATURE_STORE`, source schema `CLICKSTREAM_DATA`, warehouse `FS_DEV_WH`, and Feature View versions in **`V01`** format (dynamic table suffix `$V01`).
 
-## 1. The Translation Path
+## The Translation Path
 
 When you define feature transformations in Python using Snowpark DataFrames, **no Python code ships to the Dynamic Table**. The pipeline works as follows:
 
@@ -101,13 +101,17 @@ This is often preferable when teams already have well-tested SQL transformations
 
 > **Key takeaway:** Python is a development-time convenience. At runtime, the Dynamic Table refreshes by re-executing the generated SQL with no Python involvement. Whether you author with Snowpark DataFrames or raw SQL via `session.sql()`, the end result is the same.
 
+::: {.callout-tip title="Dynamic Iceberg Tables (SDK 1.26+)"}
+When a Feature View includes a `StorageConfig` with `StorageFormat.ICEBERG`, the registration creates a **Dynamic Iceberg Table** instead of a standard Dynamic Table. The translation path above is identical -- the only difference is that the materialized output is written as Parquet files in Iceberg format on external cloud storage rather than in Snowflake's internal format. All optimization strategies and limitations described in this appendix apply equally to Dynamic Iceberg Tables. See [Chapter 10: Iceberg-Backed Feature Views](../../10_training_inference/index.qmd#sec-iceberg-fv) for details.
+:::
+
 ---
 
-## 2. Limitations: What Can and Cannot Be Expressed
+## Limitations: What Can and Cannot Be Expressed
 
 Because the Dynamic Table is ultimately a SQL object, the constraints come from what Dynamic Tables support in their query definition.
 
-### 2.1 Incremental vs Full Refresh
+### Incremental vs Full Refresh
 
 Dynamic Tables support three refresh modes:
 
@@ -147,9 +151,13 @@ Several SQL constructs **fall back to full refresh** or are unsupported entirely
 | `WITH RECURSIVE` | Not supported | Supported | |
 | `VOLATILE` UDFs | Not supported | Supported | |
 
+::: {.callout-tip title="Primary key-based incremental refresh (April 2026)"}
+The matrix above describes what happens **within a single DT**. As of April 2026, **downstream** DTs can refresh incrementally even when reading from an upstream DT that uses full refresh, provided the upstream DT has a **system-derived unique key**. Snowflake automatically derives unique keys from `GROUP BY` columns and `QUALIFY ROW_NUMBER() = 1` filters. Additionally, base tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a primary key with `RELY` (`ALTER TABLE ... ADD PRIMARY KEY (...) RELY`). The downstream DT must explicitly set `REFRESH_MODE = INCREMENTAL` (AUTO does not resolve to incremental in this case). Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. These are SQL-level capabilities not yet exposed through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+:::
+
 > **Reference:** [Supported queries for dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries)
 
-### 2.2 Python UDFs and UDTFs in Dynamic Tables
+### Python UDFs and UDTFs in Dynamic Tables
 
 UDFs and UDTFs provide a way to embed custom logic -- including Python with third-party libraries -- inside a Dynamic Table's SQL definition. They are **row-level transformations**: they operate on input columns from a single row and produce output for that row. They do not aggregate across rows or join between tables.
 
@@ -174,7 +182,7 @@ According to the Snowflake documentation, both UDFs and UDTFs **are supported fo
 **UDF caveats:**
 
 - The UDF must be declared **`IMMUTABLE`** (not `VOLATILE`). `VOLATILE` UDFs are not supported for incremental refresh.
-- **Replacing** an `IMMUTABLE` UDF while it is in use by an incremental-refresh DT will cause refresh failures. The DT must be recreated after replacing the UDF.
+- **Replacing** an `IMMUTABLE` UDF via `CREATE OR REPLACE FUNCTION` while it is in use by an incremental-refresh DT will cause refresh failures. The DT must be recreated after replacing the UDF. **This does not apply to Model Registry** -- `MODEL(name)!PREDICT()` handles version rotation gracefully (the DT triggers a `REINITIALIZE` and resumes incremental mode). See [Chapter 10: UDF Immutability](../../10_training_inference/index.qmd#sec-udf-immutability) for the full comparison.
 - UDFs that **import from an external stage** are not supported.
 - SQL UDFs that **contain subqueries** are not supported for incremental refresh.
 - **Vectorized UDFs** (processing Pandas DataFrames in batches) perform significantly better than scalar UDFs for large datasets.
@@ -204,11 +212,18 @@ feature_df = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS").select(
 )
 ```
 
-> **Bottom line:** Existing Python logic can run via `IMMUTABLE` UDFs within a Dynamic Table and still benefit from incremental refresh. Prefer vectorized UDFs for performance, and avoid replacing a UDF definition while a DT depends on it.
+> **Bottom line:** Existing Python logic can run via `IMMUTABLE` UDFs within a Dynamic Table and still benefit from incremental refresh. Prefer vectorized UDFs for performance. For model inference, prefer **Model Registry** (`MODEL(name)!PREDICT()`) over custom UDFs -- MR handles version rotation gracefully (REINITIALIZE + incremental resume) whereas replacing a standard UDF breaks the DT. If you must use custom UDFs, plan for DT recreation when the function changes.
 
-### 2.2.1 Common Pattern: UDF for Incremental Batch Inference
+### Common Pattern: Incremental Batch Inference in a DT
 
-A particularly effective use of UDFs in Dynamic Tables is placing a model-scoring UDF at the **end** of a Feature View pipeline. Upstream DTs prepare and aggregate the features incrementally; a final DT calls a vectorized UDF that runs batch inference over those features. Because the UDF is `IMMUTABLE` and the DT supports incremental refresh, only the rows whose upstream features changed are scored -- giving you **incremental batch inference** without any external orchestration.
+For model inference in a DT, there are two approaches. **Model Registry is strongly preferred** for models that will be retrained and versioned over time:
+
+| Approach | Version rotation | DT impact | Best for |
+|----------|-----------------|-----------|----------|
+| **Model Registry** `MODEL(name)!PREDICT(...)` | `ALTER MODEL SET DEFAULT_VERSION` | REINITIALIZE (one-time full refresh), then incremental resumes | Production models with regular retraining |
+| **Custom IMMUTABLE UDF** | `CREATE OR REPLACE FUNCTION` | **Breaks the DT** — must `CREATE OR REPLACE DYNAMIC TABLE` | Static logic that rarely changes, or non-ML transformations |
+
+Upstream DTs prepare and aggregate the features incrementally; a final DT calls the model for inference. Because the function is `IMMUTABLE` and the DT supports incremental refresh, only the rows whose upstream features changed are scored -- giving you **incremental batch inference** without any external orchestration.
 
 ```python
 # Upstream Feature View: features are incrementally maintained
@@ -243,18 +258,18 @@ churn_score_fv = FeatureView(
 
 This pattern is well-suited to use cases like propensity scoring, risk rating, or recommendation ranking where predictions need to stay fresh as features update, but a full re-score of the entire population each cycle would be wasteful.
 
-### 2.3 Constructs That Prevent Incremental Refresh Entirely
+### Constructs That Prevent Incremental Refresh Entirely
 
 The following patterns force every refresh to be a full recomputation:
 
 - **Non-deterministic functions in SELECT** (e.g., `RANDOM()`, `CURRENT_TIMESTAMP()` outside WHERE/HAVING/QUALIFY)
 - **Self-referential queries** (a DT reading its own previous state)
 - **`VOLATILE` UDFs** -- even if the logic is deterministic, the `VOLATILE` marker tells the optimizer it cannot be trusted
-- **Downstream incremental DTs cannot sit below upstream full-refresh DTs** -- an incremental DT is incompatible with the complete row changes that occur during each refresh of an upstream full-refresh table
+- **Downstream incremental DTs below upstream full-refresh DTs** -- historically, an incremental DT could not sit below a full-refresh DT. As of April 2026, this limitation is relaxed when the upstream full-refresh DT has a **system-derived unique key** (e.g., from `GROUP BY` columns or `QUALIFY ROW_NUMBER() = 1`). In that case, the downstream DT can use `REFRESH_MODE = INCREMENTAL` explicitly and Snowflake will compute only the actual row-level changes between upstream full refreshes. `AUTO` mode does **not** resolve to incremental in this scenario -- you must opt in. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys) for details. **Note:** This is a SQL-level capability; the Feature Store Python API does not yet expose it. Use the same `ALTER DYNAMIC TABLE` / plain-DT pattern described in [View-Based Feature Views](#view-based-feature-views-the-on-demand-alternative) when the API lags behind SQL features.
 
 ---
 
-## 3. View-Based Feature Views: The On-Demand Alternative
+## View-Based Feature Views: The On-Demand Alternative
 
 Not every Feature View needs a Dynamic Table. When you omit `refresh_freq`, the Feature Store creates a **view** instead. The transformation SQL is stored as a view definition and executed on-the-fly each time data is retrieved.
 
@@ -304,11 +319,11 @@ This gives you the full Feature Store benefits -- point-in-time-correct dataset 
 
 ---
 
-## 4. Optimization Strategies
+## Optimization Strategies
 
-### 4.1 Break Complex Pipelines into Chained Dynamic Tables
+### Break Complex Pipelines into Chained Dynamic Tables
 
-Long, complex Snowpark pipelines translate to long, complex SQL, which can degrade incremental refresh performance. The recommended pattern is to **decompose** into multiple Feature Views (each backed by its own Dynamic Table) chained together:
+Long, complex Snowpark pipelines translate to long, complex SQL, which can degrade incremental refresh performance. The recommended pattern is to **decompose** into multiple Feature Views (each backed by its own Dynamic Table) chained together. When you still have a large generated statement to inspect (for example in `QUERY_HISTORY` or a colleague's review), pretty-printing and light structural rewrites can make it readable; see [Formatting machine-generated SQL](#sec-sql-formatting).
 
 ```python
 # Stage 1: Cleaning and parsing
@@ -347,9 +362,9 @@ Benefits:
 - **Better incremental refresh** -- simpler SQL per DT means the optimizer can reason about changes more effectively.
 - **Independent monitoring** -- each stage has its own refresh history and health metrics.
 - **Mixed refresh strategies** -- fast refresh for one stage, slower for another.
-- **Full-refresh propagation awareness** -- any DT using full refresh forces all downstream DTs to also use full refresh (see Section 2.3). Design your chain so that stages using full-refresh constructs sit at the *end* of the pipeline, not the beginning. If this is unavoidable, consider whether the full-refresh stages should instead be handled by an external pipeline and wrapped as a view-based Feature View (see Section 3).
+- **Full-refresh propagation awareness** -- historically, any DT using full refresh forced all downstream DTs to also use full refresh. As of April 2026, this constraint is relaxed: if the full-refresh DT has a **system-derived unique key** (from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`), downstream DTs can opt into `REFRESH_MODE = INCREMENTAL` and process only actual row changes (see [Constructs That Prevent Incremental Refresh](#constructs-that-prevent-incremental-refresh-entirely) above). When this is not possible, design your chain so that stages using full-refresh constructs sit at the *end* of the pipeline, not the beginning. If neither option works, consider whether the full-refresh stages should instead be handled by an external pipeline and wrapped as a view-based Feature View (see [View-Based Feature Views](#view-based-feature-views-the-on-demand-alternative) below).
 
-### 4.2 Optimize for Incremental Refresh
+### Optimize for Incremental Refresh
 
 The Snowflake documentation provides specific guidance on operator-level optimization:
 
@@ -461,7 +476,7 @@ window_all = Window.order_by(F.col("AMOUNT").desc())
 ranked_df = sales_df.with_column("GLOBAL_RANK", F.rank().over(window_all))
 ```
 
-### 4.3 Reduce Refresh Cost with Immutability Constraints
+### Reduce Refresh Cost with Immutability Constraints
 
 Dynamic Tables with large historical datasets can incur significant compute costs during refresh -- especially when dimension table changes force recomputation of the entire result set, or when queries that cannot incrementalize well (e.g., multiple LEFT OUTER JOINs) fall back to full refresh.
 
@@ -504,7 +519,7 @@ SELECT *, METADATA$IS_IMMUTABLE FROM USER_EVENT_FEATURES LIMIT 10;
 
 > **Reference:** [Use immutability constraints](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) | [Introducing Immutability for Dynamic Tables (engineering blog)](https://www.snowflake.com/en/engineering-blog/dynamic-tables-immutability/)
 
-### 4.4 Choose an Appropriate Target Lag
+### Choose an Appropriate Target Lag
 
 Dynamic Tables do **not** blindly re-execute on every refresh cycle. The scheduler checks for upstream changes and only triggers warehouse compute when there is new data to process. This change-detection check is near-zero cost, so a short target lag on a source that updates infrequently does not waste significant compute -- the DT simply checks more often and finds nothing to do.
 
@@ -524,15 +539,62 @@ Choose your target lag based on how quickly downstream consumers need to see upd
 
 ---
 
-## 5. Summary
+## Formatting machine-generated SQL {#sec-sql-formatting}
+
+Snowpark, Spark SQL, **R** packages such as [dbplyr](https://dbplyr.tidyverse.org/) (`dbplyr::sql_render()`), and other dataframe-style APIs emit SQL that is **correct but often hard to read**: dense one-liners, deep nesting, or redundant derived tables. That friction shows up when you compare `DataFrame.queries` (Snowpark) or rendered SQL from other stacks against worksheets, documentation, or `EXPLAIN` output in Snowsight.
+
+Third-party **parsers and formatters** address readability. Treat them as **developer aids**, not as something Snowflake requires at runtime: the engine optimizes from its own parse tree, and reformatting does not improve warehouse performance. Also assume **round-trip risk**: any tool that parses and re-emits SQL can reject uncommon syntax, normalize identifiers, or reorder clauses. If you paste formatted SQL back into production objects, run it in a non-production worksheet first.
+
+### Tool landscape (summary)
+
+| Tool | Primary role | Snowflake fit | Strengths | Limitations |
+|------|----------------|---------------|-----------|-------------|
+| **[SQLGlot](https://github.com/tobymao/sqlglot)** | Parser, transpiler, optional rewrite rules | First-class `read="snowflake"` / `dialect` support | `pretty=True` indentation; dialect-aware transpile; [`eliminate_subqueries`](https://sqlglot.com/sqlglot/optimizer/eliminate_subqueries.html) hoists **derived tables in `FROM`** to `WITH` CTEs and deduplicates identical subqueries | Cutting-edge Snowflake keywords can lag the live product until the grammar catches up; correlated subqueries and `LATERAL` are not always rewritten |
+| **[SQLFluff](https://www.sqlfluff.com/)** | Linter + auto-fix + formatter | Snowflake ruleset | Strong for **team style** and CI on `.sql` / dbt projects; fixes many layout and some logic-smell issues | Heavier dependency and configuration; severely mangled generator output may need manual cleanup before lint passes |
+| **[sqlfmt](https://sqlfmt.com/)** | Opinionated formatter (dbt-first) | Polyglot / Snowflake-friendly **style** | Extremely fast; minimal configuration; works well on dbt models with Jinja | Enforces sqlfmt's style (e.g. lowercase keywords); not a semantic transpiler |
+| **[sqlparse](https://github.com/andialbrecht/sqlparse)** | Lexer-based split / reindent | Dialect-agnostic | Small library; good for quick indentation in Python | No real dialect model; can mis-parenthesize or break on Snowflake-specific constructs |
+| **pgFormatter**, **sql-formatter** (JS), **IDE formatters** | Pretty-print | Often PostgreSQL- or ANSI-leaning | Easy editor integration | Snowflake extensions (`QUALIFY`, staged file functions, etc.) may format oddly or fail to parse |
+
+For one-off inspection of Snowpark output, **SQLGlot** is usually the best balance of Snowflake awareness and programmatic control. For repository-wide SQL style enforcement, **SQLFluff** or **sqlfmt** are common complements to (not replacements for) code review.
+
+### Example: pretty-print and optional CTE hoisting (SQLGlot)
+
+[`eliminate_subqueries`](https://sqlglot.com/sqlglot/optimizer/eliminate_subqueries.html) lifts inline derived tables into a `WITH` clause (it does **not** rewrite every correlated predicate subquery). Combine it with `transpile(..., pretty=True)` for indentation.
+
+```python
+from sqlglot import parse_one, transpile
+from sqlglot.optimizer.eliminate_subqueries import eliminate_subqueries
+
+
+def format_sql(query: str, hoist_derived_tables_to_cte: bool = False) -> str:
+    """Pretty-print SQL; optionally hoist FROM subqueries to CTEs."""
+    expression = parse_one(query, read="snowflake")
+    if hoist_derived_tables_to_cte:
+        expression = eliminate_subqueries(expression)
+    return transpile(expression, read="snowflake", pretty=True)[0]
+```
+
+Usage with a Snowpark plan string (conceptually):
+
+```python
+raw_sql = feature_df.queries["queries"][0]  # illustrative; structure may vary by Snowpark version
+print(format_sql(raw_sql, hoist_derived_tables_to_cte=True))
+```
+
+In **R**, a typical pattern is `dbplyr::sql_render(lazy_query)` to obtain the text, then the same Python helper via `reticulate`, a saved `.sql` file processed in CI, or any standalone formatter above.
+
+---
+
+## Summary
 
 | Question | Answer |
 |----------|--------|
 | How does Python become a Dynamic Table? | Snowpark translates DataFrame operations to SQL at registration time. The DT is a pure SQL object -- no Python runs during refresh. |
-| Can we use existing Python code? | Yes, via `IMMUTABLE` UDFs called within the DT definition. Immutable UDFs are supported for incremental refresh. Prefer vectorized UDFs for performance, and avoid replacing a UDF while a DT depends on it. |
+| Can we use existing Python code? | Yes, via `IMMUTABLE` UDFs called within the DT definition. For model inference, prefer Model Registry (`MODEL(name)!PREDICT()`) -- it handles version rotation gracefully. Standard UDFs work for static logic but replacing one breaks the DT. |
 | What are the limitations? | Certain SQL constructs don't support incremental refresh (`PIVOT`, external functions, `VOLATILE` UDFs, set operators other than `UNION`/`UNION ALL`). See the [supported queries documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries) for the full matrix. |
 | What about view-based Feature Views? | Omit `refresh_freq` to create a view instead of a DT. The query runs on-the-fly at retrieval time with spine filter push-down. Ideal for prototyping, rarely accessed features, or wrapping externally managed tables (dbt, Airflow, etc.). |
 | How do we optimize? | Break long pipelines into chained DTs, cluster source data by grouping/join keys, use `QUALIFY` over `DISTINCT`, choose target lag based on consumer freshness needs, and use `IMMUTABLE WHERE` to skip recomputation of historical rows. |
+| How do I read ugly generated SQL? | Use a dialect-aware formatter (often SQLGlot for Snowpark strings); optionally hoist derived tables to CTEs for review only. See [Formatting machine-generated SQL](#sec-sql-formatting). |
 
 ## References
 
@@ -543,3 +605,4 @@ Choose your target lag based on how quickly downstream consumers need to see upd
 - [Use immutability constraints](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) -- IMMUTABLE WHERE and BACKFILL FROM
 - [Chapter 04: Feature Views](../../04_feature_views/index.qmd) -- DT vs View Feature View types
 - [Chapter 05: Feature Pipelines](../../05_feature_pipelines/index.qmd) -- pipeline architecture patterns
+- [SQLGlot](https://github.com/tobymao/sqlglot) -- Python parser / transpiler used for pretty-printing and optional CTE hoisting ([`eliminate_subqueries` API](https://sqlglot.com/sqlglot/optimizer/eliminate_subqueries.html))

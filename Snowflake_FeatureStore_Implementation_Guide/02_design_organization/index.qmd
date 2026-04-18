@@ -16,6 +16,8 @@ After completing this chapter, you will be able to:
 - Implement role-based access control (RBAC) for Feature Store objects
 - Plan and execute cross-environment feature promotion
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/02_design_organization/_code)
+
 ---
 
 ## Organization Patterns

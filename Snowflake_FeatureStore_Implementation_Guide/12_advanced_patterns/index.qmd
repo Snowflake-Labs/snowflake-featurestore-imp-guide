@@ -21,6 +21,8 @@ After completing this chapter, you will be able to:
 - Apply hybrid storage, two-tier Feature View architecture, and Dynamic Table (DT) cascades to manage wide and sparse feature data at scale
 - Use `OBJECT_CONSTRUCT` and semi-structured types for embeddings, JSON features, and column-count reduction
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/12_advanced_patterns/_code)
+
 ---
 
 ## Platform capabilities and preview status (March 2026)
@@ -220,7 +222,7 @@ for fs_name in ["SHARED_FS", "MARKETING_FS", "FRAUD_FS"]:
 
 Feature Views can wrap tables managed by external systems. For **dbt integration** (View-based Feature Views backed by dbt-managed tables), see [Chapter 5: Feature Pipelines -- External Orchestration](../05_feature_pipelines/index.qmd#sec-dbt).
 
-### Iceberg Tables
+### Iceberg Tables as Sources
 
 Apache Iceberg tables registered as Snowflake External Tables or Snowflake-managed Iceberg Tables can serve as Feature View sources. The Feature View wraps the Iceberg table with a View (no `refresh_freq`) since the external system controls data updates:
 
@@ -238,6 +240,38 @@ iceberg_fv = FeatureView(
 ```
 
 This is functionally identical to any View-based Feature View -- the Iceberg table is just another source. Freshness depends entirely on the external write cadence.
+
+### Iceberg-Backed Feature Views (Dynamic Iceberg Tables) {#sec-iceberg-backed-fv}
+
+The reverse pattern -- Feature Views that **output** to Iceberg format -- is supported since SDK 1.26.0 via `StorageConfig`. This creates a Dynamic Iceberg Table: a DT that materializes its output as Parquet files on external cloud storage, with Iceberg metadata for catalog-based access.
+
+```python
+from snowflake.ml.feature_store import StorageConfig, StorageFormat
+
+storage = StorageConfig(
+    format=StorageFormat.ICEBERG,
+    external_volume='MY_EXTERNAL_VOLUME',
+    base_location='feature_store/user_features'
+)
+
+iceberg_output_fv = FeatureView(
+    name="USER_PURCHASE_STATS_ICE",
+    entities=[user_entity],
+    feature_df=user_purchase_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 hour",
+    storage_config=storage,
+    desc="Purchase stats materialized as Iceberg for external access"
+)
+fs.register_feature_view(feature_view=iceberg_output_fv, version="V01")
+```
+
+| Direction | Backing Object | Use Case |
+|----------|---------------|----------|
+| **Iceberg as source** | View (no `refresh_freq`) | External tools write features to Iceberg; Feature Store wraps them for retrieval |
+| **Iceberg as output** | Dynamic Iceberg Table (`refresh_freq` required) | Feature Store computes features; external tools read them from Iceberg |
+
+The Iceberg-as-output pattern is particularly valuable for teams that train models outside Snowflake (Databricks, SageMaker, custom Kubernetes jobs) -- they can read feature data via standard Iceberg catalog integration without the Snowflake SDK. For a full discussion of Iceberg-backed Feature Views in training workflows, including limitations and the future automated training pipeline vision, see [Chapter 10: Iceberg-Backed Feature Views](../10_training_inference/index.qmd#sec-iceberg-fv).
 
 ---
 
@@ -654,6 +688,10 @@ FROM my_features__bundled;
 
 Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behavior). Only create DT3 (the KV materialization) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
 
+::: {.callout-tip title="Primary key-based change reduction in cascades (April 2026)"}
+DT cascades benefit from **primary key derivation**. When an intermediate DT's query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`, Snowflake derives a unique key and uses it for **value-based change filtering** -- rows where the PK exists in both the old and new versions with identical values are filtered out before propagating to the next stage. This reduces the volume of changes flowing through the cascade, even if an upstream stage uses full refresh. Downstream stages can opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); this is not yet available through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+:::
+
 ::: {.callout-note}
 The SQL examples above use `CREATE DYNAMIC TABLE` / `CREATE VIEW` for clarity, but each stage can equally be implemented through the **Feature Store API** (register a View-based or DT-backed Feature View). Using the API makes the objects discoverable within the Feature Store and ensures entity/timestamp metadata is tracked.
 :::
@@ -815,6 +853,8 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 **Problem**: A Dynamic Table Feature View that should be refreshing incrementally is instead performing **full refresh** every cycle, causing unexpectedly high compute costs. This often goes unnoticed until the bill arrives.
 
 **Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 4](../04_feature_views/index.qmd), [Chapter 5](../05_feature_pipelines/index.qmd), and [Chapter 11](../11_operations/index.qmd) for detailed guidance and workarounds.
+
+Even when a DT cannot avoid full refresh, **downstream DTs can still process incrementally** if the full-refresh DT has a system-derived unique key (e.g., from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`). Set `REFRESH_MODE = INCREMENTAL` on the downstream DT via SQL. Similarly, source tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a `RELY` primary key. These are SQL-level capabilities not yet in the Feature Store Python API -- see [Chapter 5](../05_feature_pipelines/index.qmd) for the full pattern and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
 
 ---
 

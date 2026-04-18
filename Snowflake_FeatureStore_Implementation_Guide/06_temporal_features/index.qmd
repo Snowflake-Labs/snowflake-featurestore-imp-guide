@@ -23,6 +23,8 @@ After completing this chapter, you will be able to:
 - Run manual refresh / backfill for Dynamic Table-backed Feature Views
 - Recognize when derived time-dependent features must be computed after retrieval (or via snapshot materialization)
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/06_temporal_features/_code)
+
 ```{python}
 #| output: false
 #| echo: false

@@ -18,6 +18,8 @@ After completing this chapter, you will be able to:
 - Migrate feature definitions and pipelines
 - Validate migrated features
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/13_migration_guide/_code)
+
 ---
 
 ## Why Migrate to Snowflake Feature Store?

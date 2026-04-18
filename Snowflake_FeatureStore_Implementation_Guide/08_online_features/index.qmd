@@ -24,6 +24,8 @@ After completing this chapter, you will be able to:
 - Retrieve online features via the Feature Store Python API and integrate with serving layers
 - Evaluate when an external serving store is appropriate and understand the trade-offs
 
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/08_online_features/_code)
+
 ---
 
 ## What is an Online Feature Table?
