@@ -752,7 +752,7 @@ At large scale (50+ Feature Views, billions of spine rows, thousands of features
 
 ### Batched Joins
 
-SDK version 1.32+ automatically batches Feature View joins into groups of ~10, producing intermediate results before a final merge. This resolved OOM failures seen at 77+ Feature Views and ~1.7 billion spine rows. See [Chapter 10: Dataset Generation at Scale](../10_training_inference/index.qmd#sec-scale) for manual batching code when upgrading the SDK is not immediately possible.
+SDK version 1.32+ automatically batches Feature View joins into groups of ~10, producing intermediate results before a final merge. This resolved OOM failures seen at 75+ Feature Views and ~2 billion spine rows. See [Chapter 10: Dataset Generation at Scale](../10_training_inference/index.qmd#sec-scale) for manual batching code when upgrading the SDK is not immediately possible.
 
 ### Warehouse Selection: Standard vs Snowpark Optimized
 
@@ -784,7 +784,7 @@ At extreme scale (100+ Feature Views, 2,000+ features), Snowflake's query compil
 
 When batched joins alone are insufficient, two architectural patterns can help:
 
-1. **VARIANT column encoding** -- encapsulate each Feature View's features into a single OBJECT column, reducing the SQL expression count to one per Feature View rather than one per feature. This reduces a 2,000-feature compilation from 1,501 seconds to 3.6 seconds in benchmarks. See [Chapter 10: The Wide Resultset Problem](../10_training_inference/index.qmd#sec-wide-resultset) for trade-offs.
+1. **VARIANT column encoding** -- encapsulate each Feature View's features into a single OBJECT column, reducing the SQL expression count to one per Feature View rather than one per feature. This reduces a 2,000-feature compilation from ~25 minutes to ~4 seconds in benchmarks. See [Chapter 10: The Wide Resultset Problem](../10_training_inference/index.qmd#sec-wide-resultset) for trade-offs.
 
 2. **Parquet/Iceberg output** -- bypass `to_pandas()` entirely by writing training data to Parquet files on a stage or to a Snowflake-managed Iceberg table. At 4XL warehouse scale, 1B rows writes in ~4 minutes and 12B rows in ~35 minutes. The output is natively readable by Ray, Spark, and PyTorch DataLoader. See [Chapter 10: Parquet and Iceberg Output](../10_training_inference/index.qmd#sec-parquet-output).
 

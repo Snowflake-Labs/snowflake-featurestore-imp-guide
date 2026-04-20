@@ -408,8 +408,8 @@ SDK version 1.32+ automatically **batches** Feature View joins into groups of ~1
 
 | Scenario | Pre-1.32 (single query) | 1.32+ (batched) |
 |----------|------------------------|-----------------|
-| 77 FVs, ~1K features, ~90M spine rows | ~40 min on 4XL | ~17 min on 4XL Gen2 |
-| 77 FVs, ~2K features, ~1.7B spine rows | OOM on 4XL | ~2 hours on 4XL Gen2 |
+| 75+ FVs, ~1,000 features, ~100M spine rows | ~40 min on 4XL | ~17 min on 4XL Gen2 |
+| 75+ FVs, ~2,000 features, ~2B spine rows | OOM on 4XL | ~2 hours on 4XL Gen2 |
 
 If you are on an older SDK version and cannot upgrade, the manual workaround is to split Feature Views into batches of 10-15, call `generate_training_set` for each batch, and join the results:
 
@@ -478,8 +478,8 @@ This is a known Snowflake limitation for wide resultsets. The Feature Store SDK 
 # Use:        SELECT entity_id, OBJECT_CONSTRUCT(*) AS features FROM fv_table
 
 # Benchmark: 100 FVs, 2000 features
-# Column-per-feature: 1,501 seconds for a single-row collect()
-# VARIANT approach:     3.6 seconds for a single-row collect()
+# Column-per-feature: ~25 minutes for a single-row collect()
+# VARIANT approach:     ~4 seconds for a single-row collect()
 ```
 
 **Trade-offs of the VARIANT approach:**
