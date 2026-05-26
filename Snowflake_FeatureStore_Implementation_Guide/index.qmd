@@ -2,8 +2,6 @@
 subtitle: "Best Practices for Building Production ML Feature Platforms"
 ---
 
-# Snowflake Feature Store Implementation Guide {.unnumbered}
-
 ## Welcome {.unnumbered}
 
 This guide provides comprehensive, practical guidance for implementing a Feature Store 
