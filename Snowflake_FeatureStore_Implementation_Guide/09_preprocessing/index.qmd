@@ -35,7 +35,18 @@ After completing this chapter, you will be able to:
 
 ### Decision Guide
 
-![MIT MDT ODT preprocessing decision tree](../_diagrams/png/dg_09_preprocessing_tree.png){fig-alt="Reusable transforms in feature view else model-dependent or on-demand"}
+```{mermaid}
+%%| fig-cap: "MIT MDT ODT preprocessing decision tree"
+%%| fig-alt: "Reusable transforms in feature view else model-dependent or on-demand"
+flowchart TD
+  Q1{Reusable across models?}
+  Q1 -->|YES| MIT[MIT in Feature View]
+  Q1 -->|NO| Q2{Training data statistics?}
+  Q2 -->|YES| MDT[MDT with model]
+  Q2 -->|NO| Q3{Request context?}
+  Q3 -->|YES| ODT[ODT at inference]
+  Q3 -->|NO| MIT2[Probably MIT]
+```
 
 ---
 

@@ -9,9 +9,12 @@ The Aggregations API provides a declarative way to define time-windowed features
 
 Examples in this chapter use the canonical demo layout: database `FEATURE_STORE_DEMO`, Feature Store schema `FEATURE_STORE`, clickstream source schema `CLICKSTREAM_DATA`, warehouse `FS_DEV_WH`, and tables such as `ORDERS` (`ORDER_TS`, `ORDER_ID`, `USER_ID`, `TOTAL_AMT`).
 
-::: {.callout-note}
-## 🆕 New in snowflake-ml 1.21+
-The Feature class and tiled aggregation are new capabilities requiring `snowflake-ml-python >= 1.21.0`.
+::: {.callout-note title="SDK Version and Documentation Status"}
+The `Feature` class and tiled aggregation API require **`snowflake-ml-python >= 1.24.0`**. This is a **client-side SDK feature** -- it generates standard SQL (Dynamic Tables, window functions, aggregations) under the hood, so no account-level enablement or feature flag is needed. Install the required SDK version and you are ready to use it.
+
+Official API documentation on the Snowflake docs portal may be limited at time of reading. For the authoritative parameter reference, use `help(Feature)` in a Python session or inspect the SDK source. API names and signatures may evolve in future releases.
+
+See also the [platform capabilities and preview status table](../12_advanced_patterns/index.qmd#platform-capabilities-and-preview-status-march-2026) in Chapter 12.
 :::
 
 ## Learning Objectives
@@ -156,8 +159,11 @@ Not all aggregation functions are equal in terms of tile storage, computation co
 
 When the same source data feeds features that differ only by a **filter condition** (e.g., count of automated messages vs. count of all messages), use separate `Feature` definitions with filter logic in the source `feature_df` rather than creating multiple Feature Views:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Approach 1: Filtered features via CASE in the source DataFrame
 filtered_source_df = session.sql("""
     SELECT
         USER_ID,
@@ -168,7 +174,27 @@ filtered_source_df = session.sql("""
         CASE WHEN CHANNEL = 'AUTOMATED' THEN TOTAL_AMT END AS AUTO_TOTAL_AMT
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+filtered_source_df = orders.select(
+    F.col("USER_ID"),
+    F.col("EVENT_TS"),
+    F.col("ORDER_ID"),
+    F.col("TOTAL_AMT"),
+    F.when(F.col("CHANNEL") == "AUTOMATED", F.col("ORDER_ID")).alias("AUTO_ORDER_ID"),
+    F.when(F.col("CHANNEL") == "AUTOMATED", F.col("TOTAL_AMT")).alias("AUTO_TOTAL_AMT"),
+)
+```
+
+:::
+
+```python
 features = [
     Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
     Feature.count("AUTO_ORDER_ID", "7d").alias("AUTO_ORDER_CNT_7D"),
@@ -193,13 +219,20 @@ Windows can be specified using shorthand notation:
 | `"30d"` | 30 days |
 | `"1w"` or `"1 week"` | 1 week |
 
-### Window offset
+### Window offset {#sec-window-offset}
 
-Pass `offset` to shift the aggregation window backward in time (for example, “previous week” vs “current week”):
+Pass `offset` to shift the aggregation window backward in time. This is the standard way to build **comparative features** such as week-over-week or month-over-month trends:
 
 ```python
-Feature.sum("TOTAL_AMT", "7d", offset="7d").alias("TOTAL_AMT_SUM_PREV_WEEK")
+features = [
+    Feature.sum("TOTAL_AMT", "7d").alias("TOTAL_AMT_SUM_CURRENT_WEEK"),
+    Feature.sum("TOTAL_AMT", "7d", offset="7d").alias("TOTAL_AMT_SUM_PREV_WEEK"),
+]
 ```
+
+Pair the current-window and offset-window versions to capture momentum or change over time. For example, a model can detect spending acceleration when `TOTAL_AMT_SUM_CURRENT_WEEK` exceeds `TOTAL_AMT_SUM_PREV_WEEK`.
+
+The `offset` must be a **multiple of `feature_granularity`** so the shifted window aligns cleanly to tile boundaries. For example, with `feature_granularity="1h"`, valid offsets are `"1h"`, `"2h"`, `"24h"`, `"7d"`, etc.
 
 Use `.alias("NAME")` on each `Feature` to set the output column name.
 
@@ -720,6 +753,10 @@ The Feature View schema is fixed at registration time. Data-driven generation ma
 
 **Static (2 known channels):**
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
 source_df = session.sql("""
     SELECT USER_ID, ORDER_TS, ORDER_ID, TOTAL_AMT,
@@ -727,6 +764,24 @@ source_df = session.sql("""
            CASE WHEN CHANNEL = 'WEB'       THEN ORDER_ID END AS WEB_ORDER_ID
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
 """)
+```
+
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+source_df = orders.select(
+    "USER_ID", "ORDER_TS", "ORDER_ID", "TOTAL_AMT",
+    F.when(F.col("CHANNEL") == "AUTOMATED", F.col("ORDER_ID")).alias("AUTOMATED_ORDER_ID"),
+    F.when(F.col("CHANNEL") == "WEB", F.col("ORDER_ID")).alias("WEB_ORDER_ID"),
+)
+```
+
+:::
+
+```python
 features = [
     Feature.count("ORDER_ID", "7d").alias("ORDER_CNT_7D"),
     Feature.count("AUTOMATED_ORDER_ID", "7d").alias("AUTOMATED_ORDER_CNT_7D"),
@@ -1063,6 +1118,210 @@ This is particularly valuable when the factory generates dozens of columns — c
 
 ---
 
+## Tiled Feature Views and Online Serving {#sec-tiled-online}
+
+::: {.callout-warning title="Tiled Feature Views Cannot Be Served Directly via Hybrid Table OFTs"}
+A tiled Feature View's underlying Dynamic Table stores **partial aggregates** per tile interval — columns like `_PARTIAL_SUM_TOTAL_AMT`, `_PARTIAL_COUNT_ORDER_ID`, and a `TILE_START` timestamp. The original `timestamp_col` (e.g., `ORDER_TS`) **does not exist** in the DT schema. When you attempt to create a Hybrid Table Online Feature Table from a tiled FV, the `CREATE ONLINE FEATURE TABLE ... TIMESTAMP_COLUMN = ORDER_TS` statement fails:
+
+```
+SQL compilation error: column 'ORDER_TS' does not exist
+```
+
+The SDK does not validate this upfront — the error only surfaces at OFT creation time during `register_feature_view`.
+:::
+
+For **offline retrieval** (`fs.read_feature_view`, `fs.retrieve_feature_values`), the Feature Store performs tile reassembly automatically — window aggregations are computed correctly at read time. The issue only arises when you want to push these aggregated values into a Hybrid Table for low-latency online serving.
+
+### Workaround: `online_fv_from_tiled` Helper {#sec-tiled-online-workaround}
+
+Manually re-expressing the same aggregation logic as a SQL `GROUP BY` is error-prone and violates DRY. The `online_fv_from_tiled()` helper introspects a tiled Feature View's `Feature` definitions and **automatically generates** a non-tiled, OFT-compatible companion:
+
+```{python}
+#| eval: false
+
+from online_from_tiled import online_fv_from_tiled
+
+# Step 1: Define the tiled FV (offline only, no online_config)
+tiled_fv = FeatureView(
+    name="USER_PURCHASE_TILED",
+    entities=[user_entity],
+    feature_df=session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"),
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    feature_granularity="1 hour",
+    features=purchase_features,
+    desc="Tiled aggregations — offline only",
+)
+tiled_reg = fs.register_feature_view(tiled_fv, version="V01", block=True)
+
+# Step 2: Auto-generate a non-tiled, OFT-ready companion
+online_fv = online_fv_from_tiled(
+    tiled_reg, session,
+    source_query="SELECT * FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS",
+    refresh_freq="1 minute",
+    target_lag="1 minute",
+    window_buffer="1d",
+)
+online_reg = fs.register_feature_view(online_fv, version="V01", block=True)
+```
+
+The helper produces a `GROUP BY` query scoped to only `max(window + offset) + buffer` of source data. For the purchase features above (7-day windows, no offset, 1-day buffer), the generated SQL is:
+
+```sql
+SELECT
+    USER_ID,
+    SUM(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+        THEN TOTAL_AMT END)  AS TOTAL_AMT_SUM_7D,
+    COUNT(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+        THEN ORDER_ID END)   AS ORDER_ID_CNT_7D,
+    AVG(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+        THEN TOTAL_AMT END)  AS TOTAL_AMT_AVG_7D,
+    MAX(ORDER_TS) AS LAST_ORDER_TS
+FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+WHERE ORDER_TS >= DATEADD('DAY', -8, CURRENT_TIMESTAMP())
+GROUP BY USER_ID
+```
+
+Each feature gets its own `CASE WHEN` filter for its specific window, so features with different windows (e.g., 7-day and 30-day) coexist correctly in a single query. The outer `WHERE` clause scopes the entire query to the longest window plus the buffer.
+
+::: {.callout-note title="How the helper works"}
+`online_fv_from_tiled()` reads each `Feature` object's internal attributes (`_function`, `_column`, `_window`, `_offset`, `_alias`) and maps them to standard SQL aggregation functions. It:
+
+1. Converts each `Feature` aggregation type to its SQL equivalent (e.g., `Feature.sum` → `SUM`, `Feature.stddev` → `STDDEV`)
+2. Applies per-feature `CASE WHEN` window filters based on the feature's `_window` and `_offset`
+3. Computes the maximum lookback across all features and adds `window_buffer` to form the outer `WHERE` clause
+4. Adds `MAX(timestamp_col) AS LAST_{timestamp_col}` as the timestamp for OFT tracking
+5. Returns a new `FeatureView` with `online_config` enabled and no tiling
+
+For a registered tiled FV (whose internal query has been rewritten to the tiled form), you must pass `source_query=` pointing at the original source table.
+
+**Unsupported aggregations:** `FIRST_N`, `LAST_N`, `FIRST_DISTINCT_N`, and `LAST_DISTINCT_N` cannot be reduced to a simple `GROUP BY` — the helper raises a clear error for these.
+:::
+
+You can also use `online_sql_from_features()` to inspect or customise the generated SQL before creating a FeatureView:
+
+```{python}
+#| eval: false
+
+from online_from_tiled import online_sql_from_features
+
+sql = online_sql_from_features(
+    features=purchase_features,
+    join_keys=["USER_ID"],
+    source_table="FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS",
+    timestamp_col="ORDER_TS",
+)
+print(sql)
+```
+
+### Manual Approach: Direct SQL {#sec-tiled-online-manual}
+
+If you prefer full control or need to customise the query beyond what the helper generates, you can write the non-tiled FV manually:
+
+::: {.panel-tabset group="feature-definition"}
+
+## SQL
+
+```{python}
+#| eval: false
+
+from snowflake.ml.feature_store import feature_view as fv_mod
+
+online_df = session.sql("""
+    SELECT
+        USER_ID,
+        SUM(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+            THEN TOTAL_AMT END)  AS TOTAL_AMT_SUM_7D,
+        COUNT(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+            THEN ORDER_ID END)   AS ORDER_ID_CNT_7D,
+        AVG(CASE WHEN ORDER_TS >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+            THEN TOTAL_AMT END)  AS TOTAL_AMT_AVG_7D,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    WHERE ORDER_TS >= DATEADD('DAY', -8, CURRENT_TIMESTAMP())
+    GROUP BY USER_ID
+""")
+
+online_fv = FeatureView(
+    name="USER_PURCHASE_ONLINE",
+    entities=[user_entity],
+    feature_df=online_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 minute",
+    online_config=fv_mod.OnlineConfig(enable=True, target_lag="1 minute"),
+    desc="Non-tiled online companion for USER_PURCHASE_TILED",
+)
+online_reg = fs.register_feature_view(online_fv, version="V01", block=True)
+```
+
+## Snowpark DataFrame
+
+```{python}
+#| eval: false
+
+from snowflake.snowpark import functions as F
+from snowflake.ml.feature_store import feature_view as fv_mod
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+cutoff_7d = F.dateadd("DAY", F.lit(-7), F.current_timestamp())
+cutoff_8d = F.dateadd("DAY", F.lit(-8), F.current_timestamp())
+
+online_df = (
+    orders
+    .filter(F.col("ORDER_TS") >= cutoff_8d)
+    .group_by("USER_ID")
+    .agg(
+        F.sum(F.when(F.col("ORDER_TS") >= cutoff_7d, F.col("TOTAL_AMT")))
+            .alias("TOTAL_AMT_SUM_7D"),
+        F.count(F.when(F.col("ORDER_TS") >= cutoff_7d, F.col("ORDER_ID")))
+            .alias("ORDER_ID_CNT_7D"),
+        F.avg(F.when(F.col("ORDER_TS") >= cutoff_7d, F.col("TOTAL_AMT")))
+            .alias("TOTAL_AMT_AVG_7D"),
+        F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+    )
+)
+
+online_fv = FeatureView(
+    name="USER_PURCHASE_ONLINE",
+    entities=[user_entity],
+    feature_df=online_df,
+    timestamp_col="LAST_ORDER_TS",
+    refresh_freq="1 minute",
+    online_config=fv_mod.OnlineConfig(enable=True, target_lag="1 minute"),
+    desc="Non-tiled online companion for USER_PURCHASE_TILED",
+)
+online_reg = fs.register_feature_view(online_fv, version="V01", block=True)
+```
+
+:::
+
+::: {.callout-important title="Performance: FULL Refresh on Scoped Window"}
+Both the helper and the manual approach use `CURRENT_TIMESTAMP()` in the `WHERE` clause to scope data to only the maximum window needed. This forces the resulting Dynamic Table to use **FULL refresh** on every cycle (not incremental), because Snowflake cannot track changes on queries with non-deterministic functions.
+
+For short-to-medium windows (e.g., 7–30 days), the scoped data volume is small and FULL refresh typically completes in 1–2 seconds. For **wide windows** (90d, 180d, 365d), the FULL refresh must re-scan a proportionally larger slice of the source table on every cycle. At 365 days the scoped query effectively touches most of the table, negating much of the scoping benefit.
+
+| Window Width | Approx. Source Scope | FULL Refresh Impact |
+|-------------|---------------------|---------------------|
+| 7 days | ~1 week + buffer | Fast (seconds) |
+| 30 days | ~1 month + buffer | Low (seconds to tens of seconds) |
+| 90–180 days | Quarters to half-year | Moderate — monitor DT refresh duration and warehouse cost |
+| 365 days | ~full table | **High** — consider whether online serving of year-wide aggregates is truly needed, or pre-compute in a scheduled task instead |
+
+| Component | Refresh Mode | Why |
+|-----------|-------------|-----|
+| Tiled FV (offline) | **INCREMENTAL** | Deterministic tiling query, efficient for large historical datasets |
+| Online FV (helper-generated) | **FULL** | `CURRENT_TIMESTAMP()` in WHERE prevents change tracking, but scoped to bounded window |
+| OFT (Hybrid Table) | Mirrors DT | Syncs changes from the online DT each cycle |
+
+The **recommended pattern** is to use both: the Aggregations API for offline computation (efficient tiled storage) and the `online_fv_from_tiled()` helper for online serving (scoped, bounded FULL refresh). If your widest feature window exceeds 90 days, benchmark the DT refresh time and cost before committing to a 1-minute `refresh_freq` — a longer refresh cycle (e.g., 5–15 minutes) may be more appropriate for wide windows.
+:::
+
+::: {.callout-tip title="Postgres Online Store (Private Preview)"}
+The upcoming **Postgres-backed online store** (`OnlineStoreType.POSTGRES`) is designed to handle tiled Feature Views natively. It performs **query-time tile reassembly** to return correct window-aggregated values directly. Once this backend reaches General Availability, it will eliminate the need for the materialized workaround. See [Chapter 8: Online Features](../08_online_features/index.qmd) for online store configuration details.
+:::
+
+---
+
 ## Next Steps
 
-Continue to [Chapter 8: Online Features](../08_online_features/index.qmd) to learn about Online Feature Tables for real-time serving.
+Continue to [Chapter 8: Online Features](../08_online_features/index.qmd) to learn about Online Feature Tables for real-time serving, including the limitations and workarounds for tiled Feature Views discussed above.

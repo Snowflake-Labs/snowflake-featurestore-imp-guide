@@ -37,7 +37,18 @@ Snowflake Feature Store uses native Snowflake objects for storage and metadata:
 
 The simplest organization uses a single database with one Feature Store schema:
 
-![Single Feature Store: one database and schema with multiple feature views](../_diagrams/png/dg_02_single_fs.png){fig-alt="Single database with one schema containing several feature views"}
+```{mermaid}
+%%| fig-cap: "Single Feature Store: one database and schema with multiple feature views"
+%%| fig-alt: "Single database with one schema containing several feature views"
+flowchart TB
+  DB[(FEATURE_STORE_DEMO)]
+  subgraph SCH[Schema FEATURE_STORE]
+    F1[USER_FEATURES_FV DT]
+    F2[PRODUCT_FV DT]
+    F3[SESSION_FV View]
+  end
+  DB --> SCH
+```
 
 > 📁 **Full code:** [`_code/organization_patterns.py`](_code/organization_patterns.py)
 
@@ -66,7 +77,23 @@ fs = FeatureStore(
 
 Separate schemas by domain, team, or use case within a single database:
 
-![Domain-based organization: multiple schemas in one database](../_diagrams/png/dg_02_domain_orgs.png){fig-alt="Marketing, fraud, and shared schemas under one database"}
+```{mermaid}
+%%| fig-cap: "Domain-based organization: multiple schemas in one database"
+%%| fig-alt: "Marketing, fraud, and shared schemas under one database"
+flowchart LR
+  subgraph M[Schema MARKETING]
+    mfv[SESSION / USER_SEGMENT / EVENT_ATTRIBUTION FVs]
+  end
+  subgraph F[Schema FRAUD]
+    ffv[ORDER_VELOCITY / SESSION_ANOMALY FVs]
+  end
+  subgraph S[Schema SHARED]
+    sfv[USER_BASE / PRODUCT / SESSION FVs]
+  end
+  DB2[(FEATURE_STORE_DEMO)] --> M
+  DB2 --> F
+  DB2 --> S
+```
 
 ```python
 # Marketing team's Feature Store
@@ -107,7 +134,16 @@ shared_fs = FeatureStore(
 
 ### Decision Framework
 
-![Single vs multiple Feature Stores decision flow](../_diagrams/png/dg_02_fs_decision.png){fig-alt="Decision tree for isolation and compliance"}
+```{mermaid}
+%%| fig-cap: "Single vs multiple Feature Stores decision flow"
+%%| fig-alt: "Decision tree for isolation and compliance"
+flowchart TD
+  Q{Strong isolation between domains?}
+  Q -->|YES| M[Multiple Feature Stores]
+  Q -->|NO| C{Compliance requirements?}
+  C -->|YES| MR[Multiple FS + RBAC]
+  C -->|NO| S[Single Feature Store]
+```
 
 ### Single Feature Store
 
@@ -141,11 +177,25 @@ shared_fs = FeatureStore(
 - More complex management
 - Potential for inconsistent patterns
 
+::: {.callout-tip}
+## Cross-store discovery via Snowsight
+
+Even with multiple Feature Stores, the Snowsight Feature Store UI (**AI & ML → Features**) lets users switch between any tagged Feature Store schema via the dropdown and browse Feature Views, Entities, and lineage without writing code. This assists with the "cross-domain discovery" issue — teams can explore what exists across stores before creating new features. See [Chapter 11: Snowsight Feature Store UI](../11_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough.
+:::
+
 ### Hybrid: Shared + Domain-Specific
 
 The recommended pattern for larger organizations combines shared and domain-specific Feature Stores:
 
-![Hybrid organization: shared Feature Store feeding domain-specific stores](../_diagrams/png/dg_02_hybrid_org.png){fig-alt="Shared features connect to marketing, fraud, and personalization feature stores"}
+```{mermaid}
+%%| fig-cap: "Hybrid organization: shared Feature Store feeding domain-specific stores"
+%%| fig-alt: "Shared features connect to marketing, fraud, and personalization feature stores"
+flowchart TB
+  SH[SHARED Feature Store core entities]
+  SH --> MKT[MARKETING_FS]
+  SH --> FR[FRAUD_FS]
+  SH --> PR[PERSONALIZATION_FS]
+```
 
 ---
 
@@ -157,7 +207,21 @@ Production ML systems require separate environments for development, testing, an
 
 Use different schemas for each environment within the same database:
 
-![Schema-based DEV TEST PROD environments](../_diagrams/png/dg_02_schema_env.png){fig-alt="Three schemas for dev test and prod with promotion flow"}
+```{mermaid}
+%%| fig-cap: "Schema-based DEV TEST PROD environments"
+%%| fig-alt: "Three schemas for dev test and prod with promotion flow"
+flowchart LR
+  subgraph DEV[Schema DEV]
+    d[USER_FEATURES_FV V01-V03]
+  end
+  subgraph TST[Schema TEST]
+    t[USER_FEATURES_FV promoted]
+  end
+  subgraph PRD[Schema PROD]
+    p[USER_FEATURES_FV validated]
+  end
+  DEV -->|clone| TST -->|clone| PRD
+```
 
 > 📁 **Full code:** [`_code/environment_setup.py`](_code/environment_setup.py)
 
@@ -201,7 +265,15 @@ The pattern applies equally to source table references (`CLICKSTREAM_DATA` schem
 
 Use separate databases for stronger logical isolation:
 
-![Database-based environments for dev test and prod](../_diagrams/png/dg_02_db_env.png){fig-alt="Separate databases per environment"}
+```{mermaid}
+%%| fig-cap: "Database-based environments for dev test and prod"
+%%| fig-alt: "Separate databases per environment"
+flowchart LR
+  D1[(FS_DEMO_DEV)]
+  D2[(FS_DEMO_TEST)]
+  D3[(FS_DEMO_PROD)]
+  D1 --> D2 --> D3
+```
 
 ### Environment Strategy Comparison
 
@@ -222,7 +294,15 @@ Snowflake's native RBAC integrates with Feature Store objects. Design roles arou
 
 ### Recommended Role Hierarchy
 
-![Feature Store RBAC role hierarchy](../_diagrams/png/dg_02_rbac_model.png){fig-alt="Account admin to sysadmin to FS admin dev and consumer roles"}
+```{mermaid}
+%%| fig-cap: "Feature Store RBAC role hierarchy"
+%%| fig-alt: "Account admin to sysadmin to FS admin dev and consumer roles"
+flowchart TB
+  AA[ACCOUNTADMIN] --> SYS[SYSADMIN]
+  SYS --> AD[FS_ADMIN_ROLE]
+  SYS --> DV[FS_DEV_ROLE]
+  SYS --> CN[FS_CONSUMER_ROLE]
+```
 
 ### RBAC Implementation
 
@@ -272,7 +352,21 @@ Moving features from development to production requires a controlled promotion p
 
 ### Promotion Workflow
 
-![Feature promotion workflow across DEV TEST and PROD](../_diagrams/png/dg_02_promotion_workflow.png){fig-alt="Develop and test locally then validate in test and deploy to production"}
+```{mermaid}
+%%| fig-cap: "Feature promotion workflow across DEV TEST and PROD"
+%%| fig-alt: "Develop and test locally then validate in test and deploy to production"
+flowchart LR
+  subgraph DEV[DEV]
+    d1[Develop + test locally]
+  end
+  subgraph TST[TEST]
+    t1[Validate + integration tests]
+  end
+  subgraph PRD[PROD]
+    p1[Deploy + monitor]
+  end
+  DEV -->|PR CI| TST -->|gate| PRD
+```
 
 ### Method 1: Re-register via CI/CD (Recommended)
 
@@ -350,6 +444,40 @@ When a Dynamic Table is re-initialized due to a body change, any **downstream** 
 
 DCM Projects also provide pipeline-aware commands: `REFRESH ALL` bulk-refreshes all Dynamic Tables managed by the project (plus required upstream DTs), and `TEST ALL` runs attached data quality expectations. A typical CI/CD promotion flow is: `PLAN` → `DEPLOY` → `REFRESH ALL` → `TEST ALL` on staging, then repeat `PLAN` → `DEPLOY` on production.
 
+**Example: Feature Store DCM definition file.** A single definition file can declare a Dynamic Table, apply the Feature Store internal TAGs, and grant access to the Feature Store roles — all parameterised by environment:
+
+```sql
+-- feature_store_definitions/user_purchase_stats.sql
+
+CREATE OR REPLACE DYNAMIC TABLE {{ env }}_FEATURE_STORE.FEATURE_STORE.USER_PURCHASE_STATS
+  TARGET_LAG  = '{{ target_lag }}'
+  WAREHOUSE   = {{ env }}_FS_WH
+  REFRESH_MODE = INCREMENTAL
+AS
+SELECT
+    USER_ID,
+    COUNT(*)          AS ORDER_CNT,
+    SUM(TOTAL_AMT)    AS SPEND_SUM,
+    AVG(TOTAL_AMT)    AS AVG_ORDER_AMT,
+    MAX(ORDER_TS)      AS LAST_ORDER_TS
+FROM {{ env }}_FEATURE_STORE.{{ source_schema }}.ORDERS
+GROUP BY USER_ID;
+
+-- Feature Store TAGs (required for Snowsight visibility and SDK discovery)
+ALTER DYNAMIC TABLE {{ env }}_FEATURE_STORE.FEATURE_STORE.USER_PURCHASE_STATS
+  SET TAG FEATURE_STORE.TAGS.SNOWML_FEATURE_STORE_OBJECT = 'FEATURE_VIEW';
+
+-- RBAC grants
+GRANT SELECT ON DYNAMIC TABLE {{ env }}_FEATURE_STORE.FEATURE_STORE.USER_PURCHASE_STATS
+  TO ROLE {{ env }}_FS_CONSUMER;
+```
+
+Deploy with environment-specific parameters: `USING (env => 'PROD', source_schema => 'CLICKSTREAM_DATA', target_lag => '1 hour')`. The same definition file produces identical objects across DEV, TEST, and PROD — only the parameterised values change.
+
+::: {.callout-important title="Two-layer management: physical + logical"}
+DCM manages the **physical layer** — Dynamic Tables, Views, Tags, grants, warehouses. The **logical layer** — Entities as named constructs, Feature View metadata (descriptions, version labels, entity associations) — still requires the Feature Store Python SDK or manual TAG application via SQL (see [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd)). In practice this means a DCM project handles object creation and promotion, while a lightweight deployment script (or CI step) calls `fs.register_feature_view()` or applies the TAG JSON to complete the logical registration. See [Chapter 12: Reconciling Desired vs Actual State](../12_advanced_patterns/index.qmd#sec-reconciliation) for patterns that bridge this gap.
+:::
+
 ::: {.callout-note}
 ## DCM Projects: Preview status and limitations
 DCM Projects is in Public Preview (March 2026) and is still a relatively new capability within Snowflake. Not all object types or operations are supported yet -- for example, some object properties are immutable after creation (requiring drop + recreate), and column rename/reorder on Dynamic Tables is not supported. Feature Store-specific objects (Entities, Feature Views as logical constructs) are not directly managed by DCM -- you would define the underlying Dynamic Tables, Views, Tags, and grants in DCM definition files, and use the Feature Store Python API for the logical registration layer. Check the [supported object types and limitations](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-supported-entities) page for current coverage and constraints.
@@ -361,7 +489,24 @@ DCM Projects is in Public Preview (March 2026) and is still a relatively new cap
 
 ### 1. Start Simple, Scale as Needed {.unnumbered}
 
-![Start simple then scale practices](../_diagrams/png/dg_02_scale_practices.png){fig-alt="Start with single database and schema envs then scale to multi-db and CI/CD"}
+```{mermaid}
+%%| fig-cap: "Start simple then scale practices"
+%%| fig-alt: "Start with single database and schema envs then scale to multi-db and CI/CD"
+flowchart TB
+  subgraph Start[Start simple]
+    s1[Single DB]
+    s2[Schema DEV TEST PROD]
+    s3[Basic RBAC roles]
+    s4[Manual promotion]
+  end
+  subgraph Scale[Scale to]
+    x1[Multi DB by domain]
+    x2[Multi-account compliance]
+    x3[Granular RBAC]
+    x4[CI/CD promotion]
+  end
+  Start --> Scale
+```
 
 ### 2. Establish Naming Conventions Early {.unnumbered}
 | Object Type | Convention | Example |
@@ -393,7 +538,7 @@ ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
   SET INITIALIZATION_WAREHOUSE = FS_PROD_INIT_WH;
 ```
 
-This is not yet exposed through the Feature Store Python API's `FeatureView` constructor -- use `ALTER DYNAMIC TABLE` after registration. See the [DT warehouse documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables-warehouses) for details.
+This is not yet exposed through the Feature Store Python API's `FeatureView` constructor -- use `ALTER DYNAMIC TABLE` after registration. See the [DT warehouse documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables/warehouse-selection) for details.
 :::
 
 ---

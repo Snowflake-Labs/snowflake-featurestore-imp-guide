@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="keywords" content="snowflake, feature store, ml, machine learning, mlops">
+<meta name="description" content="Comprehensive guide to implementing Snowflake Feature Store for production ML, covering design patterns, temporal features, aggregations, online serving, and CI/CD.">
+
+<title>Appendix B — Streamlit Data Manager – Snowflake Feature Store Implementation Guide (Internal)</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../../">
+<link href="../../../appendices/B_setup/index.html" rel="next">
+<link href="../../../appendices/A_sample_data/index.html" rel="prev">
+<script src="../../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-dark-23bbe8b5e4efc1e257f6d59dce478b08.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-dark-88f976c52a096bfcf50c5d13e133667b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "sidebar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "start",
+  "type": "textbox",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<meta property="og:title" content="Snowflake Feature Store Implementation Guide">
+<meta property="og:description" content="Best practices for building production ML feature platforms with Snowflake Feature Store — entities, Feature Views, pipelines, online serving, and operations.">
+<meta property="og:image" content="ui_images/streamlit_sidebar.png">
+<meta property="og:site_name" content="Snowflake Feature Store Implementation Guide (Internal)">
+</head>
+
+<body class="nav-sidebar docked quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+      // Hack to workaround the fact that safari doesn't
+      // properly recolor the scrollbar when toggling (#1455)
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        window.scrollTo(0, 1);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const darkModeDefault = authorPrefersDark;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+  <nav class="quarto-secondary-nav">
+    <div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../../appendices/A_sample_data/data_manager/streamlit_app.html"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></a></li></ol></nav>
+        <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+        </a>
+      <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
+        <i class="bi bi-search"></i>
+      </button>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation docked overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="sidebar-title mb-0 py-0">
+      <a href="../../../">Snowflake Feature Store Implementation Guide (Internal)</a> 
+        <div class="sidebar-tools-main">
+    <a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide" title="Source Code" class="quarto-navigation-tool px-1" aria-label="Source Code"><i class="bi bi-github"></i></a>
+  <a href="" class="quarto-color-scheme-toggle quarto-navigation-tool  px-1" onclick="window.quartoToggleColorScheme(); return false;" title="Toggle dark mode"><i class="bi"></i></a>
+</div>
+    </div>
+      </div>
+        <div class="mt-2 flex-shrink-0 align-items-center">
+        <div class="sidebar-search">
+        <div id="quarto-search" class="" title="Search"></div>
+        </div>
+        </div>
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Snowflake Feature Store Implementation Guide</span></a>
+  </div>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
+ <span class="menu-text">Getting Started</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../00_introduction/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Introduction</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../01_concepts/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">1</span>&nbsp; <span class="chapter-title">Core Concepts</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true">
+ <span class="menu-text">Design &amp; Architecture</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../02_design_organization/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Design &amp; Organization</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../03_entities_hierarchies/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">3</span>&nbsp; <span class="chapter-title">Entities &amp; Hierarchies</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../04_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true">
+ <span class="menu-text">Feature Engineering</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-3" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../05_feature_pipelines/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Feature Pipelines</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../06_temporal_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Temporal Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../07_aggregations_api/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Aggregations API</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true">
+ <span class="menu-text">Production</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-4" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../08_online_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Online Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../09_preprocessing/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Preprocessing</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../10_training_inference/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Training &amp; Inference</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true">
+ <span class="menu-text">Operations &amp; Advanced</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../11_operations/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">11</span>&nbsp; <span class="chapter-title">Operations</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../12_advanced_patterns/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">12</span>&nbsp; <span class="chapter-title">Advanced Patterns</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../13_migration_guide/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">13</span>&nbsp; <span class="chapter-title">Migration Guide</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true">
+ <span class="menu-text">Preview Features</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-6" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../08a_streaming_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true">
+ <span class="menu-text">Appendices</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-7" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../appendices/A_sample_data/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../appendices/A_sample_data/data_manager/streamlit_app.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../appendices/B_setup/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">C</span>&nbsp; <span class="chapter-title">Environment Setup</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../appendices/C_snowpark_to_dynamic_table/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">D</span>&nbsp; <span class="chapter-title">Snowpark to Dynamic Table</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../../appendices/D_tag_convention/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+    </ul>
+    </div>
+</nav>
+<div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview"><span class="header-section-number">B.1</span> Overview</a>
+  <ul class="collapse">
+  <li><a href="#features" id="toc-features" class="nav-link" data-scroll-target="#features"><span class="header-section-number">B.1.1</span> Features</a></li>
+  </ul></li>
+  <li><a href="#quick-start" id="toc-quick-start" class="nav-link" data-scroll-target="#quick-start"><span class="header-section-number">B.2</span> Quick Start</a>
+  <ul class="collapse">
+  <li><a href="#prerequisites" id="toc-prerequisites" class="nav-link" data-scroll-target="#prerequisites"><span class="header-section-number">B.2.1</span> Prerequisites</a></li>
+  <li><a href="#launch-the-app" id="toc-launch-the-app" class="nav-link" data-scroll-target="#launch-the-app"><span class="header-section-number">B.2.2</span> Launch the App</a></li>
+  </ul></li>
+  <li><a href="#connecting-to-snowflake" id="toc-connecting-to-snowflake" class="nav-link" data-scroll-target="#connecting-to-snowflake"><span class="header-section-number">B.3</span> Connecting to Snowflake</a>
+  <ul class="collapse">
+  <li><a href="#named-connection-recommended" id="toc-named-connection-recommended" class="nav-link" data-scroll-target="#named-connection-recommended"><span class="header-section-number">B.3.1</span> Named Connection (Recommended)</a></li>
+  <li><a href="#manual-credentials" id="toc-manual-credentials" class="nav-link" data-scroll-target="#manual-credentials"><span class="header-section-number">B.3.2</span> Manual Credentials</a></li>
+  <li><a href="#common-settings" id="toc-common-settings" class="nav-link" data-scroll-target="#common-settings"><span class="header-section-number">B.3.3</span> Common Settings</a></li>
+  </ul></li>
+  <li><a href="#page-walkthroughs" id="toc-page-walkthroughs" class="nav-link" data-scroll-target="#page-walkthroughs"><span class="header-section-number">B.4</span> Page Walkthroughs</a>
+  <ul class="collapse">
+  <li><a href="#overview-1" id="toc-overview-1" class="nav-link" data-scroll-target="#overview-1"><span class="header-section-number">B.4.1</span> 📊 Overview</a></li>
+  <li><a href="#initial-load" id="toc-initial-load" class="nav-link" data-scroll-target="#initial-load"><span class="header-section-number">B.4.2</span> 📥 Initial Load</a></li>
+  <li><a href="#incremental-generator" id="toc-incremental-generator" class="nav-link" data-scroll-target="#incremental-generator"><span class="header-section-number">B.4.3</span> 🔄 Incremental Generator</a></li>
+  <li><a href="#development-branch" id="toc-development-branch" class="nav-link" data-scroll-target="#development-branch"><span class="header-section-number">B.4.4</span> 🌿 Development Branch</a></li>
+  <li><a href="#public-datasets" id="toc-public-datasets" class="nav-link" data-scroll-target="#public-datasets"><span class="header-section-number">B.4.5</span> 📚 Public Datasets</a></li>
+  <li><a href="#monitoring" id="toc-monitoring" class="nav-link" data-scroll-target="#monitoring"><span class="header-section-number">B.4.6</span> 📈 Monitoring</a></li>
+  </ul></li>
+  <li><a href="#common-workflows" id="toc-common-workflows" class="nav-link" data-scroll-target="#common-workflows"><span class="header-section-number">B.5</span> Common Workflows</a>
+  <ul class="collapse">
+  <li><a href="#first-time-setup" id="toc-first-time-setup" class="nav-link" data-scroll-target="#first-time-setup"><span class="header-section-number">B.5.1</span> First-Time Setup</a></li>
+  <li><a href="#testing-dynamic-tables" id="toc-testing-dynamic-tables" class="nav-link" data-scroll-target="#testing-dynamic-tables"><span class="header-section-number">B.5.2</span> Testing Dynamic Tables</a></li>
+  <li><a href="#creating-a-dev-environment" id="toc-creating-a-dev-environment" class="nav-link" data-scroll-target="#creating-a-dev-environment"><span class="header-section-number">B.5.3</span> Creating a Dev Environment</a></li>
+  </ul></li>
+  <li><a href="#troubleshooting" id="toc-troubleshooting" class="nav-link" data-scroll-target="#troubleshooting"><span class="header-section-number">B.6</span> Troubleshooting</a>
+  <ul class="collapse">
+  <li><a href="#app-wont-start" id="toc-app-wont-start" class="nav-link" data-scroll-target="#app-wont-start"><span class="header-section-number">B.6.1</span> App won’t start</a></li>
+  <li><a href="#connection-fails" id="toc-connection-fails" class="nav-link" data-scroll-target="#connection-fails"><span class="header-section-number">B.6.2</span> Connection fails</a></li>
+  <li><a href="#no-tables-found" id="toc-no-tables-found" class="nav-link" data-scroll-target="#no-tables-found"><span class="header-section-number">B.6.3</span> “No tables found”</a></li>
+  <li><a href="#incremental-generator-not-running" id="toc-incremental-generator-not-running" class="nav-link" data-scroll-target="#incremental-generator-not-running"><span class="header-section-number">B.6.4</span> Incremental generator not running</a></li>
+  </ul></li>
+  <li><a href="#cli-equivalents" id="toc-cli-equivalents" class="nav-link" data-scroll-target="#cli-equivalents"><span class="header-section-number">B.7</span> CLI Equivalents</a></li>
+  </ul>
+<div class="toc-actions"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/A_sample_data/data_manager/streamlit_app.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../../appendices/A_sample_data/data_manager/streamlit_app.html"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></a></li></ol></nav>
+<div class="quarto-title">
+<div class="quarto-title-block"><div><h1 class="title">Appendix B — Streamlit Data Manager</h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<p class="subtitle lead">Interactive UI for managing sample data</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Keywords</div>
+    <p>snowflake, feature store, ml, machine learning, mlops</p>
+  </div>
+</div>
+
+</header>
+
+
+<section id="overview" class="level2" data-number="B.1">
+<h2 data-number="B.1" class="anchored" data-anchor-id="overview"><span class="header-section-number">B.1</span> Overview</h2>
+<p>The <strong>Clickstream Data Manager</strong> is a Streamlit application that provides an interactive interface for all data management tasks. It’s the recommended way to set up sample data for the first time, as it guides you through each step with visual feedback.</p>
+<div class="quarto-figure quarto-figure-left">
+<figure class="figure">
+<p><img src="ui_images/streamlit_sidebar.png" class="img-fluid figure-img" width="250"></p>
+<figcaption>Streamlit Sidebar</figcaption>
+</figure>
+</div>
+<section id="features" class="level3" data-number="B.1.1">
+<h3 data-number="B.1.1" class="anchored" data-anchor-id="features"><span class="header-section-number">B.1.1</span> Features</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 40%">
+<col style="width: 60%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Page</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>📊 Overview</td>
+<td>Dashboard showing current data status</td>
+</tr>
+<tr class="even">
+<td>📥 Initial Load</td>
+<td>Generate and load synthetic clickstream data</td>
+</tr>
+<tr class="odd">
+<td>🔄 Incremental Generator</td>
+<td>Manage continuous data generation task</td>
+</tr>
+<tr class="even">
+<td>🌿 Development Branch</td>
+<td>Create sampled dev environments with Dynamic Tables</td>
+</tr>
+<tr class="odd">
+<td>📚 Public Datasets</td>
+<td>Load standard ML datasets</td>
+</tr>
+<tr class="even">
+<td>📈 Monitoring</td>
+<td>Track task and Dynamic Table refresh history</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="quick-start" class="level2" data-number="B.2">
+<h2 data-number="B.2" class="anchored" data-anchor-id="quick-start"><span class="header-section-number">B.2</span> Quick Start</h2>
+<section id="prerequisites" class="level3" data-number="B.2.1">
+<h3 data-number="B.2.1" class="anchored" data-anchor-id="prerequisites"><span class="header-section-number">B.2.1</span> Prerequisites</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1"></a><span class="co"># Install dependencies</span></span>
+<span id="cb1-2"><a href="#cb1-2"></a><span class="ex">pip</span> install streamlit pandas</span>
+<span id="cb1-3"><a href="#cb1-3"></a></span>
+<span id="cb1-4"><a href="#cb1-4"></a><span class="co"># Optional: for TOML parsing (auto-detects connections)</span></span>
+<span id="cb1-5"><a href="#cb1-5"></a><span class="ex">pip</span> install tomli  <span class="co"># Python &lt; 3.11</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="launch-the-app" class="level3" data-number="B.2.2">
+<h3 data-number="B.2.2" class="anchored" data-anchor-id="launch-the-app"><span class="header-section-number">B.2.2</span> Launch the App</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1"></a><span class="bu">cd</span> Snowflake_FeatureStore_Implementation_Guide/appendices/A_sample_data/data_manager/</span>
+<span id="cb2-2"><a href="#cb2-2"></a></span>
+<span id="cb2-3"><a href="#cb2-3"></a><span class="co"># Option 1: Set connection via environment variable</span></span>
+<span id="cb2-4"><a href="#cb2-4"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb2-5"><a href="#cb2-5"></a><span class="ex">streamlit</span> run app.py</span>
+<span id="cb2-6"><a href="#cb2-6"></a></span>
+<span id="cb2-7"><a href="#cb2-7"></a><span class="co"># Option 2: Select connection in the UI (if connections.toml exists)</span></span>
+<span id="cb2-8"><a href="#cb2-8"></a><span class="ex">streamlit</span> run app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The app will open in your browser at <code>http://localhost:8501</code>.</p>
+</section>
+</section>
+<section id="connecting-to-snowflake" class="level2" data-number="B.3">
+<h2 data-number="B.3" class="anchored" data-anchor-id="connecting-to-snowflake"><span class="header-section-number">B.3</span> Connecting to Snowflake</h2>
+<p>The sidebar provides two connection methods:</p>
+<section id="named-connection-recommended" class="level3" data-number="B.3.1">
+<h3 data-number="B.3.1" class="anchored" data-anchor-id="named-connection-recommended"><span class="header-section-number">B.3.1</span> Named Connection (Recommended)</h3>
+<p>If you have <code>~/.snowflake/connections.toml</code> configured, the app will automatically discover your connections:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_sidebar_connections_dropdown.png" class="img-fluid figure-img" width="300"></p>
+<figcaption>Connection Dropdown</figcaption>
+</figure>
+</div>
+<p>Select your connection from the dropdown. The app shows connection details (account, user) to help you identify the right one.</p>
+</section>
+<section id="manual-credentials" class="level3" data-number="B.3.2">
+<h3 data-number="B.3.2" class="anchored" data-anchor-id="manual-credentials"><span class="header-section-number">B.3.2</span> Manual Credentials</h3>
+<p>Alternatively, enter credentials directly:</p>
+<ul>
+<li>Account (e.g., <code>xy12345.us-east-1</code>)</li>
+<li>User</li>
+<li>Password</li>
+</ul>
+</section>
+<section id="common-settings" class="level3" data-number="B.3.3">
+<h3 data-number="B.3.3" class="anchored" data-anchor-id="common-settings"><span class="header-section-number">B.3.3</span> Common Settings</h3>
+<p>Regardless of connection method, you can override:</p>
+<ul>
+<li><strong>Warehouse</strong> - Compute warehouse to use</li>
+<li><strong>Database</strong> - Target database (default: <code>FEATURE_STORE_DEMO</code>)</li>
+<li><strong>Schema</strong> - Target schema (default: <code>CLICKSTREAM_DATA</code>)</li>
+</ul>
+<p>Click <strong>Connect</strong> to establish the connection. The status indicator will show 🟢 when connected.</p>
+</section>
+</section>
+<section id="page-walkthroughs" class="level2" data-number="B.4">
+<h2 data-number="B.4" class="anchored" data-anchor-id="page-walkthroughs"><span class="header-section-number">B.4</span> Page Walkthroughs</h2>
+<section id="overview-1" class="level3" data-number="B.4.1">
+<h3 data-number="B.4.1" class="anchored" data-anchor-id="overview-1"><span class="header-section-number">B.4.1</span> 📊 Overview</h3>
+<p>The Overview page shows the current state of your data:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_overview_dataloaded.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Overview Dashboard</figcaption>
+</figure>
+</div>
+<p><strong>Key metrics displayed:</strong></p>
+<ul>
+<li>Total tables and row counts</li>
+<li>Visitor and event counts</li>
+<li>Bar chart visualization of table sizes</li>
+<li>Detailed table breakdown</li>
+</ul>
+<p>Use this page to verify data was loaded correctly or to check current data volumes.</p>
+<hr>
+</section>
+<section id="initial-load" class="level3" data-number="B.4.2">
+<h3 data-number="B.4.2" class="anchored" data-anchor-id="initial-load"><span class="header-section-number">B.4.2</span> 📥 Initial Load</h3>
+<p>Generate and load synthetic clickstream data into your <strong>Production database</strong>.</p>
+<p>This page creates the foundational clickstream data model that serves as the source for all feature engineering examples in this guide. The Production database contains the complete e-commerce dataset with visitors, sessions, events, orders, and supporting dimension tables.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_initial_load.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Initial Load Page</figcaption>
+</figure>
+</div>
+<p><strong>Configuration options:</strong></p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 26%">
+<col style="width: 43%">
+<col style="width: 30%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Option</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Scale Factor</td>
+<td>Controls data volume (0.01 = 1K users, 1.0 = 100K users)</td>
+<td>0.01</td>
+</tr>
+<tr class="even">
+<td>Loading Method</td>
+<td><code>simple</code> (in-memory) or <code>bulk</code> (Parquet files)</td>
+<td>simple</td>
+</tr>
+<tr class="odd">
+<td>Target Database</td>
+<td>Where to create the data</td>
+<td>FEATURE_STORE_DEMO</td>
+</tr>
+<tr class="even">
+<td>Target Schema</td>
+<td>Schema for data tables</td>
+<td>CLICKSTREAM_DATA</td>
+</tr>
+<tr class="odd">
+<td>Date Range</td>
+<td>Historical date range for generated data</td>
+<td>2022-01-01 to yesterday</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scale guide:</strong></p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Scale</th>
+<th>Users</th>
+<th>Sessions</th>
+<th>Events</th>
+<th>Orders</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>0.01</td>
+<td>~1K</td>
+<td>~5K</td>
+<td>~50K</td>
+<td>~250</td>
+<td>Development</td>
+</tr>
+<tr class="even">
+<td>0.1</td>
+<td>~10K</td>
+<td>~50K</td>
+<td>~500K</td>
+<td>~2.5K</td>
+<td>Testing</td>
+</tr>
+<tr class="odd">
+<td>1.0</td>
+<td>~100K</td>
+<td>~500K</td>
+<td>~5M</td>
+<td>~25K</td>
+<td>Full scale</td>
+</tr>
+</tbody>
+</table>
+<p>Click <strong>Generate &amp; Load Data</strong> to start. The page shows progress and final row counts.</p>
+<hr>
+</section>
+<section id="incremental-generator" class="level3" data-number="B.4.3">
+<h3 data-number="B.4.3" class="anchored" data-anchor-id="incremental-generator"><span class="header-section-number">B.4.3</span> 🔄 Incremental Generator</h3>
+<p>Transform your Production database into a <strong>live, continuously updating dataset</strong>.</p>
+<p>This page deploys and manages a Snowflake-native incremental data generator that simulates real-time e-commerce traffic. Once started, the generator continuously adds new sessions, events, and orders to your Production database at a refresh frequency of your choosing. This enables testing of:</p>
+<ul>
+<li>Dynamic Tables that react to new data</li>
+<li>Streaming feature pipelines</li>
+<li>Point-in-time correct feature retrieval</li>
+<li>Real-time feature serving scenarios</li>
+</ul>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_incremental_load.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Incremental Generator Page</figcaption>
+</figure>
+</div>
+<p><strong>Status section shows:</strong></p>
+<ul>
+<li>Task state (🟢 RUNNING / 🟡 SUSPENDED / ⚪ NOT DEPLOYED)</li>
+<li>Sessions per batch</li>
+<li>Orders per batch</li>
+</ul>
+<p><strong>Controls:</strong></p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Button</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>▶️ Start Task</td>
+<td>Resume the incremental generation task</td>
+</tr>
+<tr class="even">
+<td>⏹️ Stop Task</td>
+<td>Suspend the task (stops generating data)</td>
+</tr>
+<tr class="odd">
+<td>🚀 Deploy Generator</td>
+<td>Deploy the stored procedure and task (first time setup)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Configuration updates:</strong></p>
+<p>Adjust sessions/orders per batch and click <strong>Update Config</strong> to change generation rate.</p>
+<p><strong>Recent Executions:</strong></p>
+<p>Shows the last 10 batch executions with timestamps, row counts, and duration.</p>
+<div class="callout callout-style-default callout-warning callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Warning</span>Cost Consideration
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The incremental generator runs on a schedule and consumes compute resources. Remember to <strong>Stop Task</strong> when not actively testing to avoid unnecessary costs.</p>
+</div>
+</div>
+<hr>
+</section>
+<section id="development-branch" class="level3" data-number="B.4.4">
+<h3 data-number="B.4.4" class="anchored" data-anchor-id="development-branch"><span class="header-section-number">B.4.4</span> 🌿 Development Branch</h3>
+<p>Create and maintain a <strong>live subset of Production data</strong> in a separate Development database.</p>
+<p>This page creates a Development database branch that automatically stays synchronized with your Production database using Dynamic Tables. The branch contains a sampled subset of visitors (and all their related sessions, events, and orders), making it ideal for:</p>
+<ul>
+<li>Cost-effective development and testing with smaller data volumes</li>
+<li>Isolated experimentation without affecting production</li>
+<li>Testing feature pipelines with realistic, live-updating data</li>
+<li>Validating Dynamic Table refresh behavior</li>
+</ul>
+<p>As new data flows into Production (via the Incremental Generator), the Development branch automatically receives the corresponding subset based on your sample percentage.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_dev_branch.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Development Branch Page</figcaption>
+</figure>
+</div>
+<p><strong>Create New Branch:</strong></p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 26%">
+<col style="width: 43%">
+<col style="width: 30%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Option</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Production Database</td>
+<td>Source database to sample from</td>
+<td>FEATURE_STORE_DEMO</td>
+</tr>
+<tr class="even">
+<td>Development Database</td>
+<td>New database name to create</td>
+<td>FEATURE_STORE_DEMO_DEV</td>
+</tr>
+<tr class="odd">
+<td>Sample Percentage</td>
+<td>% of visitors to include</td>
+<td>10%</td>
+</tr>
+<tr class="even">
+<td>DT Refresh Lag</td>
+<td>How often Dynamic Tables refresh</td>
+<td>1 HOUR</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Refresh Lag Options:</strong></p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Option</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1 MINUTE</td>
+<td>Real-time testing, demos</td>
+</tr>
+<tr class="even">
+<td>10 MINUTES</td>
+<td>Active development</td>
+</tr>
+<tr class="odd">
+<td>15 MINUTES</td>
+<td>Development with moderate refresh</td>
+</tr>
+<tr class="even">
+<td>30 MINUTES</td>
+<td>Standard development</td>
+</tr>
+<tr class="odd">
+<td>1 HOUR</td>
+<td>Default, balanced cost/freshness</td>
+</tr>
+<tr class="even">
+<td>2 HOURS</td>
+<td>Lower cost, less frequent updates</td>
+</tr>
+<tr class="odd">
+<td>6 HOURS</td>
+<td>Minimal cost, batch-style refresh</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How it works:</strong></p>
+<ol type="1">
+<li>Creates a new database with identical schema structure</li>
+<li>Samples visitors at the specified percentage</li>
+<li>Creates Dynamic Tables that automatically sync from production</li>
+<li>Maintains referential integrity (related sessions, events, orders follow the sampled visitors)</li>
+</ol>
+<p><strong>Manage Existing Branch:</strong></p>
+<ul>
+<li><strong>Load Branch Status</strong> - View current config and DT states</li>
+<li><strong>Suspend DTs</strong> - Pause refresh (cost savings when not in use)</li>
+<li><strong>Resume DTs</strong> - Resume automatic refresh</li>
+<li><strong>Update Refresh Rate</strong> - Change the target lag for all Dynamic Tables</li>
+<li><strong>Drop Branch</strong> - Delete the development database</li>
+</ul>
+<p><strong>Adjusting Refresh Frequency:</strong></p>
+<p>After creating a branch, you can change how frequently the Dynamic Tables refresh:</p>
+<ol type="1">
+<li>Enter the branch database name</li>
+<li>Select a new target lag from the dropdown</li>
+<li>Click <strong>⚡ Update Refresh Rate</strong></li>
+</ol>
+<p>This updates all Dynamic Tables in the branch to use the new refresh interval.</p>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Environment Switching
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Development branches use identical object names below the database level. Switch environments by changing <code>USE DATABASE</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb3-1"><a href="#cb3-1"></a><span class="co">-- Production</span></span>
+<span id="cb3-2"><a href="#cb3-2"></a><span class="kw">USE</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO;</span>
+<span id="cb3-3"><a href="#cb3-3"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> CLICKSTREAM_DATA.<span class="kw">EVENTS</span> <span class="kw">LIMIT</span> <span class="dv">10</span>;</span>
+<span id="cb3-4"><a href="#cb3-4"></a></span>
+<span id="cb3-5"><a href="#cb3-5"></a><span class="co">-- Development (10% sample)</span></span>
+<span id="cb3-6"><a href="#cb3-6"></a><span class="kw">USE</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO_DEV;</span>
+<span id="cb3-7"><a href="#cb3-7"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> CLICKSTREAM_DATA.<span class="kw">EVENTS</span> <span class="kw">LIMIT</span> <span class="dv">10</span>;  <span class="co">-- Same query!</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+<hr>
+</section>
+<section id="public-datasets" class="level3" data-number="B.4.5">
+<h3 data-number="B.4.5" class="anchored" data-anchor-id="public-datasets"><span class="header-section-number">B.4.5</span> 📚 Public Datasets</h3>
+<p>Load standard ML datasets for testing and examples:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_public_datasets.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Public Datasets Page</figcaption>
+</figure>
+</div>
+<p><strong>Available datasets:</strong></p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Dataset</th>
+<th>Rows</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>penguins</td>
+<td>344</td>
+<td>Multi-class classification</td>
+</tr>
+<tr class="even">
+<td>titanic</td>
+<td>891</td>
+<td>Binary classification</td>
+</tr>
+<tr class="odd">
+<td>iris</td>
+<td>150</td>
+<td>Classification basics</td>
+</tr>
+<tr class="even">
+<td>wine</td>
+<td>1,599</td>
+<td>Regression / classification</td>
+</tr>
+<tr class="odd">
+<td>california_housing</td>
+<td>20,640</td>
+<td>Regression</td>
+</tr>
+<tr class="even">
+<td>nyc_taxi</td>
+<td>~3M (50K sample)</td>
+<td>Temporal features</td>
+</tr>
+<tr class="odd">
+<td>credit_card_fraud</td>
+<td>284K (50K sample)</td>
+<td>Imbalanced classification</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Options:</strong></p>
+<ul>
+<li><strong>Select Dataset</strong> - Choose which dataset to load</li>
+<li><strong>Load Full Dataset</strong> - For large datasets, bypass the default 50K sample limit</li>
+<li><strong>Target Database/Schema</strong> - Where to create the table</li>
+</ul>
+<p>Click <strong>Load Dataset</strong> for a single dataset or <strong>Load All Datasets</strong> to load everything.</p>
+<hr>
+</section>
+<section id="monitoring" class="level3" data-number="B.4.6">
+<h3 data-number="B.4.6" class="anchored" data-anchor-id="monitoring"><span class="header-section-number">B.4.6</span> 📈 Monitoring</h3>
+<p>Track production data generation and development branch Dynamic Table refreshes:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="ui_images/streamlit_monitoring.png" class="img-fluid figure-img" style="width:80.0%"></p>
+<figcaption>Monitoring Dashboard</figcaption>
+</figure>
+</div>
+<p>The Monitoring page is divided into two main sections:</p>
+<p><strong>🏭 Production Data Section:</strong></p>
+<p>Monitor the incremental data generator and production table statistics:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 45%">
+<col style="width: 54%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Component</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Production Database</td>
+<td>Database where production data and generator are deployed</td>
+</tr>
+<tr class="even">
+<td>Data Schema</td>
+<td>Schema containing the data tables</td>
+</tr>
+<tr class="odd">
+<td>Admin Schema</td>
+<td>Schema containing the generator task and logs</td>
+</tr>
+<tr class="even">
+<td>Production Row Counts</td>
+<td>Bar chart and table showing current row counts</td>
+</tr>
+<tr class="odd">
+<td>Incremental Generator History</td>
+<td>Recent batch executions with timestamps, row counts, and duration</td>
+</tr>
+</tbody>
+</table>
+<p><strong>🌿 Development Branch Section:</strong></p>
+<p>Monitor Dynamic Tables in your development branches:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 45%">
+<col style="width: 54%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Component</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Development Database</td>
+<td>The dev branch database to monitor (default: <code>_DEV01</code> suffix)</td>
+</tr>
+<tr class="even">
+<td>Data Schema</td>
+<td>Schema containing the Dynamic Tables</td>
+</tr>
+<tr class="odd">
+<td>Development Row Counts</td>
+<td>Bar chart and table showing current row counts with % of production</td>
+</tr>
+<tr class="even">
+<td>Dynamic Table Refresh History</td>
+<td>Real-time refresh data from <code>INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Row Limit Selectors:</strong></p>
+<p>Both history tables include a “Rows” dropdown to control how many records are displayed (25, 50, 100, 250, or 500).</p>
+<p><strong>Auto-refresh:</strong></p>
+<p>Enable the checkbox to automatically refresh the dashboard every 60 seconds - useful for monitoring incremental generation and Dynamic Table refreshes in real-time.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Real-Time Dynamic Table History
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The Dynamic Table refresh history uses Snowflake’s <code>INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()</code> table function, which provides real-time data with no latency. This shows both completed and in-progress refreshes.</p>
+</div>
+</div>
+</section>
+</section>
+<section id="common-workflows" class="level2" data-number="B.5">
+<h2 data-number="B.5" class="anchored" data-anchor-id="common-workflows"><span class="header-section-number">B.5</span> Common Workflows</h2>
+<section id="first-time-setup" class="level3" data-number="B.5.1">
+<h3 data-number="B.5.1" class="anchored" data-anchor-id="first-time-setup"><span class="header-section-number">B.5.1</span> First-Time Setup</h3>
+<ol type="1">
+<li><strong>Connect</strong> - Select your Snowflake connection and click Connect</li>
+<li><strong>Initial Load</strong> - Go to 📥 Initial Load, set scale to 0.01, click Generate &amp; Load</li>
+<li><strong>Verify</strong> - Go to 📊 Overview to confirm data was loaded</li>
+<li><strong>Public Datasets</strong> (optional) - Load any additional datasets needed</li>
+</ol>
+</section>
+<section id="testing-dynamic-tables" class="level3" data-number="B.5.2">
+<h3 data-number="B.5.2" class="anchored" data-anchor-id="testing-dynamic-tables"><span class="header-section-number">B.5.2</span> Testing Dynamic Tables</h3>
+<ol type="1">
+<li>Complete first-time setup above</li>
+<li><strong>Deploy Generator</strong> - Go to 🔄 Incremental Generator, click Deploy Generator</li>
+<li><strong>Start Task</strong> - Click Start Task to begin continuous generation</li>
+<li><strong>Monitor</strong> - Go to 📈 Monitoring to watch data grow</li>
+<li><strong>Stop Task</strong> - When done testing, click Stop Task</li>
+</ol>
+</section>
+<section id="creating-a-dev-environment" class="level3" data-number="B.5.3">
+<h3 data-number="B.5.3" class="anchored" data-anchor-id="creating-a-dev-environment"><span class="header-section-number">B.5.3</span> Creating a Dev Environment</h3>
+<ol type="1">
+<li>Complete first-time setup with production-scale data (scale 0.1 or 1.0)</li>
+<li><strong>Create Branch</strong> - Go to 🌿 Development Branch</li>
+<li>Set sample percentage (e.g., 10%)</li>
+<li>Click <strong>Create Development Branch</strong></li>
+<li>Use <code>FEATURE_STORE_DEMO_DEV</code> for development/testing</li>
+</ol>
+</section>
+</section>
+<section id="troubleshooting" class="level2" data-number="B.6">
+<h2 data-number="B.6" class="anchored" data-anchor-id="troubleshooting"><span class="header-section-number">B.6</span> Troubleshooting</h2>
+<section id="app-wont-start" class="level3" data-number="B.6.1">
+<h3 data-number="B.6.1" class="anchored" data-anchor-id="app-wont-start"><span class="header-section-number">B.6.1</span> App won’t start</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1"></a><span class="co"># Check Streamlit is installed</span></span>
+<span id="cb4-2"><a href="#cb4-2"></a><span class="ex">pip</span> install streamlit</span>
+<span id="cb4-3"><a href="#cb4-3"></a></span>
+<span id="cb4-4"><a href="#cb4-4"></a><span class="co"># Try a different port</span></span>
+<span id="cb4-5"><a href="#cb4-5"></a><span class="ex">streamlit</span> run app.py <span class="at">--server.port</span> 8502</span>
+<span id="cb4-6"><a href="#cb4-6"></a></span>
+<span id="cb4-7"><a href="#cb4-7"></a><span class="co"># Check for import errors</span></span>
+<span id="cb4-8"><a href="#cb4-8"></a><span class="ex">python</span> <span class="at">-c</span> <span class="st">"from core import DataManager"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="connection-fails" class="level3" data-number="B.6.2">
+<h3 data-number="B.6.2" class="anchored" data-anchor-id="connection-fails"><span class="header-section-number">B.6.2</span> Connection fails</h3>
+<ol type="1">
+<li>Verify your connection works with SnowSQL or another tool</li>
+<li>Check <code>~/.snowflake/connections.toml</code> format</li>
+<li>Ensure your IP is allowlisted if using network policies</li>
+<li>Try manual credentials instead of named connection</li>
+</ol>
+</section>
+<section id="no-tables-found" class="level3" data-number="B.6.3">
+<h3 data-number="B.6.3" class="anchored" data-anchor-id="no-tables-found"><span class="header-section-number">B.6.3</span> “No tables found”</h3>
+<p>The database/schema doesn’t exist or has no tables. Use <strong>Initial Load</strong> to create and populate tables.</p>
+</section>
+<section id="incremental-generator-not-running" class="level3" data-number="B.6.4">
+<h3 data-number="B.6.4" class="anchored" data-anchor-id="incremental-generator-not-running"><span class="header-section-number">B.6.4</span> Incremental generator not running</h3>
+<ol type="1">
+<li>Check task status - it may be SUSPENDED</li>
+<li>Verify the task was deployed (click Deploy Generator)</li>
+<li>Check EXECUTE TASK privilege on your role</li>
+<li>Review task history for errors</li>
+</ol>
+</section>
+</section>
+<section id="cli-equivalents" class="level2" data-number="B.7">
+<h2 data-number="B.7" class="anchored" data-anchor-id="cli-equivalents"><span class="header-section-number">B.7</span> CLI Equivalents</h2>
+<p>Each page shows a <strong>CLI Equivalent</strong> section with the corresponding command-line commands. This is useful for:</p>
+<ul>
+<li>Automation and scripting</li>
+<li>CI/CD pipelines</li>
+<li>Reproducibility</li>
+<li>Users who prefer command-line interfaces</li>
+</ul>
+<p>The Streamlit UI and CLI tools use the same underlying <code>core.py</code> module, ensuring consistent behavior.</p>
+
+
+<!-- -->
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const a = window.document.createElement('a');
+      a.classList.add('top-right');
+      a.classList.add('quarto-color-scheme-toggle');
+      a.href = "";
+      a.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      a.appendChild(i);
+      window.document.body.appendChild(a);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+    const viewSource = window.document.getElementById('quarto-view-source') ||
+                       window.document.getElementById('quarto-code-tools-source');
+    if (viewSource) {
+      const sourceUrl = viewSource.getAttribute("data-quarto-source-url");
+      viewSource.addEventListener("click", function(e) {
+        if (sourceUrl) {
+          // rstudio viewer pane
+          if (/\bcapabilities=\b/.test(window.location)) {
+            window.open(sourceUrl);
+          } else {
+            window.location.href = sourceUrl;
+          }
+        } else {
+          const modal = new bootstrap.Modal(document.getElementById('quarto-embedded-source-code-modal'));
+          modal.show();
+        }
+        return false;
+      });
+    }
+    function toggleCodeHandler(show) {
+      return function(e) {
+        const detailsSrc = window.document.querySelectorAll(".cell > details > .sourceCode");
+        for (let i=0; i<detailsSrc.length; i++) {
+          const details = detailsSrc[i].parentElement;
+          if (show) {
+            details.open = true;
+          } else {
+            details.removeAttribute("open");
+          }
+        }
+        const cellCodeDivs = window.document.querySelectorAll(".cell > .sourceCode");
+        const fromCls = show ? "hidden" : "unhidden";
+        const toCls = show ? "unhidden" : "hidden";
+        for (let i=0; i<cellCodeDivs.length; i++) {
+          const codeDiv = cellCodeDivs[i];
+          if (codeDiv.classList.contains(fromCls)) {
+            codeDiv.classList.remove(fromCls);
+            codeDiv.classList.add(toCls);
+          } 
+        }
+        return false;
+      }
+    }
+    const hideAllCode = window.document.getElementById("quarto-hide-all-code");
+    if (hideAllCode) {
+      hideAllCode.addEventListener("click", toggleCodeHandler(false));
+    }
+    const showAllCode = window.document.getElementById("quarto-show-all-code");
+    if (showAllCode) {
+      showAllCode.addEventListener("click", toggleCodeHandler(true));
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+      <a href="../../../appendices/A_sample_data/index.html" class="pagination-link" aria-label="Sample Data">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="../../../appendices/B_setup/index.html" class="pagination-link" aria-label="Environment Setup">
+        <span class="nav-page-text"><span class="chapter-number">C</span>&nbsp; <span class="chapter-title">Environment Setup</span></span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5" data-shortcodes="false"><pre class="sourceCode numberSource markdown number-lines code-with-copy"><code class="sourceCode markdown"><span id="cb5-1"><a href="#cb5-1"></a><span class="co">---</span></span>
+<span id="cb5-2"><a href="#cb5-2"></a><span class="an">title:</span><span class="co"> "Streamlit Data Manager"</span></span>
+<span id="cb5-3"><a href="#cb5-3"></a><span class="an">subtitle:</span><span class="co"> "Interactive UI for managing sample data"</span></span>
+<span id="cb5-4"><a href="#cb5-4"></a><span class="co">---</span></span>
+<span id="cb5-5"><a href="#cb5-5"></a></span>
+<span id="cb5-6"><a href="#cb5-6"></a><span class="fu">## Overview</span></span>
+<span id="cb5-7"><a href="#cb5-7"></a></span>
+<span id="cb5-8"><a href="#cb5-8"></a>The **Clickstream Data Manager** is a Streamlit application that provides an interactive interface for all data management tasks. It's the recommended way to set up sample data for the first time, as it guides you through each step with visual feedback.</span>
+<span id="cb5-9"><a href="#cb5-9"></a></span>
+<span id="cb5-10"><a href="#cb5-10"></a><span class="al">![Streamlit Sidebar](ui_images/streamlit_sidebar.png)</span>{width=250 fig-align="left"}</span>
+<span id="cb5-11"><a href="#cb5-11"></a></span>
+<span id="cb5-12"><a href="#cb5-12"></a><span class="fu">### Features</span></span>
+<span id="cb5-13"><a href="#cb5-13"></a></span>
+<span id="cb5-14"><a href="#cb5-14"></a><span class="pp">|</span> Page <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb5-15"><a href="#cb5-15"></a><span class="pp">|------|---------|</span></span>
+<span id="cb5-16"><a href="#cb5-16"></a><span class="pp">|</span> 📊 Overview <span class="pp">|</span> Dashboard showing current data status <span class="pp">|</span></span>
+<span id="cb5-17"><a href="#cb5-17"></a><span class="pp">|</span> 📥 Initial Load <span class="pp">|</span> Generate and load synthetic clickstream data <span class="pp">|</span></span>
+<span id="cb5-18"><a href="#cb5-18"></a><span class="pp">|</span> 🔄 Incremental Generator <span class="pp">|</span> Manage continuous data generation task <span class="pp">|</span></span>
+<span id="cb5-19"><a href="#cb5-19"></a><span class="pp">|</span> 🌿 Development Branch <span class="pp">|</span> Create sampled dev environments with Dynamic Tables <span class="pp">|</span></span>
+<span id="cb5-20"><a href="#cb5-20"></a><span class="pp">|</span> 📚 Public Datasets <span class="pp">|</span> Load standard ML datasets <span class="pp">|</span></span>
+<span id="cb5-21"><a href="#cb5-21"></a><span class="pp">|</span> 📈 Monitoring <span class="pp">|</span> Track task and Dynamic Table refresh history <span class="pp">|</span></span>
+<span id="cb5-22"><a href="#cb5-22"></a></span>
+<span id="cb5-23"><a href="#cb5-23"></a><span class="fu">## Quick Start</span></span>
+<span id="cb5-24"><a href="#cb5-24"></a></span>
+<span id="cb5-25"><a href="#cb5-25"></a><span class="fu">### Prerequisites</span></span>
+<span id="cb5-26"><a href="#cb5-26"></a></span>
+<span id="cb5-27"><a href="#cb5-27"></a><span class="in">```bash</span></span>
+<span id="cb5-28"><a href="#cb5-28"></a><span class="co"># Install dependencies</span></span>
+<span id="cb5-29"><a href="#cb5-29"></a><span class="ex">pip</span> install streamlit pandas</span>
+<span id="cb5-30"><a href="#cb5-30"></a></span>
+<span id="cb5-31"><a href="#cb5-31"></a><span class="co"># Optional: for TOML parsing (auto-detects connections)</span></span>
+<span id="cb5-32"><a href="#cb5-32"></a><span class="ex">pip</span> install tomli  <span class="co"># Python &lt; 3.11</span></span>
+<span id="cb5-33"><a href="#cb5-33"></a><span class="in">```</span></span>
+<span id="cb5-34"><a href="#cb5-34"></a></span>
+<span id="cb5-35"><a href="#cb5-35"></a><span class="fu">### Launch the App</span></span>
+<span id="cb5-36"><a href="#cb5-36"></a></span>
+<span id="cb5-37"><a href="#cb5-37"></a><span class="in">```bash</span></span>
+<span id="cb5-38"><a href="#cb5-38"></a><span class="bu">cd</span> Snowflake_FeatureStore_Implementation_Guide/appendices/A_sample_data/data_manager/</span>
+<span id="cb5-39"><a href="#cb5-39"></a></span>
+<span id="cb5-40"><a href="#cb5-40"></a><span class="co"># Option 1: Set connection via environment variable</span></span>
+<span id="cb5-41"><a href="#cb5-41"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb5-42"><a href="#cb5-42"></a><span class="ex">streamlit</span> run app.py</span>
+<span id="cb5-43"><a href="#cb5-43"></a></span>
+<span id="cb5-44"><a href="#cb5-44"></a><span class="co"># Option 2: Select connection in the UI (if connections.toml exists)</span></span>
+<span id="cb5-45"><a href="#cb5-45"></a><span class="ex">streamlit</span> run app.py</span>
+<span id="cb5-46"><a href="#cb5-46"></a><span class="in">```</span></span>
+<span id="cb5-47"><a href="#cb5-47"></a></span>
+<span id="cb5-48"><a href="#cb5-48"></a>The app will open in your browser at <span class="in">`http://localhost:8501`</span>.</span>
+<span id="cb5-49"><a href="#cb5-49"></a></span>
+<span id="cb5-50"><a href="#cb5-50"></a><span class="fu">## Connecting to Snowflake</span></span>
+<span id="cb5-51"><a href="#cb5-51"></a></span>
+<span id="cb5-52"><a href="#cb5-52"></a>The sidebar provides two connection methods:</span>
+<span id="cb5-53"><a href="#cb5-53"></a></span>
+<span id="cb5-54"><a href="#cb5-54"></a><span class="fu">### Named Connection (Recommended)</span></span>
+<span id="cb5-55"><a href="#cb5-55"></a></span>
+<span id="cb5-56"><a href="#cb5-56"></a>If you have <span class="in">`~/.snowflake/connections.toml`</span> configured, the app will automatically discover your connections:</span>
+<span id="cb5-57"><a href="#cb5-57"></a></span>
+<span id="cb5-58"><a href="#cb5-58"></a><span class="al">![Connection Dropdown](ui_images/streamlit_sidebar_connections_dropdown.png)</span>{width=300}</span>
+<span id="cb5-59"><a href="#cb5-59"></a></span>
+<span id="cb5-60"><a href="#cb5-60"></a>Select your connection from the dropdown. The app shows connection details (account, user) to help you identify the right one.</span>
+<span id="cb5-61"><a href="#cb5-61"></a></span>
+<span id="cb5-62"><a href="#cb5-62"></a><span class="fu">### Manual Credentials</span></span>
+<span id="cb5-63"><a href="#cb5-63"></a></span>
+<span id="cb5-64"><a href="#cb5-64"></a>Alternatively, enter credentials directly:</span>
+<span id="cb5-65"><a href="#cb5-65"></a></span>
+<span id="cb5-66"><a href="#cb5-66"></a><span class="ss">- </span>Account (e.g., <span class="in">`xy12345.us-east-1`</span>)</span>
+<span id="cb5-67"><a href="#cb5-67"></a><span class="ss">- </span>User</span>
+<span id="cb5-68"><a href="#cb5-68"></a><span class="ss">- </span>Password</span>
+<span id="cb5-69"><a href="#cb5-69"></a></span>
+<span id="cb5-70"><a href="#cb5-70"></a><span class="fu">### Common Settings</span></span>
+<span id="cb5-71"><a href="#cb5-71"></a></span>
+<span id="cb5-72"><a href="#cb5-72"></a>Regardless of connection method, you can override:</span>
+<span id="cb5-73"><a href="#cb5-73"></a></span>
+<span id="cb5-74"><a href="#cb5-74"></a><span class="ss">- </span>**Warehouse** - Compute warehouse to use</span>
+<span id="cb5-75"><a href="#cb5-75"></a><span class="ss">- </span>**Database** - Target database (default: <span class="in">`FEATURE_STORE_DEMO`</span>)</span>
+<span id="cb5-76"><a href="#cb5-76"></a><span class="ss">- </span>**Schema** - Target schema (default: <span class="in">`CLICKSTREAM_DATA`</span>)</span>
+<span id="cb5-77"><a href="#cb5-77"></a></span>
+<span id="cb5-78"><a href="#cb5-78"></a>Click **Connect** to establish the connection. The status indicator will show 🟢 when connected.</span>
+<span id="cb5-79"><a href="#cb5-79"></a></span>
+<span id="cb5-80"><a href="#cb5-80"></a><span class="fu">## Page Walkthroughs</span></span>
+<span id="cb5-81"><a href="#cb5-81"></a></span>
+<span id="cb5-82"><a href="#cb5-82"></a><span class="fu">### 📊 Overview</span></span>
+<span id="cb5-83"><a href="#cb5-83"></a></span>
+<span id="cb5-84"><a href="#cb5-84"></a>The Overview page shows the current state of your data:</span>
+<span id="cb5-85"><a href="#cb5-85"></a></span>
+<span id="cb5-86"><a href="#cb5-86"></a><span class="al">![Overview Dashboard](ui_images/streamlit_overview_dataloaded.png)</span>{width=80%}</span>
+<span id="cb5-87"><a href="#cb5-87"></a></span>
+<span id="cb5-88"><a href="#cb5-88"></a>**Key metrics displayed:**</span>
+<span id="cb5-89"><a href="#cb5-89"></a></span>
+<span id="cb5-90"><a href="#cb5-90"></a><span class="ss">- </span>Total tables and row counts</span>
+<span id="cb5-91"><a href="#cb5-91"></a><span class="ss">- </span>Visitor and event counts</span>
+<span id="cb5-92"><a href="#cb5-92"></a><span class="ss">- </span>Bar chart visualization of table sizes</span>
+<span id="cb5-93"><a href="#cb5-93"></a><span class="ss">- </span>Detailed table breakdown</span>
+<span id="cb5-94"><a href="#cb5-94"></a></span>
+<span id="cb5-95"><a href="#cb5-95"></a>Use this page to verify data was loaded correctly or to check current data volumes.</span>
+<span id="cb5-96"><a href="#cb5-96"></a></span>
+<span id="cb5-97"><a href="#cb5-97"></a>---</span>
+<span id="cb5-98"><a href="#cb5-98"></a></span>
+<span id="cb5-99"><a href="#cb5-99"></a><span class="fu">### 📥 Initial Load</span></span>
+<span id="cb5-100"><a href="#cb5-100"></a></span>
+<span id="cb5-101"><a href="#cb5-101"></a>Generate and load synthetic clickstream data into your **Production database**.</span>
+<span id="cb5-102"><a href="#cb5-102"></a></span>
+<span id="cb5-103"><a href="#cb5-103"></a>This page creates the foundational clickstream data model that serves as the source for all feature engineering examples in this guide. The Production database contains the complete e-commerce dataset with visitors, sessions, events, orders, and supporting dimension tables.</span>
+<span id="cb5-104"><a href="#cb5-104"></a></span>
+<span id="cb5-105"><a href="#cb5-105"></a><span class="al">![Initial Load Page](ui_images/streamlit_initial_load.png)</span>{width=80%}</span>
+<span id="cb5-106"><a href="#cb5-106"></a></span>
+<span id="cb5-107"><a href="#cb5-107"></a>**Configuration options:**</span>
+<span id="cb5-108"><a href="#cb5-108"></a></span>
+<span id="cb5-109"><a href="#cb5-109"></a><span class="pp">|</span> Option <span class="pp">|</span> Description <span class="pp">|</span> Default <span class="pp">|</span></span>
+<span id="cb5-110"><a href="#cb5-110"></a><span class="pp">|--------|-------------|---------|</span></span>
+<span id="cb5-111"><a href="#cb5-111"></a><span class="pp">|</span> Scale Factor <span class="pp">|</span> Controls data volume (0.01 = 1K users, 1.0 = 100K users) <span class="pp">|</span> 0.01 <span class="pp">|</span></span>
+<span id="cb5-112"><a href="#cb5-112"></a><span class="pp">|</span> Loading Method <span class="pp">|</span> <span class="in">`simple`</span> (in-memory) or <span class="in">`bulk`</span> (Parquet files) <span class="pp">|</span> simple <span class="pp">|</span></span>
+<span id="cb5-113"><a href="#cb5-113"></a><span class="pp">|</span> Target Database <span class="pp">|</span> Where to create the data <span class="pp">|</span> FEATURE_STORE_DEMO <span class="pp">|</span></span>
+<span id="cb5-114"><a href="#cb5-114"></a><span class="pp">|</span> Target Schema <span class="pp">|</span> Schema for data tables <span class="pp">|</span> CLICKSTREAM_DATA <span class="pp">|</span></span>
+<span id="cb5-115"><a href="#cb5-115"></a><span class="pp">|</span> Date Range <span class="pp">|</span> Historical date range for generated data <span class="pp">|</span> 2022-01-01 to yesterday <span class="pp">|</span></span>
+<span id="cb5-116"><a href="#cb5-116"></a></span>
+<span id="cb5-117"><a href="#cb5-117"></a>**Scale guide:**</span>
+<span id="cb5-118"><a href="#cb5-118"></a></span>
+<span id="cb5-119"><a href="#cb5-119"></a><span class="pp">|</span> Scale <span class="pp">|</span> Users <span class="pp">|</span> Sessions <span class="pp">|</span> Events <span class="pp">|</span> Orders <span class="pp">|</span> Use Case <span class="pp">|</span></span>
+<span id="cb5-120"><a href="#cb5-120"></a><span class="pp">|-------|-------|----------|--------|--------|----------|</span></span>
+<span id="cb5-121"><a href="#cb5-121"></a><span class="pp">|</span> 0.01 <span class="pp">|</span> ~1K <span class="pp">|</span> ~5K <span class="pp">|</span> ~50K <span class="pp">|</span> ~250 <span class="pp">|</span> Development <span class="pp">|</span></span>
+<span id="cb5-122"><a href="#cb5-122"></a><span class="pp">|</span> 0.1 <span class="pp">|</span> ~10K <span class="pp">|</span> ~50K <span class="pp">|</span> ~500K <span class="pp">|</span> ~2.5K <span class="pp">|</span> Testing <span class="pp">|</span></span>
+<span id="cb5-123"><a href="#cb5-123"></a><span class="pp">|</span> 1.0 <span class="pp">|</span> ~100K <span class="pp">|</span> ~500K <span class="pp">|</span> ~5M <span class="pp">|</span> ~25K <span class="pp">|</span> Full scale <span class="pp">|</span></span>
+<span id="cb5-124"><a href="#cb5-124"></a></span>
+<span id="cb5-125"><a href="#cb5-125"></a>Click **Generate &amp; Load Data** to start. The page shows progress and final row counts.</span>
+<span id="cb5-126"><a href="#cb5-126"></a></span>
+<span id="cb5-127"><a href="#cb5-127"></a>---</span>
+<span id="cb5-128"><a href="#cb5-128"></a></span>
+<span id="cb5-129"><a href="#cb5-129"></a><span class="fu">### 🔄 Incremental Generator</span></span>
+<span id="cb5-130"><a href="#cb5-130"></a></span>
+<span id="cb5-131"><a href="#cb5-131"></a>Transform your Production database into a **live, continuously updating dataset**.</span>
+<span id="cb5-132"><a href="#cb5-132"></a></span>
+<span id="cb5-133"><a href="#cb5-133"></a>This page deploys and manages a Snowflake-native incremental data generator that simulates real-time e-commerce traffic. Once started, the generator continuously adds new sessions, events, and orders to your Production database at a refresh frequency of your choosing. This enables testing of:</span>
+<span id="cb5-134"><a href="#cb5-134"></a></span>
+<span id="cb5-135"><a href="#cb5-135"></a><span class="ss">- </span>Dynamic Tables that react to new data</span>
+<span id="cb5-136"><a href="#cb5-136"></a><span class="ss">- </span>Streaming feature pipelines</span>
+<span id="cb5-137"><a href="#cb5-137"></a><span class="ss">- </span>Point-in-time correct feature retrieval</span>
+<span id="cb5-138"><a href="#cb5-138"></a><span class="ss">- </span>Real-time feature serving scenarios</span>
+<span id="cb5-139"><a href="#cb5-139"></a></span>
+<span id="cb5-140"><a href="#cb5-140"></a><span class="al">![Incremental Generator Page](ui_images/streamlit_incremental_load.png)</span>{width=80%}</span>
+<span id="cb5-141"><a href="#cb5-141"></a></span>
+<span id="cb5-142"><a href="#cb5-142"></a>**Status section shows:**</span>
+<span id="cb5-143"><a href="#cb5-143"></a></span>
+<span id="cb5-144"><a href="#cb5-144"></a><span class="ss">- </span>Task state (🟢 RUNNING / 🟡 SUSPENDED / ⚪ NOT DEPLOYED)</span>
+<span id="cb5-145"><a href="#cb5-145"></a><span class="ss">- </span>Sessions per batch</span>
+<span id="cb5-146"><a href="#cb5-146"></a><span class="ss">- </span>Orders per batch</span>
+<span id="cb5-147"><a href="#cb5-147"></a></span>
+<span id="cb5-148"><a href="#cb5-148"></a>**Controls:**</span>
+<span id="cb5-149"><a href="#cb5-149"></a></span>
+<span id="cb5-150"><a href="#cb5-150"></a><span class="pp">|</span> Button <span class="pp">|</span> Action <span class="pp">|</span></span>
+<span id="cb5-151"><a href="#cb5-151"></a><span class="pp">|--------|--------|</span></span>
+<span id="cb5-152"><a href="#cb5-152"></a><span class="pp">|</span> ▶️ Start Task <span class="pp">|</span> Resume the incremental generation task <span class="pp">|</span></span>
+<span id="cb5-153"><a href="#cb5-153"></a><span class="pp">|</span> ⏹️ Stop Task <span class="pp">|</span> Suspend the task (stops generating data) <span class="pp">|</span></span>
+<span id="cb5-154"><a href="#cb5-154"></a><span class="pp">|</span> 🚀 Deploy Generator <span class="pp">|</span> Deploy the stored procedure and task (first time setup) <span class="pp">|</span></span>
+<span id="cb5-155"><a href="#cb5-155"></a></span>
+<span id="cb5-156"><a href="#cb5-156"></a>**Configuration updates:**</span>
+<span id="cb5-157"><a href="#cb5-157"></a></span>
+<span id="cb5-158"><a href="#cb5-158"></a>Adjust sessions/orders per batch and click **Update Config** to change generation rate.</span>
+<span id="cb5-159"><a href="#cb5-159"></a></span>
+<span id="cb5-160"><a href="#cb5-160"></a>**Recent Executions:**</span>
+<span id="cb5-161"><a href="#cb5-161"></a></span>
+<span id="cb5-162"><a href="#cb5-162"></a>Shows the last 10 batch executions with timestamps, row counts, and duration.</span>
+<span id="cb5-163"><a href="#cb5-163"></a></span>
+<span id="cb5-164"><a href="#cb5-164"></a>::: {.callout-warning}</span>
+<span id="cb5-165"><a href="#cb5-165"></a><span class="fu">## Cost Consideration</span></span>
+<span id="cb5-166"><a href="#cb5-166"></a>The incremental generator runs on a schedule and consumes compute resources. Remember to **Stop Task** when not actively testing to avoid unnecessary costs.</span>
+<span id="cb5-167"><a href="#cb5-167"></a>:::</span>
+<span id="cb5-168"><a href="#cb5-168"></a></span>
+<span id="cb5-169"><a href="#cb5-169"></a>---</span>
+<span id="cb5-170"><a href="#cb5-170"></a></span>
+<span id="cb5-171"><a href="#cb5-171"></a><span class="fu">### 🌿 Development Branch</span></span>
+<span id="cb5-172"><a href="#cb5-172"></a></span>
+<span id="cb5-173"><a href="#cb5-173"></a>Create and maintain a **live subset of Production data** in a separate Development database.</span>
+<span id="cb5-174"><a href="#cb5-174"></a></span>
+<span id="cb5-175"><a href="#cb5-175"></a>This page creates a Development database branch that automatically stays synchronized with your Production database using Dynamic Tables. The branch contains a sampled subset of visitors (and all their related sessions, events, and orders), making it ideal for:</span>
+<span id="cb5-176"><a href="#cb5-176"></a></span>
+<span id="cb5-177"><a href="#cb5-177"></a><span class="ss">- </span>Cost-effective development and testing with smaller data volumes</span>
+<span id="cb5-178"><a href="#cb5-178"></a><span class="ss">- </span>Isolated experimentation without affecting production</span>
+<span id="cb5-179"><a href="#cb5-179"></a><span class="ss">- </span>Testing feature pipelines with realistic, live-updating data</span>
+<span id="cb5-180"><a href="#cb5-180"></a><span class="ss">- </span>Validating Dynamic Table refresh behavior</span>
+<span id="cb5-181"><a href="#cb5-181"></a></span>
+<span id="cb5-182"><a href="#cb5-182"></a>As new data flows into Production (via the Incremental Generator), the Development branch automatically receives the corresponding subset based on your sample percentage.</span>
+<span id="cb5-183"><a href="#cb5-183"></a></span>
+<span id="cb5-184"><a href="#cb5-184"></a><span class="al">![Development Branch Page](ui_images/streamlit_dev_branch.png)</span>{width=80%}</span>
+<span id="cb5-185"><a href="#cb5-185"></a></span>
+<span id="cb5-186"><a href="#cb5-186"></a>**Create New Branch:**</span>
+<span id="cb5-187"><a href="#cb5-187"></a></span>
+<span id="cb5-188"><a href="#cb5-188"></a><span class="pp">|</span> Option <span class="pp">|</span> Description <span class="pp">|</span> Default <span class="pp">|</span></span>
+<span id="cb5-189"><a href="#cb5-189"></a><span class="pp">|--------|-------------|---------|</span></span>
+<span id="cb5-190"><a href="#cb5-190"></a><span class="pp">|</span> Production Database <span class="pp">|</span> Source database to sample from <span class="pp">|</span> FEATURE_STORE_DEMO <span class="pp">|</span></span>
+<span id="cb5-191"><a href="#cb5-191"></a><span class="pp">|</span> Development Database <span class="pp">|</span> New database name to create <span class="pp">|</span> FEATURE_STORE_DEMO_DEV <span class="pp">|</span></span>
+<span id="cb5-192"><a href="#cb5-192"></a><span class="pp">|</span> Sample Percentage <span class="pp">|</span> % of visitors to include <span class="pp">|</span> 10% <span class="pp">|</span></span>
+<span id="cb5-193"><a href="#cb5-193"></a><span class="pp">|</span> DT Refresh Lag <span class="pp">|</span> How often Dynamic Tables refresh <span class="pp">|</span> 1 HOUR <span class="pp">|</span></span>
+<span id="cb5-194"><a href="#cb5-194"></a></span>
+<span id="cb5-195"><a href="#cb5-195"></a>**Refresh Lag Options:**</span>
+<span id="cb5-196"><a href="#cb5-196"></a></span>
+<span id="cb5-197"><a href="#cb5-197"></a><span class="pp">|</span> Option <span class="pp">|</span> Use Case <span class="pp">|</span></span>
+<span id="cb5-198"><a href="#cb5-198"></a><span class="pp">|--------|----------|</span></span>
+<span id="cb5-199"><a href="#cb5-199"></a><span class="pp">|</span> 1 MINUTE <span class="pp">|</span> Real-time testing, demos <span class="pp">|</span></span>
+<span id="cb5-200"><a href="#cb5-200"></a><span class="pp">|</span> 10 MINUTES <span class="pp">|</span> Active development <span class="pp">|</span></span>
+<span id="cb5-201"><a href="#cb5-201"></a><span class="pp">|</span> 15 MINUTES <span class="pp">|</span> Development with moderate refresh <span class="pp">|</span></span>
+<span id="cb5-202"><a href="#cb5-202"></a><span class="pp">|</span> 30 MINUTES <span class="pp">|</span> Standard development <span class="pp">|</span></span>
+<span id="cb5-203"><a href="#cb5-203"></a><span class="pp">|</span> 1 HOUR <span class="pp">|</span> Default, balanced cost/freshness <span class="pp">|</span></span>
+<span id="cb5-204"><a href="#cb5-204"></a><span class="pp">|</span> 2 HOURS <span class="pp">|</span> Lower cost, less frequent updates <span class="pp">|</span></span>
+<span id="cb5-205"><a href="#cb5-205"></a><span class="pp">|</span> 6 HOURS <span class="pp">|</span> Minimal cost, batch-style refresh <span class="pp">|</span></span>
+<span id="cb5-206"><a href="#cb5-206"></a></span>
+<span id="cb5-207"><a href="#cb5-207"></a>**How it works:**</span>
+<span id="cb5-208"><a href="#cb5-208"></a></span>
+<span id="cb5-209"><a href="#cb5-209"></a><span class="ss">1. </span>Creates a new database with identical schema structure</span>
+<span id="cb5-210"><a href="#cb5-210"></a><span class="ss">2. </span>Samples visitors at the specified percentage</span>
+<span id="cb5-211"><a href="#cb5-211"></a><span class="ss">3. </span>Creates Dynamic Tables that automatically sync from production</span>
+<span id="cb5-212"><a href="#cb5-212"></a><span class="ss">4. </span>Maintains referential integrity (related sessions, events, orders follow the sampled visitors)</span>
+<span id="cb5-213"><a href="#cb5-213"></a></span>
+<span id="cb5-214"><a href="#cb5-214"></a>**Manage Existing Branch:**</span>
+<span id="cb5-215"><a href="#cb5-215"></a></span>
+<span id="cb5-216"><a href="#cb5-216"></a><span class="ss">- </span>**Load Branch Status** - View current config and DT states</span>
+<span id="cb5-217"><a href="#cb5-217"></a><span class="ss">- </span>**Suspend DTs** - Pause refresh (cost savings when not in use)</span>
+<span id="cb5-218"><a href="#cb5-218"></a><span class="ss">- </span>**Resume DTs** - Resume automatic refresh</span>
+<span id="cb5-219"><a href="#cb5-219"></a><span class="ss">- </span>**Update Refresh Rate** - Change the target lag for all Dynamic Tables</span>
+<span id="cb5-220"><a href="#cb5-220"></a><span class="ss">- </span>**Drop Branch** - Delete the development database</span>
+<span id="cb5-221"><a href="#cb5-221"></a></span>
+<span id="cb5-222"><a href="#cb5-222"></a>**Adjusting Refresh Frequency:**</span>
+<span id="cb5-223"><a href="#cb5-223"></a></span>
+<span id="cb5-224"><a href="#cb5-224"></a>After creating a branch, you can change how frequently the Dynamic Tables refresh:</span>
+<span id="cb5-225"><a href="#cb5-225"></a></span>
+<span id="cb5-226"><a href="#cb5-226"></a><span class="ss">1. </span>Enter the branch database name</span>
+<span id="cb5-227"><a href="#cb5-227"></a><span class="ss">2. </span>Select a new target lag from the dropdown</span>
+<span id="cb5-228"><a href="#cb5-228"></a><span class="ss">3. </span>Click **⚡ Update Refresh Rate**</span>
+<span id="cb5-229"><a href="#cb5-229"></a></span>
+<span id="cb5-230"><a href="#cb5-230"></a>This updates all Dynamic Tables in the branch to use the new refresh interval.</span>
+<span id="cb5-231"><a href="#cb5-231"></a></span>
+<span id="cb5-232"><a href="#cb5-232"></a>::: {.callout-tip}</span>
+<span id="cb5-233"><a href="#cb5-233"></a><span class="fu">## Environment Switching</span></span>
+<span id="cb5-234"><a href="#cb5-234"></a>Development branches use identical object names below the database level. Switch environments by changing <span class="in">`USE DATABASE`</span>:</span>
+<span id="cb5-235"><a href="#cb5-235"></a></span>
+<span id="cb5-236"><a href="#cb5-236"></a><span class="in">```sql</span></span>
+<span id="cb5-237"><a href="#cb5-237"></a><span class="co">-- Production</span></span>
+<span id="cb5-238"><a href="#cb5-238"></a><span class="kw">USE</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO;</span>
+<span id="cb5-239"><a href="#cb5-239"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> CLICKSTREAM_DATA<span class="ch">.</span>EVENTS <span class="kw">LIMIT</span> <span class="dv">10</span>;</span>
+<span id="cb5-240"><a href="#cb5-240"></a></span>
+<span id="cb5-241"><a href="#cb5-241"></a><span class="co">-- Development (10% sample)</span></span>
+<span id="cb5-242"><a href="#cb5-242"></a><span class="kw">USE</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO_DEV;</span>
+<span id="cb5-243"><a href="#cb5-243"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> CLICKSTREAM_DATA<span class="ch">.</span>EVENTS <span class="kw">LIMIT</span> <span class="dv">10</span>;  <span class="co">-- Same query!</span></span>
+<span id="cb5-244"><a href="#cb5-244"></a><span class="in">```</span></span>
+<span id="cb5-245"><a href="#cb5-245"></a>:::</span>
+<span id="cb5-246"><a href="#cb5-246"></a></span>
+<span id="cb5-247"><a href="#cb5-247"></a>---</span>
+<span id="cb5-248"><a href="#cb5-248"></a></span>
+<span id="cb5-249"><a href="#cb5-249"></a><span class="fu">### 📚 Public Datasets</span></span>
+<span id="cb5-250"><a href="#cb5-250"></a></span>
+<span id="cb5-251"><a href="#cb5-251"></a>Load standard ML datasets for testing and examples:</span>
+<span id="cb5-252"><a href="#cb5-252"></a></span>
+<span id="cb5-253"><a href="#cb5-253"></a><span class="al">![Public Datasets Page](ui_images/streamlit_public_datasets.png)</span>{width=80%}</span>
+<span id="cb5-254"><a href="#cb5-254"></a></span>
+<span id="cb5-255"><a href="#cb5-255"></a>**Available datasets:**</span>
+<span id="cb5-256"><a href="#cb5-256"></a></span>
+<span id="cb5-257"><a href="#cb5-257"></a><span class="pp">|</span> Dataset <span class="pp">|</span> Rows <span class="pp">|</span> Description <span class="pp">|</span></span>
+<span id="cb5-258"><a href="#cb5-258"></a><span class="pp">|---------|------|-------------|</span></span>
+<span id="cb5-259"><a href="#cb5-259"></a><span class="pp">|</span> penguins <span class="pp">|</span> 344 <span class="pp">|</span> Multi-class classification <span class="pp">|</span></span>
+<span id="cb5-260"><a href="#cb5-260"></a><span class="pp">|</span> titanic <span class="pp">|</span> 891 <span class="pp">|</span> Binary classification <span class="pp">|</span></span>
+<span id="cb5-261"><a href="#cb5-261"></a><span class="pp">|</span> iris <span class="pp">|</span> 150 <span class="pp">|</span> Classification basics <span class="pp">|</span></span>
+<span id="cb5-262"><a href="#cb5-262"></a><span class="pp">|</span> wine <span class="pp">|</span> 1,599 <span class="pp">|</span> Regression / classification <span class="pp">|</span></span>
+<span id="cb5-263"><a href="#cb5-263"></a><span class="pp">|</span> california_housing <span class="pp">|</span> 20,640 <span class="pp">|</span> Regression <span class="pp">|</span></span>
+<span id="cb5-264"><a href="#cb5-264"></a><span class="pp">|</span> nyc_taxi <span class="pp">|</span> ~3M (50K sample) <span class="pp">|</span> Temporal features <span class="pp">|</span></span>
+<span id="cb5-265"><a href="#cb5-265"></a><span class="pp">|</span> credit_card_fraud <span class="pp">|</span> 284K (50K sample) <span class="pp">|</span> Imbalanced classification <span class="pp">|</span></span>
+<span id="cb5-266"><a href="#cb5-266"></a></span>
+<span id="cb5-267"><a href="#cb5-267"></a>**Options:**</span>
+<span id="cb5-268"><a href="#cb5-268"></a></span>
+<span id="cb5-269"><a href="#cb5-269"></a><span class="ss">- </span>**Select Dataset** - Choose which dataset to load</span>
+<span id="cb5-270"><a href="#cb5-270"></a><span class="ss">- </span>**Load Full Dataset** - For large datasets, bypass the default 50K sample limit</span>
+<span id="cb5-271"><a href="#cb5-271"></a><span class="ss">- </span>**Target Database/Schema** - Where to create the table</span>
+<span id="cb5-272"><a href="#cb5-272"></a></span>
+<span id="cb5-273"><a href="#cb5-273"></a>Click **Load Dataset** for a single dataset or **Load All Datasets** to load everything.</span>
+<span id="cb5-274"><a href="#cb5-274"></a></span>
+<span id="cb5-275"><a href="#cb5-275"></a>---</span>
+<span id="cb5-276"><a href="#cb5-276"></a></span>
+<span id="cb5-277"><a href="#cb5-277"></a><span class="fu">### 📈 Monitoring</span></span>
+<span id="cb5-278"><a href="#cb5-278"></a></span>
+<span id="cb5-279"><a href="#cb5-279"></a>Track production data generation and development branch Dynamic Table refreshes:</span>
+<span id="cb5-280"><a href="#cb5-280"></a></span>
+<span id="cb5-281"><a href="#cb5-281"></a><span class="al">![Monitoring Dashboard](ui_images/streamlit_monitoring.png)</span>{width=80%}</span>
+<span id="cb5-282"><a href="#cb5-282"></a></span>
+<span id="cb5-283"><a href="#cb5-283"></a>The Monitoring page is divided into two main sections:</span>
+<span id="cb5-284"><a href="#cb5-284"></a></span>
+<span id="cb5-285"><a href="#cb5-285"></a>**🏭 Production Data Section:**</span>
+<span id="cb5-286"><a href="#cb5-286"></a></span>
+<span id="cb5-287"><a href="#cb5-287"></a>Monitor the incremental data generator and production table statistics:</span>
+<span id="cb5-288"><a href="#cb5-288"></a></span>
+<span id="cb5-289"><a href="#cb5-289"></a><span class="pp">|</span> Component <span class="pp">|</span> Description <span class="pp">|</span></span>
+<span id="cb5-290"><a href="#cb5-290"></a><span class="pp">|-----------|-------------|</span></span>
+<span id="cb5-291"><a href="#cb5-291"></a><span class="pp">|</span> Production Database <span class="pp">|</span> Database where production data and generator are deployed <span class="pp">|</span></span>
+<span id="cb5-292"><a href="#cb5-292"></a><span class="pp">|</span> Data Schema <span class="pp">|</span> Schema containing the data tables <span class="pp">|</span></span>
+<span id="cb5-293"><a href="#cb5-293"></a><span class="pp">|</span> Admin Schema <span class="pp">|</span> Schema containing the generator task and logs <span class="pp">|</span></span>
+<span id="cb5-294"><a href="#cb5-294"></a><span class="pp">|</span> Production Row Counts <span class="pp">|</span> Bar chart and table showing current row counts <span class="pp">|</span></span>
+<span id="cb5-295"><a href="#cb5-295"></a><span class="pp">|</span> Incremental Generator History <span class="pp">|</span> Recent batch executions with timestamps, row counts, and duration <span class="pp">|</span></span>
+<span id="cb5-296"><a href="#cb5-296"></a></span>
+<span id="cb5-297"><a href="#cb5-297"></a>**🌿 Development Branch Section:**</span>
+<span id="cb5-298"><a href="#cb5-298"></a></span>
+<span id="cb5-299"><a href="#cb5-299"></a>Monitor Dynamic Tables in your development branches:</span>
+<span id="cb5-300"><a href="#cb5-300"></a></span>
+<span id="cb5-301"><a href="#cb5-301"></a><span class="pp">|</span> Component <span class="pp">|</span> Description <span class="pp">|</span></span>
+<span id="cb5-302"><a href="#cb5-302"></a><span class="pp">|-----------|-------------|</span></span>
+<span id="cb5-303"><a href="#cb5-303"></a><span class="pp">|</span> Development Database <span class="pp">|</span> The dev branch database to monitor (default: <span class="in">`_DEV01`</span> suffix) <span class="pp">|</span></span>
+<span id="cb5-304"><a href="#cb5-304"></a><span class="pp">|</span> Data Schema <span class="pp">|</span> Schema containing the Dynamic Tables <span class="pp">|</span></span>
+<span id="cb5-305"><a href="#cb5-305"></a><span class="pp">|</span> Development Row Counts <span class="pp">|</span> Bar chart and table showing current row counts with % of production <span class="pp">|</span></span>
+<span id="cb5-306"><a href="#cb5-306"></a><span class="pp">|</span> Dynamic Table Refresh History <span class="pp">|</span> Real-time refresh data from <span class="in">`INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()`</span> <span class="pp">|</span></span>
+<span id="cb5-307"><a href="#cb5-307"></a></span>
+<span id="cb5-308"><a href="#cb5-308"></a>**Row Limit Selectors:**</span>
+<span id="cb5-309"><a href="#cb5-309"></a></span>
+<span id="cb5-310"><a href="#cb5-310"></a>Both history tables include a "Rows" dropdown to control how many records are displayed (25, 50, 100, 250, or 500).</span>
+<span id="cb5-311"><a href="#cb5-311"></a></span>
+<span id="cb5-312"><a href="#cb5-312"></a>**Auto-refresh:**</span>
+<span id="cb5-313"><a href="#cb5-313"></a></span>
+<span id="cb5-314"><a href="#cb5-314"></a>Enable the checkbox to automatically refresh the dashboard every 60 seconds - useful for monitoring incremental generation and Dynamic Table refreshes in real-time.</span>
+<span id="cb5-315"><a href="#cb5-315"></a></span>
+<span id="cb5-316"><a href="#cb5-316"></a>::: {.callout-note}</span>
+<span id="cb5-317"><a href="#cb5-317"></a><span class="fu">## Real-Time Dynamic Table History</span></span>
+<span id="cb5-318"><a href="#cb5-318"></a>The Dynamic Table refresh history uses Snowflake's <span class="in">`INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY()`</span> table function, which provides real-time data with no latency. This shows both completed and in-progress refreshes.</span>
+<span id="cb5-319"><a href="#cb5-319"></a>:::</span>
+<span id="cb5-320"><a href="#cb5-320"></a></span>
+<span id="cb5-321"><a href="#cb5-321"></a><span class="fu">## Common Workflows</span></span>
+<span id="cb5-322"><a href="#cb5-322"></a></span>
+<span id="cb5-323"><a href="#cb5-323"></a><span class="fu">### First-Time Setup</span></span>
+<span id="cb5-324"><a href="#cb5-324"></a></span>
+<span id="cb5-325"><a href="#cb5-325"></a><span class="ss">1. </span>**Connect** - Select your Snowflake connection and click Connect</span>
+<span id="cb5-326"><a href="#cb5-326"></a><span class="ss">2. </span>**Initial Load** - Go to 📥 Initial Load, set scale to 0.01, click Generate &amp; Load</span>
+<span id="cb5-327"><a href="#cb5-327"></a><span class="ss">3. </span>**Verify** - Go to 📊 Overview to confirm data was loaded</span>
+<span id="cb5-328"><a href="#cb5-328"></a><span class="ss">4. </span>**Public Datasets** (optional) - Load any additional datasets needed</span>
+<span id="cb5-329"><a href="#cb5-329"></a></span>
+<span id="cb5-330"><a href="#cb5-330"></a><span class="fu">### Testing Dynamic Tables</span></span>
+<span id="cb5-331"><a href="#cb5-331"></a></span>
+<span id="cb5-332"><a href="#cb5-332"></a><span class="ss">1. </span>Complete first-time setup above</span>
+<span id="cb5-333"><a href="#cb5-333"></a><span class="ss">2. </span>**Deploy Generator** - Go to 🔄 Incremental Generator, click Deploy Generator</span>
+<span id="cb5-334"><a href="#cb5-334"></a><span class="ss">3. </span>**Start Task** - Click Start Task to begin continuous generation</span>
+<span id="cb5-335"><a href="#cb5-335"></a><span class="ss">4. </span>**Monitor** - Go to 📈 Monitoring to watch data grow</span>
+<span id="cb5-336"><a href="#cb5-336"></a><span class="ss">5. </span>**Stop Task** - When done testing, click Stop Task</span>
+<span id="cb5-337"><a href="#cb5-337"></a></span>
+<span id="cb5-338"><a href="#cb5-338"></a><span class="fu">### Creating a Dev Environment</span></span>
+<span id="cb5-339"><a href="#cb5-339"></a></span>
+<span id="cb5-340"><a href="#cb5-340"></a><span class="ss">1. </span>Complete first-time setup with production-scale data (scale 0.1 or 1.0)</span>
+<span id="cb5-341"><a href="#cb5-341"></a><span class="ss">2. </span>**Create Branch** - Go to 🌿 Development Branch</span>
+<span id="cb5-342"><a href="#cb5-342"></a><span class="ss">3. </span>Set sample percentage (e.g., 10%)</span>
+<span id="cb5-343"><a href="#cb5-343"></a><span class="ss">4. </span>Click **Create Development Branch**</span>
+<span id="cb5-344"><a href="#cb5-344"></a><span class="ss">5. </span>Use <span class="in">`FEATURE_STORE_DEMO_DEV`</span> for development/testing</span>
+<span id="cb5-345"><a href="#cb5-345"></a></span>
+<span id="cb5-346"><a href="#cb5-346"></a><span class="fu">## Troubleshooting</span></span>
+<span id="cb5-347"><a href="#cb5-347"></a></span>
+<span id="cb5-348"><a href="#cb5-348"></a><span class="fu">### App won't start</span></span>
+<span id="cb5-349"><a href="#cb5-349"></a></span>
+<span id="cb5-350"><a href="#cb5-350"></a><span class="in">```bash</span></span>
+<span id="cb5-351"><a href="#cb5-351"></a><span class="co"># Check Streamlit is installed</span></span>
+<span id="cb5-352"><a href="#cb5-352"></a><span class="ex">pip</span> install streamlit</span>
+<span id="cb5-353"><a href="#cb5-353"></a></span>
+<span id="cb5-354"><a href="#cb5-354"></a><span class="co"># Try a different port</span></span>
+<span id="cb5-355"><a href="#cb5-355"></a><span class="ex">streamlit</span> run app.py <span class="at">--server.port</span> 8502</span>
+<span id="cb5-356"><a href="#cb5-356"></a></span>
+<span id="cb5-357"><a href="#cb5-357"></a><span class="co"># Check for import errors</span></span>
+<span id="cb5-358"><a href="#cb5-358"></a><span class="ex">python</span> <span class="at">-c</span> <span class="st">"from core import DataManager"</span></span>
+<span id="cb5-359"><a href="#cb5-359"></a><span class="in">```</span></span>
+<span id="cb5-360"><a href="#cb5-360"></a></span>
+<span id="cb5-361"><a href="#cb5-361"></a><span class="fu">### Connection fails</span></span>
+<span id="cb5-362"><a href="#cb5-362"></a></span>
+<span id="cb5-363"><a href="#cb5-363"></a><span class="ss">1. </span>Verify your connection works with SnowSQL or another tool</span>
+<span id="cb5-364"><a href="#cb5-364"></a><span class="ss">2. </span>Check <span class="in">`~/.snowflake/connections.toml`</span> format</span>
+<span id="cb5-365"><a href="#cb5-365"></a><span class="ss">3. </span>Ensure your IP is allowlisted if using network policies</span>
+<span id="cb5-366"><a href="#cb5-366"></a><span class="ss">4. </span>Try manual credentials instead of named connection</span>
+<span id="cb5-367"><a href="#cb5-367"></a></span>
+<span id="cb5-368"><a href="#cb5-368"></a><span class="fu">### "No tables found"</span></span>
+<span id="cb5-369"><a href="#cb5-369"></a></span>
+<span id="cb5-370"><a href="#cb5-370"></a>The database/schema doesn't exist or has no tables. Use **Initial Load** to create and populate tables.</span>
+<span id="cb5-371"><a href="#cb5-371"></a></span>
+<span id="cb5-372"><a href="#cb5-372"></a><span class="fu">### Incremental generator not running</span></span>
+<span id="cb5-373"><a href="#cb5-373"></a></span>
+<span id="cb5-374"><a href="#cb5-374"></a><span class="ss">1. </span>Check task status - it may be SUSPENDED</span>
+<span id="cb5-375"><a href="#cb5-375"></a><span class="ss">2. </span>Verify the task was deployed (click Deploy Generator)</span>
+<span id="cb5-376"><a href="#cb5-376"></a><span class="ss">3. </span>Check EXECUTE TASK privilege on your role</span>
+<span id="cb5-377"><a href="#cb5-377"></a><span class="ss">4. </span>Review task history for errors</span>
+<span id="cb5-378"><a href="#cb5-378"></a></span>
+<span id="cb5-379"><a href="#cb5-379"></a><span class="fu">## CLI Equivalents</span></span>
+<span id="cb5-380"><a href="#cb5-380"></a></span>
+<span id="cb5-381"><a href="#cb5-381"></a>Each page shows a **CLI Equivalent** section with the corresponding command-line commands. This is useful for:</span>
+<span id="cb5-382"><a href="#cb5-382"></a></span>
+<span id="cb5-383"><a href="#cb5-383"></a><span class="ss">- </span>Automation and scripting</span>
+<span id="cb5-384"><a href="#cb5-384"></a><span class="ss">- </span>CI/CD pipelines</span>
+<span id="cb5-385"><a href="#cb5-385"></a><span class="ss">- </span>Reproducibility</span>
+<span id="cb5-386"><a href="#cb5-386"></a><span class="ss">- </span>Users who prefer command-line interfaces</span>
+<span id="cb5-387"><a href="#cb5-387"></a></span>
+<span id="cb5-388"><a href="#cb5-388"></a>The Streamlit UI and CLI tools use the same underlying <span class="in">`core.py`</span> module, ensuring consistent behavior.</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
+</div></div></div></div></div>
+</div> <!-- /content -->
+<footer class="footer"><div class="nav-footer"><div class="nav-footer-center"><div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/A_sample_data/data_manager/streamlit_app.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div></div></footer><script>
+/**
+ * Sidebar toggle controls for Quarto book layout.
+ * Buttons are appended to <body> (fixed position) so they remain
+ * accessible even when a sidebar is collapsed to zero width.
+ * State is persisted in localStorage across page navigations.
+ */
+(function () {
+  "use strict";
+
+  var STORAGE_LEFT  = "sf-sidebar-left-collapsed";
+  var STORAGE_RIGHT = "sf-sidebar-right-collapsed";
+
+  var CHEVRON_LEFT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M10.5 3.5L6 8l4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEVRON_RIGHT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M5.5 3.5L10 8l-4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function positionLeftBtn(btn, sidebar, collapsed) {
+    if (collapsed) {
+      btn.style.left = "0px";
+    } else {
+      btn.style.left = sidebar.offsetWidth + "px";
+    }
+  }
+
+  function init() {
+    var sidebar       = document.getElementById("quarto-sidebar");
+    var marginSidebar = document.getElementById("quarto-margin-sidebar");
+    var body          = document.body;
+
+    if (!sidebar && !marginSidebar) return;
+
+    var leftOff  = localStorage.getItem(STORAGE_LEFT) === "true";
+    var rightOff = localStorage.getItem(STORAGE_RIGHT) === "true";
+
+    // --- Left sidebar toggle ---
+    if (sidebar) {
+      var btnL = document.createElement("button");
+      btnL.id = "sf-toggle-left";
+      btnL.className = "sf-sidebar-toggle";
+      btnL.setAttribute("type", "button");
+      btnL.setAttribute("aria-label", "Toggle chapter navigation");
+      btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+      body.appendChild(btnL);
+
+      if (leftOff) body.classList.add("sf-left-collapsed");
+
+      // Position after layout settles
+      requestAnimationFrame(function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+
+      btnL.addEventListener("click", function () {
+        leftOff = !leftOff;
+        body.classList.toggle("sf-left-collapsed", leftOff);
+        localStorage.setItem(STORAGE_LEFT, String(leftOff));
+        btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+        btnL.setAttribute("aria-expanded", String(!leftOff));
+        // Reposition after CSS transition completes
+        setTimeout(function () {
+          positionLeftBtn(btnL, sidebar, leftOff);
+        }, 320);
+        // Immediate position for collapsed
+        if (leftOff) btnL.style.left = "0px";
+      });
+
+      // Reposition on window resize
+      window.addEventListener("resize", function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+    }
+
+    // --- Right sidebar toggle ---
+    if (marginSidebar) {
+      var btnR = document.createElement("button");
+      btnR.id = "sf-toggle-right";
+      btnR.className = "sf-sidebar-toggle";
+      btnR.setAttribute("type", "button");
+      btnR.setAttribute("aria-label", "Toggle table of contents");
+      btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+      body.appendChild(btnR);
+
+      if (rightOff) body.classList.add("sf-right-collapsed");
+
+      btnR.addEventListener("click", function () {
+        rightOff = !rightOff;
+        body.classList.toggle("sf-right-collapsed", rightOff);
+        localStorage.setItem(STORAGE_RIGHT, String(rightOff));
+        btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+        btnR.setAttribute("aria-expanded", String(!rightOff));
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+
+
+
+</body></html>

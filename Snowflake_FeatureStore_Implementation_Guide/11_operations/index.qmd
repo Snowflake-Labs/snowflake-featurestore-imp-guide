@@ -96,20 +96,26 @@ WHERE DATABASE_NAME = 'FEATURE_STORE_DEMO'
   AND SCHEMA_NAME = 'FEATURE_STORE';
 ```
 
-### Manual refresh (Python API)
+### Manual Refresh
 
-To trigger a refresh outside the scheduled `refresh_freq`, use the registered Feature View object with [`refresh_feature_view`](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/overview) (see also Chapter 6 backfill patterns):
+To trigger a refresh outside the scheduled `refresh_freq` (see also [Chapter 6: backfill patterns](../06_temporal_features/index.qmd)):
+
+::: {.panel-tabset}
+
+## Python API
 
 ```python
 fv = fs.get_feature_view(name="USER_ORDER_FV", version="V01")
 fs.refresh_feature_view(fv)
 ```
 
-The equivalent SQL:
+## SQL
 
 ```sql
 ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01" REFRESH;
 ```
+
+:::
 
 ### Alerting for Stale Features
 
@@ -129,6 +135,39 @@ CREATE ALERT feature_staleness_alert
     CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
 ```
 
+::: {.callout-important title="Auto-suspension after 5 consecutive refresh failures"}
+Snowflake automatically **suspends** a Dynamic Table after **5 consecutive refresh failures**. Timeouts and cancellations count toward this threshold; skipped refreshes (where the table was not attempted because an upstream DT failed with `UPSTREAM_FAILED`) do not count.
+
+Once suspended, the Feature View DT will not refresh again until manually resumed -- staleness accumulates silently. The alert above catches lag, but it will not fire if the table is suspended and data is simply stale. Add a second alert targeting `SCHEDULING_STATE`:
+
+```sql
+-- Alert when any Feature View DT is suspended (auto-suspend after 5 consecutive failures)
+CREATE ALERT feature_view_suspended_alert
+  WAREHOUSE = FS_DEV_WH
+  SCHEDULE = 'USING CRON */15 * * * * UTC'
+  IF (EXISTS (
+    SELECT *
+    FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+    WHERE DATABASE_NAME = 'FEATURE_STORE_DEMO'
+      AND SCHEMA_NAME = 'FEATURE_STORE'
+      AND SCHEDULING_STATE:state::STRING = 'SUSPENDED'
+  ))
+  THEN
+    CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Feature View Suspended', 'Alert');
+```
+
+To resume a suspended Feature View:
+```python
+# Python API
+fs.resume_feature_view(fs.get_feature_view("MY_FV", "V01"))
+
+# SQL
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."MY_FV$V01" RESUME;
+```
+
+Investigate the root cause in `DYNAMIC_TABLE_REFRESH_HISTORY` before resuming -- resuming without fixing the underlying issue will restart the failure countdown.
+:::
+
 ---
 
 ## Dynamic Table SQL Features Beyond the API {#sec-dt-sql-features}
@@ -136,7 +175,11 @@ CREATE ALERT feature_staleness_alert
 The Feature Store Python API exposes the most common Dynamic Table parameters (`refresh_freq`, `warehouse`, etc.), but several powerful DT capabilities are only available via SQL today. You can apply these by creating the DT directly in SQL and wrapping it as a view-based Feature View, or by using `ALTER DYNAMIC TABLE` after the API creates the DT.
 
 ::: {.callout-note}
-Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store) for future API integration of these features. See also [Appendix C](../appendices/C_snowpark_to_dynamic_table/index.md) for `IMMUTABLE WHERE` and `BACKFILL FROM`.
+Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store) for future API integration of these features. See also [Appendix C](../appendices/C_snowpark_to_dynamic_table/index.qmd) for `IMMUTABLE WHERE` and `BACKFILL FROM`.
+:::
+
+::: {.callout-important title="TAG registration required for API visibility"}
+Dynamic Tables created via SQL in the Feature Store schema are not visible to `fs.list_feature_views()` or the Snowsight Feature Store UI unless the correct internal TAGs are applied. When using `ALTER DYNAMIC TABLE` on an API-created object, the tags are already present. When creating a new DT entirely via SQL, you must add them yourself. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the required TAG schema and worked examples.
 :::
 
 ### INITIALIZATION_WAREHOUSE
@@ -160,6 +203,33 @@ ALTER DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V01
 ```
 
 This is particularly valuable when promoting features to production where large historical datasets must be materialized for the first time, or when recovering from a full re-initialization event.
+
+### INITIALIZE
+
+By default, `CREATE DYNAMIC TABLE` (and `fs.register_feature_view()`) blocks until the initial refresh completes before returning. For large Feature Views this can take minutes or longer, holding up CI/CD pipelines or deployment scripts.
+
+Set `INITIALIZE = ON_SCHEDULE` to make the CREATE statement return immediately. The table exists but is empty until its first scheduled refresh; queries against it during that window return a `Dynamic table is not initialized` error.
+
+```sql
+-- Create the DT without blocking -- initial data arrives on the first scheduled refresh
+CREATE DYNAMIC TABLE FEATURE_STORE.USER_LARGE_HISTORY_FV$V01
+  TARGET_LAG        = '1 hour'
+  WAREHOUSE         = 'FS_PROD_WH'
+  INITIALIZE        = ON_SCHEDULE   -- non-blocking; table is empty until first refresh
+  AS
+    SELECT ...;
+
+-- Verify initialization before pointing consumers at the table
+SELECT NAME, STATE, REFRESH_START_TIME, REFRESH_END_TIME
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'FEATURE_STORE_DEMO.FEATURE_STORE.USER_LARGE_HISTORY_FV$V01'
+))
+ORDER BY REFRESH_START_TIME DESC
+LIMIT 1;
+-- STATE = 'SUCCEEDED' and REFRESH_END_TIME is populated → safe to query
+```
+
+The Feature Store Python API does not yet expose `INITIALIZE`. Apply it by creating the DT via SQL with the pattern above, or add it to an API-created DT using `ALTER DYNAMIC TABLE ... SET INITIALIZE = ON_SCHEDULE` before the first refresh cycle.
 
 ### ROW_TIMESTAMP
 
@@ -291,8 +361,28 @@ For tile computation, a small warehouse (XS-M) is usually sufficient since each 
 
 > 📁 **Full code:** [`_code/discovery.py`](_code/discovery.py)
 
+::: {.panel-tabset}
+
+## Python API
+
+```python
+fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
+```
+
+## SQL
+
+```sql
+-- DT-backed Feature Views
+SHOW DYNAMIC TABLES IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE;
+
+-- View-based Feature Views
+SHOW VIEWS IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE;
+```
+
+:::
+
 ```{python}
-# List all registered Feature Views (accumulated across guide chapters)
+#| echo: false
 fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
 ```
 
@@ -413,6 +503,141 @@ def search_features(fs: FeatureStore, search_term: str) -> list:
     
     return results
 ```
+
+### Feature Catalog View {#sec-feature-catalog}
+
+The SDK and `INFORMATION_SCHEMA` queries above return raw metadata that requires post-processing. For SQL-first teams, a **pre-built catalog view** that joins column metadata, Feature Store TAGs, and Dynamic Table status into a single queryable reference is more practical:
+
+```sql
+CREATE OR REPLACE VIEW FEATURE_STORE.FEATURE_CATALOG AS
+WITH tagged_objects AS (
+    SELECT
+        OBJECT_DATABASE,
+        OBJECT_SCHEMA,
+        OBJECT_NAME,
+        TAG_VALUE
+    FROM TABLE(INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS(
+        'FEATURE_STORE',
+        'SCHEMA'
+    ))
+    WHERE TAG_NAME = 'SNOWML_FEATURE_STORE_OBJECT'
+      AND TAG_VALUE IN ('FEATURE_VIEW', 'ENTITY')
+)
+SELECT
+    t.OBJECT_NAME                           AS FEATURE_VIEW_NAME,
+    c.COLUMN_NAME,
+    c.DATA_TYPE,
+    c.COMMENT                               AS COLUMN_DESCRIPTION,
+    t.TAG_VALUE                             AS OBJECT_TYPE,
+    dt.TARGET_LAG,
+    dt.REFRESH_MODE,
+    dt.SCHEDULING_STATE
+FROM tagged_objects t
+JOIN INFORMATION_SCHEMA.COLUMNS c
+    ON c.TABLE_SCHEMA = t.OBJECT_SCHEMA
+   AND c.TABLE_NAME   = t.OBJECT_NAME
+LEFT JOIN INFORMATION_SCHEMA.DYNAMIC_TABLES() dt
+    ON dt.SCHEMA_NAME = t.OBJECT_SCHEMA
+   AND dt.NAME        = t.OBJECT_NAME
+ORDER BY t.OBJECT_NAME, c.ORDINAL_POSITION;
+```
+
+Query the catalog with standard SQL:
+
+```sql
+-- All features in a specific Feature View
+SELECT * FROM FEATURE_STORE.FEATURE_CATALOG
+WHERE FEATURE_VIEW_NAME = 'USER_PURCHASE_STATS$V01';
+
+-- Find all FLOAT features across the Feature Store
+SELECT FEATURE_VIEW_NAME, COLUMN_NAME
+FROM FEATURE_STORE.FEATURE_CATALOG
+WHERE DATA_TYPE = 'NUMBER' AND OBJECT_TYPE = 'FEATURE_VIEW';
+```
+
+::: {.callout-tip title="Cross-schema catalog for multi-FS setups"}
+For organisations with multiple Feature Store schemas, create a union view that spans schemas. Either generate it dynamically with a Stored Procedure that iterates over `TAG_REFERENCES_ALL_COLUMNS` per schema, or maintain a static `UNION ALL` across known schemas. See [Chapter 12: Multi-Feature Store operations](../12_advanced_patterns/index.qmd#sec-sharing-patterns) for cross-FS discovery patterns.
+:::
+
+::: {.callout-note title="Product feedback opportunity"}
+A built-in `fs.catalog()` or `FEATURE_STORE_CATALOG()` table function would eliminate the need for this manual view. If this pattern is valuable to your team, consider submitting it as product feedback via your Snowflake account team.
+:::
+
+---
+
+## Snowsight Feature Store UI {#sec-snowsight-ui}
+
+Snowsight provides a dedicated Feature Store interface for browsing Feature Views, Entities, metadata, and lineage — no SDK or SQL required. This section walks through the key panels using the clickstream sample environment.
+
+::: {.callout-tip}
+## Navigation path
+
+**AI & ML → Features** in the left sidebar. Select a Feature Store from the dropdown at the top of the page (`database.schema`). The dropdown lists every schema that contains objects with the required Feature Store TAGs **and** that the current role has access to — if a schema is missing, either its objects have not been tagged or your active role lacks the necessary privileges. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the required TAG schema and [Chapter 2: RBAC](../02_design_organization/index.qmd#sec-rbac) for role configuration.
+:::
+
+### Feature View Listing
+
+The landing page shows all registered Feature Views in the selected Feature Store. Each card displays the Feature View name, version count, version selector, description, feature column badges, and entity links.
+
+![Feature Store landing page — Feature View listing with versions, features, and entity links](../_diagrams/screenshots/ss01_feature_store_listing.png){width=95%}
+
+The listing provides a quick inventory of what is available. Descriptions (set via `desc` at registration time) are visible here, reinforcing why every Feature View should carry a meaningful description. The **Entities** tab at the top switches to the entity-centric view (see [Entities](#sec-snowsight-entities) below).
+
+### Feature View Details
+
+Click a Feature View name to open its detail page. The **Details** tab surfaces key metadata: entities, timestamp column, creation date, refresh mode, the underlying Dynamic Table or View link, and the full column schema with data types.
+
+![Feature View detail page — metadata, Dynamic Table link, and column schema](../_diagrams/screenshots/ss02_feature_view_detail.png){width=95%}
+
+The **Version** dropdown (top-right) lets you switch between versions of the same Feature View to compare schemas. The Dynamic Table or View link (under *Dynamic Table* or *View*) navigates directly to the underlying DT or View object in the Database Explorer — useful for inspecting refresh status, SQL definition, and TAG values (see [Underlying Dynamic Table](#sec-snowsight-dt) below).
+
+### Entities {#sec-snowsight-entities}
+
+The **Entities** tab on the Feature Store landing page lists all registered Entities with their descriptions, join keys, and associated Feature Views.
+
+![Entities tab — descriptions, join keys (including composite keys), and associated Feature Views](../_diagrams/screenshots/ss04_entities_tab.png){width=95%}
+
+Entity descriptions and composite join keys (e.g. `ORDER_ID, LINE_NUMBER` for `ORDER_ITEM`) are visible at a glance. This view is particularly useful for teams evaluating which entities exist before creating new Feature Views — helping avoid duplicate or inconsistent entity definitions.  It is also useful to see the entity links to the Feature Views that are associated with the entity, when developing an ML model at a specific entity level.
+
+### Lineage {#sec-snowsight-lineage}
+
+The **Lineage** tab on the Feature View detail page renders a visual graph showing the source-to-Feature View data flow, including the source database, schema, table, and the Feature View's entity key and feature columns.  It will also show downstream ML models that have been trained with data sourced from the Feature View.
+
+![Feature View lineage graph — source table flowing into Feature View with entity key and feature columns](../_diagrams/screenshots/ss07_lineage_graph.png){width=95%}
+
+The lineage graph is interactive: zoom, pan, and click nodes to drill into source objects. For API and SQL-based lineage queries, see [Data Lineage](#sec-lineage) below.
+
+### Underlying Dynamic Table {#sec-snowsight-dt}
+
+Clicking the Dynamic Table link from the Feature View detail page navigates to the DT's page in the Database Explorer. This page surfaces operational metadata not visible in the Feature Store UI: scheduling state, current and target lag, refresh mode, the full `CREATE DYNAMIC TABLE` SQL definition, and — critically — the **Feature Store TAGs** applied to the object.
+
+![Dynamic Table detail page — description, scheduling/refresh details, table definition SQL, and Feature Store TAGs](../_diagrams/screenshots/ss05_dynamic_table_detail.png){width=95%}
+
+::: {.callout-note}
+## Feature Store TAGs on the Dynamic Table
+
+The **Tags** section shows the three internal TAGs the Feature Store SDK applies at registration time:
+
+- `SNOWML_FEATURE_STORE_ENTITY_USER` — links this DT to the `USER` entity
+- `SNOWML_FEATURE_STORE_OBJECT` — marks the object as a managed Feature View (includes `type` and `pkg_version`)
+- `SNOWML_FEATURE_VIEW_METADATA` — stores entity mappings, `timestamp_col`, and tiling configuration as JSON
+
+These TAGs are what make the object visible in the Feature Store UI and discoverable via `fs.list_feature_views()`. Objects created via SQL without these TAGs will not appear. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the full TAG schema and SQL-only registration instructions.
+:::
+
+### Refresh History
+
+The **Refresh History** tab on the Dynamic Table page provides lag metrics and a timeline of individual refreshes. The summary bar shows time within target lag, target lag, current lag, and maximum lag. Each refresh row shows the source data timestamp, status, duration, and refresh lag.
+
+![Dynamic Table refresh history — lag metrics and individual refresh timeline](../_diagrams/screenshots/ss06_refresh_history.png){width=95%}
+
+Use the **Date Range** filter and **Refresh Status** filter to narrow to specific time windows or failure states. The **Warehouse used only** toggle distinguishes incremental refreshes that consumed warehouse credits from no-op checks. For alerting on stale features via SQL, see [Alerting for Stale Features](#alerting-for-stale-features) earlier in this chapter.
+
+### Data Preview
+
+The **Data Preview** tab on the Dynamic Table page shows a sample of the materialized data without writing any SQL — useful for quick validation that the Feature View is refreshing correctly and producing expected values.
+
+![Data preview of the underlying Dynamic Table — materialized feature values](../_diagrams/screenshots/ss08_data_preview.png){width=95%}
 
 ---
 
@@ -718,6 +943,8 @@ See [Chapter 12: CI/CD for Feature Store](../12_advanced_patterns/index.qmd) for
 | **DT SQL Features** | `INITIALIZATION_WAREHOUSE`, `ROW_TIMESTAMP`, `DATA_RETENTION_TIME_IN_DAYS`, `MAX_DATA_EXTENSION_TIME_IN_DAYS` |
 | **OFT monitoring** | `ONLINE_FEATURE_TABLE_REFRESH_HISTORY`, `HYBRID_TABLES`, `HYBRID_TABLE_USAGE_HISTORY` |
 | **Feature Discovery** | `list_feature_views()`, `search_feature_columns()`, `DESCRIBE TABLE` / `DESCRIBE VIEW`, `INFORMATION_SCHEMA.COLUMNS` |
+| **Feature Catalog View** | Pre-built SQL view joining columns, TAGs, and DT status into a single queryable catalog |
+| **Snowsight UI** | Feature View listing, detail, entities, lineage graph, DT drill-through, refresh history, data preview |
 | **Avoiding Duplicates** | Search by name pattern before creating new Feature Views |
 | **Model Registry metadata** | `INFORMATION_SCHEMA.MODEL_VERSIONS` |
 | **Lineage** | `FeatureView.lineage()`, `OBJECT_DEPENDENCIES`, `ACCESS_HISTORY` |

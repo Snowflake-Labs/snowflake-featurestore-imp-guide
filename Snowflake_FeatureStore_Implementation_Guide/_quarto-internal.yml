@@ -1,0 +1,22 @@
+# =============================================================================
+# Internal profile: includes Private Preview / NDA-only chapters
+# =============================================================================
+# Render with:  QUARTO_PROFILE=internal quarto render --to html
+# Preview with: QUARTO_PROFILE=internal quarto preview
+#
+# Quarto merges profile YAML with the base _quarto.yml.  Arrays are
+# CONCATENATED, not replaced, so this file must NOT re-declare the full
+# chapters list.  Instead it adds a new part that is appended to the
+# sidebar after the base sections.
+# =============================================================================
+
+book:
+  title: "Snowflake Feature Store Implementation Guide (Internal)"
+
+  chapters:
+    - part: "Preview Features"
+      chapters:
+        - 08a_streaming_feature_views/index.qmd
+
+project:
+  output-dir: _site-internal

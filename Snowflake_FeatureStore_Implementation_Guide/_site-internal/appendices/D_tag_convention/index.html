@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="keywords" content="snowflake, feature store, ml, machine learning, mlops">
+<meta name="description" content="Comprehensive guide to implementing Snowflake Feature Store for production ML, covering design patterns, temporal features, aggregations, online serving, and CI/CD.">
+
+<title>Appendix E — Feature Store Internal Tag Schema – Snowflake Feature Store Implementation Guide (Internal)</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<link href="../../appendices/C_snowpark_to_dynamic_table/index.html" rel="prev">
+<script src="../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-dark-23bbe8b5e4efc1e257f6d59dce478b08.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../../site_libs/bootstrap/bootstrap-dark-88f976c52a096bfcf50c5d13e133667b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "sidebar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "start",
+  "type": "textbox",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<meta property="og:title" content="Snowflake Feature Store Implementation Guide">
+<meta property="og:description" content="Best practices for building production ML feature platforms with Snowflake Feature Store — entities, Feature Views, pipelines, online serving, and operations.">
+<meta property="og:site_name" content="Snowflake Feature Store Implementation Guide (Internal)">
+</head>
+
+<body class="nav-sidebar docked quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+      // Hack to workaround the fact that safari doesn't
+      // properly recolor the scrollbar when toggling (#1455)
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        window.scrollTo(0, 1);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const darkModeDefault = authorPrefersDark;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+  <nav class="quarto-secondary-nav">
+    <div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../appendices/D_tag_convention/index.html"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></a></li></ol></nav>
+        <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+        </a>
+      <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
+        <i class="bi bi-search"></i>
+      </button>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation docked overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="sidebar-title mb-0 py-0">
+      <a href="../../">Snowflake Feature Store Implementation Guide (Internal)</a> 
+        <div class="sidebar-tools-main">
+    <a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide" title="Source Code" class="quarto-navigation-tool px-1" aria-label="Source Code"><i class="bi bi-github"></i></a>
+  <a href="" class="quarto-color-scheme-toggle quarto-navigation-tool  px-1" onclick="window.quartoToggleColorScheme(); return false;" title="Toggle dark mode"><i class="bi"></i></a>
+</div>
+    </div>
+      </div>
+        <div class="mt-2 flex-shrink-0 align-items-center">
+        <div class="sidebar-search">
+        <div id="quarto-search" class="" title="Search"></div>
+        </div>
+        </div>
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Snowflake Feature Store Implementation Guide</span></a>
+  </div>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
+ <span class="menu-text">Getting Started</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../00_introduction/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Introduction</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../01_concepts/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">1</span>&nbsp; <span class="chapter-title">Core Concepts</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true">
+ <span class="menu-text">Design &amp; Architecture</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../02_design_organization/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Design &amp; Organization</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../03_entities_hierarchies/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">3</span>&nbsp; <span class="chapter-title">Entities &amp; Hierarchies</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../04_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true">
+ <span class="menu-text">Feature Engineering</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-3" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../05_feature_pipelines/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Feature Pipelines</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../06_temporal_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Temporal Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../07_aggregations_api/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Aggregations API</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true">
+ <span class="menu-text">Production</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-4" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../08_online_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Online Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../09_preprocessing/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Preprocessing</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../10_training_inference/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Training &amp; Inference</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true">
+ <span class="menu-text">Operations &amp; Advanced</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../11_operations/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">11</span>&nbsp; <span class="chapter-title">Operations</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../12_advanced_patterns/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">12</span>&nbsp; <span class="chapter-title">Advanced Patterns</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../13_migration_guide/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">13</span>&nbsp; <span class="chapter-title">Migration Guide</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true">
+ <span class="menu-text">Preview Features</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-6" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../08a_streaming_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true">
+ <span class="menu-text">Appendices</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-7" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/A_sample_data/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/A_sample_data/data_manager/streamlit_app.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/B_setup/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">C</span>&nbsp; <span class="chapter-title">Environment Setup</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/C_snowpark_to_dynamic_table/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">D</span>&nbsp; <span class="chapter-title">Snowpark to Dynamic Table</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/D_tag_convention/index.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+    </ul>
+    </div>
+</nav>
+<div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview"><span class="header-section-number">E.1</span> Overview</a></li>
+  <li><a href="#tag-schema-reference" id="toc-tag-schema-reference" class="nav-link" data-scroll-target="#tag-schema-reference"><span class="header-section-number">E.2</span> TAG Schema Reference</a>
+  <ul class="collapse">
+  <li><a href="#snowml_feature_store_object" id="toc-snowml_feature_store_object" class="nav-link" data-scroll-target="#snowml_feature_store_object"><span class="header-section-number">E.2.1</span> <code>SNOWML_FEATURE_STORE_OBJECT</code></a></li>
+  <li><a href="#snowml_feature_store_entity_entity_name" id="toc-snowml_feature_store_entity_entity_name" class="nav-link" data-scroll-target="#snowml_feature_store_entity_entity_name"><span class="header-section-number">E.2.2</span> <code>SNOWML_FEATURE_STORE_ENTITY_&lt;ENTITY_NAME&gt;</code></a></li>
+  <li><a href="#snowml_feature_view_metadata" id="toc-snowml_feature_view_metadata" class="nav-link" data-scroll-target="#snowml_feature_view_metadata"><span class="header-section-number">E.2.3</span> <code>SNOWML_FEATURE_VIEW_METADATA</code></a></li>
+  </ul></li>
+  <li><a href="#full-worked-example-sql-only-feature-view-registration" id="toc-full-worked-example-sql-only-feature-view-registration" class="nav-link" data-scroll-target="#full-worked-example-sql-only-feature-view-registration"><span class="header-section-number">E.3</span> Full Worked Example: SQL-Only Feature View Registration</a>
+  <ul class="collapse">
+  <li><a href="#step-1-create-the-tags-once-per-feature-store-schema" id="toc-step-1-create-the-tags-once-per-feature-store-schema" class="nav-link" data-scroll-target="#step-1-create-the-tags-once-per-feature-store-schema"><span class="header-section-number">E.3.1</span> Step 1: Create the tags (once per Feature Store schema)</a></li>
+  <li><a href="#step-2-create-the-dynamic-table-with-tags" id="toc-step-2-create-the-dynamic-table-with-tags" class="nav-link" data-scroll-target="#step-2-create-the-dynamic-table-with-tags"><span class="header-section-number">E.3.2</span> Step 2: Create the Dynamic Table with TAGs</a></li>
+  <li><a href="#step-3-verify-via-the-python-api" id="toc-step-3-verify-via-the-python-api" class="nav-link" data-scroll-target="#step-3-verify-via-the-python-api"><span class="header-section-number">E.3.3</span> Step 3: Verify via the Python API</a></li>
+  </ul></li>
+  <li><a href="#view-based-feature-view-via-sql" id="toc-view-based-feature-view-via-sql" class="nav-link" data-scroll-target="#view-based-feature-view-via-sql"><span class="header-section-number">E.4</span> View-Based Feature View via SQL</a></li>
+  <li><a href="#entity-registration-via-sql" id="toc-entity-registration-via-sql" class="nav-link" data-scroll-target="#entity-registration-via-sql"><span class="header-section-number">E.5</span> Entity Registration via SQL</a></li>
+  <li><a href="#adding-tags-to-an-existing-object" id="toc-adding-tags-to-an-existing-object" class="nav-link" data-scroll-target="#adding-tags-to-an-existing-object"><span class="header-section-number">E.6</span> Adding Tags to an Existing Object</a></li>
+  <li><a href="#inspecting-tags-on-existing-feature-views" id="toc-inspecting-tags-on-existing-feature-views" class="nav-link" data-scroll-target="#inspecting-tags-on-existing-feature-views"><span class="header-section-number">E.7</span> Inspecting Tags on Existing Feature Views</a></li>
+  <li><a href="#composite-entity-example" id="toc-composite-entity-example" class="nav-link" data-scroll-target="#composite-entity-example"><span class="header-section-number">E.8</span> Composite Entity Example</a></li>
+  <li><a href="#when-to-use-sql-only-registration" id="toc-when-to-use-sql-only-registration" class="nav-link" data-scroll-target="#when-to-use-sql-only-registration"><span class="header-section-number">E.9</span> When to Use SQL-Only Registration</a></li>
+  <li><a href="#cross-references" id="toc-cross-references" class="nav-link" data-scroll-target="#cross-references"><span class="header-section-number">E.10</span> Cross-References</a></li>
+  </ul>
+<div class="toc-actions"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/D_tag_convention/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../appendices/D_tag_convention/index.html"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></a></li></ol></nav>
+<div class="quarto-title">
+<div class="quarto-title-block"><div><h1 class="title">Appendix E — Feature Store Internal Tag Schema</h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<p class="subtitle lead">SQL-only registration of Feature Views and Entities</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Keywords</div>
+    <p>snowflake, feature store, ml, machine learning, mlops</p>
+  </div>
+</div>
+
+</header>
+
+
+<section id="overview" class="level2" data-number="E.1">
+<h2 data-number="E.1" class="anchored" data-anchor-id="overview"><span class="header-section-number">E.1</span> Overview</h2>
+<p>The Feature Store Python SDK (<code>fs.register_feature_view()</code>, <code>fs.register_entity()</code>) creates standard Snowflake objects – Dynamic Tables, Views, and Tags – and applies a specific <strong>TAG convention</strong> that makes them discoverable via the SDK and the Snowsight Feature Store UI. Understanding this convention enables:</p>
+<ul>
+<li><strong>SQL-only workflows</strong>: create Feature Views from dbt, Airflow SQL operators, or Terraform without installing <code>snowflake-ml-python</code></li>
+<li><strong>Advanced DT features</strong>: use SQL-only capabilities like <code>BACKFILL FROM</code>, <code>IMMUTABLE WHERE</code>, or <code>INITIALIZATION_WAREHOUSE</code> that the Python API does not yet expose, while keeping the object visible to the Feature Store</li>
+<li><strong>Debugging</strong>: inspect and understand what the SDK created under the hood</li>
+</ul>
+<div class="callout callout-style-default callout-warning callout-titled" title="Internal schema -- stable but subject to evolution">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Warning</span>Internal schema – stable but subject to evolution
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The TAG names and JSON schemas documented here are <strong>internal implementation details</strong> of <code>snowflake-ml-python</code>. Snowflake maintains <strong>backward compatibility</strong> – objects created with older tag versions continue to work with newer SDK releases. However:</p>
+<ul>
+<li>New JSON fields may be added in future SDK versions.</li>
+<li>Field names or tag structure could change (old values remain readable).</li>
+<li>If you use SQL-only registration, <strong>pin the <code>pkg_version</code> value</strong> to the SDK version you are testing against and re-verify after SDK upgrades.</li>
+</ul>
+<p>The Python SDK remains the recommended and officially supported approach. SQL-only registration is for advanced users who accept the maintenance burden.</p>
+</div>
+</div>
+</section>
+<section id="tag-schema-reference" class="level2" data-number="E.2">
+<h2 data-number="E.2" class="anchored" data-anchor-id="tag-schema-reference"><span class="header-section-number">E.2</span> TAG Schema Reference</h2>
+<p>The SDK uses three tags, all created in the Feature Store schema (e.g., <code>FEATURE_STORE_DEMO.FEATURE_STORE</code>):</p>
+<section id="snowml_feature_store_object" class="level3" data-number="E.2.1">
+<h3 data-number="E.2.1" class="anchored" data-anchor-id="snowml_feature_store_object"><span class="header-section-number">E.2.1</span> <code>SNOWML_FEATURE_STORE_OBJECT</code></h3>
+<p>Applied to the Dynamic Table or View. Identifies the object type and the SDK version that created it.</p>
+<pre><code>{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}</code></pre>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 31%">
+<col style="width: 36%">
+<col style="width: 31%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Values</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>type</code></td>
+<td><code>MANAGED_FEATURE_VIEW</code> (DT-backed), <code>EXTERNAL_FEATURE_VIEW</code> (View-based)</td>
+<td>Determines how the SDK interprets the object</td>
+</tr>
+<tr class="even">
+<td><code>pkg_version</code></td>
+<td>Semver string, e.g.&nbsp;<code>"1.27.0"</code></td>
+<td>Match to your installed <code>snowflake-ml-python</code> version</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="snowml_feature_store_entity_entity_name" class="level3" data-number="E.2.2">
+<h3 data-number="E.2.2" class="anchored" data-anchor-id="snowml_feature_store_entity_entity_name"><span class="header-section-number">E.2.2</span> <code>SNOWML_FEATURE_STORE_ENTITY_&lt;ENTITY_NAME&gt;</code></h3>
+<p>One tag per entity referenced by the Feature View. The tag <strong>name</strong> encodes the entity name (uppercased); the tag <strong>value</strong> is the join key column name.</p>
+<pre><code>SNOWML_FEATURE_STORE_ENTITY_USER = 'USER_ID'</code></pre>
+<p>For composite-key entities, the value is a comma-separated list of column names:</p>
+<pre><code>SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM = 'ORDER_ID,LINE_NUMBER'</code></pre>
+</section>
+<section id="snowml_feature_view_metadata" class="level3" data-number="E.2.3">
+<h3 data-number="E.2.3" class="anchored" data-anchor-id="snowml_feature_view_metadata"><span class="header-section-number">E.2.3</span> <code>SNOWML_FEATURE_VIEW_METADATA</code></h3>
+<p>Applied to the Dynamic Table or View. JSON containing the entity list and timestamp column.</p>
+<pre><code>{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}</code></pre>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 31%">
+<col style="width: 36%">
+<col style="width: 31%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Values</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>entities</code></td>
+<td>Array of entity names (must match the <code>_ENTITY_&lt;NAME&gt;</code> tag suffixes)</td>
+<td>Case-sensitive, uppercase</td>
+</tr>
+<tr class="even">
+<td><code>timestamp_col</code></td>
+<td>Column name string, or <code>"NULL"</code> if no timestamp</td>
+<td><code>"NULL"</code> means equality join (latest-state); a column name enables ASOF join</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="full-worked-example-sql-only-feature-view-registration" class="level2" data-number="E.3">
+<h2 data-number="E.3" class="anchored" data-anchor-id="full-worked-example-sql-only-feature-view-registration"><span class="header-section-number">E.3</span> Full Worked Example: SQL-Only Feature View Registration</h2>
+<section id="step-1-create-the-tags-once-per-feature-store-schema" class="level3" data-number="E.3.1">
+<h3 data-number="E.3.1" class="anchored" data-anchor-id="step-1-create-the-tags-once-per-feature-store-schema"><span class="header-section-number">E.3.1</span> Step 1: Create the tags (once per Feature Store schema)</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb5-1"><a href="#cb5-1"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT;</span>
+<span id="cb5-2"><a href="#cb5-2"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER;</span>
+<span id="cb5-3"><a href="#cb5-3"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="step-2-create-the-dynamic-table-with-tags" class="level3" data-number="E.3.2">
+<h3 data-number="E.3.2" class="anchored" data-anchor-id="step-2-create-the-dynamic-table-with-tags"><span class="header-section-number">E.3.2</span> Step 2: Create the Dynamic Table with TAGs</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb6-1"><a href="#cb6-1"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> <span class="kw">DYNAMIC</span> <span class="kw">TABLE</span> FEATURE_STORE_DEMO.FEATURE_STORE.<span class="ot">"USER_ORDER_FV$V01"</span></span>
+<span id="cb6-2"><a href="#cb6-2"></a>  TARGET_LAG <span class="op">=</span> <span class="st">'1 hour'</span></span>
+<span id="cb6-3"><a href="#cb6-3"></a>  WAREHOUSE <span class="op">=</span> FS_DEV_WH</span>
+<span id="cb6-4"><a href="#cb6-4"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb6-5"><a href="#cb6-5"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb6-6"><a href="#cb6-6"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb6-7"><a href="#cb6-7"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb6-8"><a href="#cb6-8"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb6-9"><a href="#cb6-9"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb6-10"><a href="#cb6-10"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}'</span></span>
+<span id="cb6-11"><a href="#cb6-11"></a>  )</span>
+<span id="cb6-12"><a href="#cb6-12"></a><span class="kw">AS</span></span>
+<span id="cb6-13"><a href="#cb6-13"></a>  <span class="kw">SELECT</span></span>
+<span id="cb6-14"><a href="#cb6-14"></a>      USER_ID,</span>
+<span id="cb6-15"><a href="#cb6-15"></a>      <span class="fu">SUM</span>(TOTAL_AMT)   <span class="kw">AS</span> ORDER_TOTAL_AMT_SUM,</span>
+<span id="cb6-16"><a href="#cb6-16"></a>      <span class="fu">COUNT</span>(ORDER_ID)   <span class="kw">AS</span> ORDER_CNT,</span>
+<span id="cb6-17"><a href="#cb6-17"></a>      <span class="fu">AVG</span>(TOTAL_AMT)    <span class="kw">AS</span> ORDER_TOTAL_AMT_AVG,</span>
+<span id="cb6-18"><a href="#cb6-18"></a>      <span class="fu">MAX</span>(ORDER_TS)     <span class="kw">AS</span> LAST_ORDER_TS</span>
+<span id="cb6-19"><a href="#cb6-19"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS</span>
+<span id="cb6-20"><a href="#cb6-20"></a>  <span class="kw">GROUP</span> <span class="kw">BY</span> USER_ID;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="step-3-verify-via-the-python-api" class="level3" data-number="E.3.3">
+<h3 data-number="E.3.3" class="anchored" data-anchor-id="step-3-verify-via-the-python-api"><span class="header-section-number">E.3.3</span> Step 3: Verify via the Python API</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureStore</span>
+<span id="cb7-2"><a href="#cb7-2"></a></span>
+<span id="cb7-3"><a href="#cb7-3"></a>fs <span class="op">=</span> FeatureStore(session, database<span class="op">=</span><span class="st">"FEATURE_STORE_DEMO"</span>, name<span class="op">=</span><span class="st">"FEATURE_STORE"</span>)</span>
+<span id="cb7-4"><a href="#cb7-4"></a>fv <span class="op">=</span> fs.get_feature_view(<span class="st">"USER_ORDER_FV"</span>, <span class="st">"V01"</span>)</span>
+<span id="cb7-5"><a href="#cb7-5"></a><span class="bu">print</span>(fv.name, fv.version, fv.status)</span>
+<span id="cb7-6"><a href="#cb7-6"></a>fv.feature_df.limit(<span class="dv">5</span>).show()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If the tags are correct, the Feature View appears in <code>fs.list_feature_views()</code> and the Snowsight Feature Store UI.</p>
+</section>
+</section>
+<section id="view-based-feature-view-via-sql" class="level2" data-number="E.4">
+<h2 data-number="E.4" class="anchored" data-anchor-id="view-based-feature-view-via-sql"><span class="header-section-number">E.4</span> View-Based Feature View via SQL</h2>
+<p>For View-based (external) Feature Views, the pattern is identical except the object is a <code>VIEW</code> and the type is <code>EXTERNAL_FEATURE_VIEW</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb8-1"><a href="#cb8-1"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> <span class="kw">VIEW</span> FEATURE_STORE_DEMO.FEATURE_STORE.<span class="ot">"USER_SNAPSHOT_FV$V01"</span></span>
+<span id="cb8-2"><a href="#cb8-2"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb8-3"><a href="#cb8-3"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb8-4"><a href="#cb8-4"></a>      <span class="st">'{"type": "EXTERNAL_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb8-5"><a href="#cb8-5"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb8-6"><a href="#cb8-6"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb8-7"><a href="#cb8-7"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb8-8"><a href="#cb8-8"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "SNAPSHOT_TS"}'</span></span>
+<span id="cb8-9"><a href="#cb8-9"></a>  )</span>
+<span id="cb8-10"><a href="#cb8-10"></a><span class="kw">AS</span></span>
+<span id="cb8-11"><a href="#cb8-11"></a>  <span class="kw">SELECT</span> USER_ID, SNAPSHOT_TS, FEATURE_A, FEATURE_B</span>
+<span id="cb8-12"><a href="#cb8-12"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO.FEATURE_STORE.USER_DAILY_SNAPSHOT;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="entity-registration-via-sql" class="level2" data-number="E.5">
+<h2 data-number="E.5" class="anchored" data-anchor-id="entity-registration-via-sql"><span class="header-section-number">E.5</span> Entity Registration via SQL</h2>
+<p>The Python SDK’s <code>fs.register_entity()</code> creates a TAG in the Feature Store schema. Each entity is represented by a tag named <code>SNOWML_FEATURE_STORE_ENTITY_&lt;ENTITY_NAME&gt;</code>. Creating the tag manually is sufficient:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb9-1"><a href="#cb9-1"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER;</span>
+<span id="cb9-2"><a href="#cb9-2"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_PRODUCT;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The entity’s join key mapping is stored as the tag <strong>value</strong> when applied to a Feature View (not on the tag definition itself). The SDK discovers entities by scanning tags with the <code>SNOWML_FEATURE_STORE_ENTITY_</code> prefix.</p>
+</section>
+<section id="adding-tags-to-an-existing-object" class="level2" data-number="E.6">
+<h2 data-number="E.6" class="anchored" data-anchor-id="adding-tags-to-an-existing-object"><span class="header-section-number">E.6</span> Adding Tags to an Existing Object</h2>
+<p>If you created a Dynamic Table via SQL without tags (e.g., to use <code>BACKFILL FROM</code> or <code>IMMUTABLE WHERE</code>), you can add the tags after creation:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb10-1"><a href="#cb10-1"></a><span class="kw">ALTER</span> <span class="kw">DYNAMIC</span> <span class="kw">TABLE</span> FEATURE_STORE_DEMO.FEATURE_STORE.<span class="ot">"USER_ORDER_FV$V02"</span></span>
+<span id="cb10-2"><a href="#cb10-2"></a>  <span class="kw">SET</span> TAG</span>
+<span id="cb10-3"><a href="#cb10-3"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb10-4"><a href="#cb10-4"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb10-5"><a href="#cb10-5"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb10-6"><a href="#cb10-6"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb10-7"><a href="#cb10-7"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb10-8"><a href="#cb10-8"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}'</span>;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="inspecting-tags-on-existing-feature-views" class="level2" data-number="E.7">
+<h2 data-number="E.7" class="anchored" data-anchor-id="inspecting-tags-on-existing-feature-views"><span class="header-section-number">E.7</span> Inspecting Tags on Existing Feature Views</h2>
+<p>To see what tags the SDK applied to a Feature View:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb11-1"><a href="#cb11-1"></a><span class="kw">SELECT</span> TAG_NAME, TAG_VALUE</span>
+<span id="cb11-2"><a href="#cb11-2"></a><span class="kw">FROM</span> <span class="kw">TABLE</span>(INFORMATION_SCHEMA.TAG_REFERENCES(</span>
+<span id="cb11-3"><a href="#cb11-3"></a>    <span class="st">'FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"'</span>, <span class="st">'TABLE'</span></span>
+<span id="cb11-4"><a href="#cb11-4"></a>))</span>
+<span id="cb11-5"><a href="#cb11-5"></a><span class="kw">WHERE</span> TAG_NAME <span class="kw">LIKE</span> <span class="st">'SNOWML_%'</span>;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="composite-entity-example" class="level2" data-number="E.8">
+<h2 data-number="E.8" class="anchored" data-anchor-id="composite-entity-example"><span class="header-section-number">E.8</span> Composite Entity Example</h2>
+<p>For a Feature View with a multi-column entity key:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb12-1"><a href="#cb12-1"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span></span>
+<span id="cb12-2"><a href="#cb12-2"></a>  FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM;</span>
+<span id="cb12-3"><a href="#cb12-3"></a></span>
+<span id="cb12-4"><a href="#cb12-4"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> <span class="kw">DYNAMIC</span> <span class="kw">TABLE</span></span>
+<span id="cb12-5"><a href="#cb12-5"></a>  FEATURE_STORE_DEMO.FEATURE_STORE.<span class="ot">"ORDER_LINEITEM_FV$V01"</span></span>
+<span id="cb12-6"><a href="#cb12-6"></a>  TARGET_LAG <span class="op">=</span> <span class="st">'1 hour'</span></span>
+<span id="cb12-7"><a href="#cb12-7"></a>  WAREHOUSE <span class="op">=</span> FS_DEV_WH</span>
+<span id="cb12-8"><a href="#cb12-8"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb12-9"><a href="#cb12-9"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb12-10"><a href="#cb12-10"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb12-11"><a href="#cb12-11"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM <span class="op">=</span></span>
+<span id="cb12-12"><a href="#cb12-12"></a>      <span class="st">'ORDER_ID,LINE_NUMBER'</span>,</span>
+<span id="cb12-13"><a href="#cb12-13"></a>    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb12-14"><a href="#cb12-14"></a>      <span class="st">'{"entities": ["ORDER_ITEM"], "timestamp_col": "SHIP_DATE"}'</span></span>
+<span id="cb12-15"><a href="#cb12-15"></a>  )</span>
+<span id="cb12-16"><a href="#cb12-16"></a><span class="kw">AS</span></span>
+<span id="cb12-17"><a href="#cb12-17"></a>  <span class="kw">SELECT</span> ORDER_ID, LINE_NUMBER, EXTENDED_PRICE, SHIP_DATE</span>
+<span id="cb12-18"><a href="#cb12-18"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDER_ITEMS;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="when-to-use-sql-only-registration" class="level2" data-number="E.9">
+<h2 data-number="E.9" class="anchored" data-anchor-id="when-to-use-sql-only-registration"><span class="header-section-number">E.9</span> When to Use SQL-Only Registration</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 40%">
+<col style="width: 60%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Scenario</th>
+<th>Recommendation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Standard Feature View development</td>
+<td>Use the Python SDK – simpler, validated, forward-compatible</td>
+</tr>
+<tr class="even">
+<td>CI/CD with dbt or Terraform (no Python)</td>
+<td>SQL-only with pinned <code>pkg_version</code></td>
+</tr>
+<tr class="odd">
+<td>Advanced DT features (<code>BACKFILL</code>, <code>IMMUTABLE WHERE</code>, <code>INITIALIZATION_WAREHOUSE</code>)</td>
+<td>Create via SQL, then add TAGs per this appendix</td>
+</tr>
+<tr class="even">
+<td>Quick ad-hoc exploration</td>
+<td>Python SDK</td>
+</tr>
+<tr class="odd">
+<td>Production pipelines on Airflow SQL operators</td>
+<td>SQL-only with pinned <code>pkg_version</code></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="cross-references" class="level2" data-number="E.10">
+<h2 data-number="E.10" class="anchored" data-anchor-id="cross-references"><span class="header-section-number">E.10</span> Cross-References</h2>
+<ul>
+<li><a href="../../04_feature_views/index.html">Chapter 4: Feature Views</a> – versioning, naming convention (<code>&lt;NAME&gt;$&lt;VERSION&gt;</code>), schema evolution</li>
+<li><a href="../../04_feature_views/index.html#sec-external-scheduling">Chapter 4: External Scheduling</a> – suspend/resume/refresh via SQL</li>
+<li><a href="../../11_operations/index.html">Chapter 11: Operations</a> – TAG_REFERENCES queries, metadata discovery</li>
+<li><a href="../../12_advanced_patterns/index.html">Chapter 12: CI/CD</a> – config-driven deployment where SQL-only may be preferred</li>
+</ul>
+
+
+<!-- -->
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const a = window.document.createElement('a');
+      a.classList.add('top-right');
+      a.classList.add('quarto-color-scheme-toggle');
+      a.href = "";
+      a.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      a.appendChild(i);
+      window.document.body.appendChild(a);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+    const viewSource = window.document.getElementById('quarto-view-source') ||
+                       window.document.getElementById('quarto-code-tools-source');
+    if (viewSource) {
+      const sourceUrl = viewSource.getAttribute("data-quarto-source-url");
+      viewSource.addEventListener("click", function(e) {
+        if (sourceUrl) {
+          // rstudio viewer pane
+          if (/\bcapabilities=\b/.test(window.location)) {
+            window.open(sourceUrl);
+          } else {
+            window.location.href = sourceUrl;
+          }
+        } else {
+          const modal = new bootstrap.Modal(document.getElementById('quarto-embedded-source-code-modal'));
+          modal.show();
+        }
+        return false;
+      });
+    }
+    function toggleCodeHandler(show) {
+      return function(e) {
+        const detailsSrc = window.document.querySelectorAll(".cell > details > .sourceCode");
+        for (let i=0; i<detailsSrc.length; i++) {
+          const details = detailsSrc[i].parentElement;
+          if (show) {
+            details.open = true;
+          } else {
+            details.removeAttribute("open");
+          }
+        }
+        const cellCodeDivs = window.document.querySelectorAll(".cell > .sourceCode");
+        const fromCls = show ? "hidden" : "unhidden";
+        const toCls = show ? "unhidden" : "hidden";
+        for (let i=0; i<cellCodeDivs.length; i++) {
+          const codeDiv = cellCodeDivs[i];
+          if (codeDiv.classList.contains(fromCls)) {
+            codeDiv.classList.remove(fromCls);
+            codeDiv.classList.add(toCls);
+          } 
+        }
+        return false;
+      }
+    }
+    const hideAllCode = window.document.getElementById("quarto-hide-all-code");
+    if (hideAllCode) {
+      hideAllCode.addEventListener("click", toggleCodeHandler(false));
+    }
+    const showAllCode = window.document.getElementById("quarto-show-all-code");
+    if (showAllCode) {
+      showAllCode.addEventListener("click", toggleCodeHandler(true));
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+      <a href="../../appendices/C_snowpark_to_dynamic_table/index.html" class="pagination-link" aria-label="Snowpark to Dynamic Table">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">D</span>&nbsp; <span class="chapter-title">Snowpark to Dynamic Table</span></span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+  </div>
+</nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13" data-shortcodes="false"><pre class="sourceCode numberSource markdown number-lines code-with-copy"><code class="sourceCode markdown"><span id="cb13-1"><a href="#cb13-1"></a><span class="co">---</span></span>
+<span id="cb13-2"><a href="#cb13-2"></a><span class="an">title:</span><span class="co"> "Feature Store Internal Tag Schema"</span></span>
+<span id="cb13-3"><a href="#cb13-3"></a><span class="an">subtitle:</span><span class="co"> "SQL-only registration of Feature Views and Entities"</span></span>
+<span id="cb13-4"><a href="#cb13-4"></a><span class="co">---</span></span>
+<span id="cb13-5"><a href="#cb13-5"></a></span>
+<span id="cb13-6"><a href="#cb13-6"></a><span class="fu">## Overview</span></span>
+<span id="cb13-7"><a href="#cb13-7"></a></span>
+<span id="cb13-8"><a href="#cb13-8"></a>The Feature Store Python SDK (<span class="in">`fs.register_feature_view()`</span>, <span class="in">`fs.register_entity()`</span>) creates standard Snowflake objects -- Dynamic Tables, Views, and Tags -- and applies a specific **TAG convention** that makes them discoverable via the SDK and the Snowsight Feature Store UI. Understanding this convention enables:</span>
+<span id="cb13-9"><a href="#cb13-9"></a></span>
+<span id="cb13-10"><a href="#cb13-10"></a><span class="ss">- </span>**SQL-only workflows**: create Feature Views from dbt, Airflow SQL operators, or Terraform without installing <span class="in">`snowflake-ml-python`</span></span>
+<span id="cb13-11"><a href="#cb13-11"></a><span class="ss">- </span>**Advanced DT features**: use SQL-only capabilities like <span class="in">`BACKFILL FROM`</span>, <span class="in">`IMMUTABLE WHERE`</span>, or <span class="in">`INITIALIZATION_WAREHOUSE`</span> that the Python API does not yet expose, while keeping the object visible to the Feature Store</span>
+<span id="cb13-12"><a href="#cb13-12"></a><span class="ss">- </span>**Debugging**: inspect and understand what the SDK created under the hood</span>
+<span id="cb13-13"><a href="#cb13-13"></a></span>
+<span id="cb13-14"><a href="#cb13-14"></a>::: {.callout-warning title="Internal schema -- stable but subject to evolution"}</span>
+<span id="cb13-15"><a href="#cb13-15"></a>The TAG names and JSON schemas documented here are **internal implementation details** of `snowflake-ml-python`. Snowflake maintains **backward compatibility** -- objects created with older tag versions continue to work with newer SDK releases. However:</span>
+<span id="cb13-16"><a href="#cb13-16"></a></span>
+<span id="cb13-17"><a href="#cb13-17"></a><span class="ss">- </span>New JSON fields may be added in future SDK versions.</span>
+<span id="cb13-18"><a href="#cb13-18"></a><span class="ss">- </span>Field names or tag structure could change (old values remain readable).</span>
+<span id="cb13-19"><a href="#cb13-19"></a><span class="ss">- </span>If you use SQL-only registration, **pin the `pkg_version` value** to the SDK version you are testing against and re-verify after SDK upgrades.</span>
+<span id="cb13-20"><a href="#cb13-20"></a></span>
+<span id="cb13-21"><a href="#cb13-21"></a>The Python SDK remains the recommended and officially supported approach. SQL-only registration is for advanced users who accept the maintenance burden.</span>
+<span id="cb13-22"><a href="#cb13-22"></a>:::</span>
+<span id="cb13-23"><a href="#cb13-23"></a></span>
+<span id="cb13-24"><a href="#cb13-24"></a><span class="fu">## TAG Schema Reference</span></span>
+<span id="cb13-25"><a href="#cb13-25"></a></span>
+<span id="cb13-26"><a href="#cb13-26"></a>The SDK uses three tags, all created in the Feature Store schema (e.g., <span class="in">`FEATURE_STORE_DEMO.FEATURE_STORE`</span>):</span>
+<span id="cb13-27"><a href="#cb13-27"></a></span>
+<span id="cb13-28"><a href="#cb13-28"></a><span class="fu">### `SNOWML_FEATURE_STORE_OBJECT`</span></span>
+<span id="cb13-29"><a href="#cb13-29"></a></span>
+<span id="cb13-30"><a href="#cb13-30"></a>Applied to the Dynamic Table or View. Identifies the object type and the SDK version that created it.</span>
+<span id="cb13-31"><a href="#cb13-31"></a></span>
+<span id="cb13-32"><a href="#cb13-32"></a><span class="in">```</span></span>
+<span id="cb13-33"><a href="#cb13-33"></a><span class="in">{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}</span></span>
+<span id="cb13-34"><a href="#cb13-34"></a><span class="in">```</span></span>
+<span id="cb13-35"><a href="#cb13-35"></a></span>
+<span id="cb13-36"><a href="#cb13-36"></a><span class="pp">|</span> Field <span class="pp">|</span> Values <span class="pp">|</span> Notes <span class="pp">|</span></span>
+<span id="cb13-37"><a href="#cb13-37"></a><span class="pp">|-------|--------|-------|</span></span>
+<span id="cb13-38"><a href="#cb13-38"></a><span class="pp">|</span> <span class="in">`type`</span> <span class="pp">|</span> <span class="in">`MANAGED_FEATURE_VIEW`</span> (DT-backed), <span class="in">`EXTERNAL_FEATURE_VIEW`</span> (View-based) <span class="pp">|</span> Determines how the SDK interprets the object <span class="pp">|</span></span>
+<span id="cb13-39"><a href="#cb13-39"></a><span class="pp">|</span> <span class="in">`pkg_version`</span> <span class="pp">|</span> Semver string, e.g. <span class="in">`"1.27.0"`</span> <span class="pp">|</span> Match to your installed <span class="in">`snowflake-ml-python`</span> version <span class="pp">|</span></span>
+<span id="cb13-40"><a href="#cb13-40"></a></span>
+<span id="cb13-41"><a href="#cb13-41"></a><span class="fu">### `SNOWML_FEATURE_STORE_ENTITY_&lt;ENTITY_NAME&gt;`</span></span>
+<span id="cb13-42"><a href="#cb13-42"></a></span>
+<span id="cb13-43"><a href="#cb13-43"></a>One tag per entity referenced by the Feature View. The tag **name** encodes the entity name (uppercased); the tag **value** is the join key column name.</span>
+<span id="cb13-44"><a href="#cb13-44"></a></span>
+<span id="cb13-45"><a href="#cb13-45"></a><span class="in">```</span></span>
+<span id="cb13-46"><a href="#cb13-46"></a><span class="in">SNOWML_FEATURE_STORE_ENTITY_USER = 'USER_ID'</span></span>
+<span id="cb13-47"><a href="#cb13-47"></a><span class="in">```</span></span>
+<span id="cb13-48"><a href="#cb13-48"></a></span>
+<span id="cb13-49"><a href="#cb13-49"></a>For composite-key entities, the value is a comma-separated list of column names:</span>
+<span id="cb13-50"><a href="#cb13-50"></a></span>
+<span id="cb13-51"><a href="#cb13-51"></a><span class="in">```</span></span>
+<span id="cb13-52"><a href="#cb13-52"></a><span class="in">SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM = 'ORDER_ID,LINE_NUMBER'</span></span>
+<span id="cb13-53"><a href="#cb13-53"></a><span class="in">```</span></span>
+<span id="cb13-54"><a href="#cb13-54"></a></span>
+<span id="cb13-55"><a href="#cb13-55"></a><span class="fu">### `SNOWML_FEATURE_VIEW_METADATA`</span></span>
+<span id="cb13-56"><a href="#cb13-56"></a></span>
+<span id="cb13-57"><a href="#cb13-57"></a>Applied to the Dynamic Table or View. JSON containing the entity list and timestamp column.</span>
+<span id="cb13-58"><a href="#cb13-58"></a></span>
+<span id="cb13-59"><a href="#cb13-59"></a><span class="in">```</span></span>
+<span id="cb13-60"><a href="#cb13-60"></a><span class="in">{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}</span></span>
+<span id="cb13-61"><a href="#cb13-61"></a><span class="in">```</span></span>
+<span id="cb13-62"><a href="#cb13-62"></a></span>
+<span id="cb13-63"><a href="#cb13-63"></a><span class="pp">|</span> Field <span class="pp">|</span> Values <span class="pp">|</span> Notes <span class="pp">|</span></span>
+<span id="cb13-64"><a href="#cb13-64"></a><span class="pp">|-------|--------|-------|</span></span>
+<span id="cb13-65"><a href="#cb13-65"></a><span class="pp">|</span> <span class="in">`entities`</span> <span class="pp">|</span> Array of entity names (must match the <span class="in">`_ENTITY_&lt;NAME&gt;`</span> tag suffixes) <span class="pp">|</span> Case-sensitive, uppercase <span class="pp">|</span></span>
+<span id="cb13-66"><a href="#cb13-66"></a><span class="pp">|</span> <span class="in">`timestamp_col`</span> <span class="pp">|</span> Column name string, or <span class="in">`"NULL"`</span> if no timestamp <span class="pp">|</span> <span class="in">`"NULL"`</span> means equality join (latest-state); a column name enables ASOF join <span class="pp">|</span></span>
+<span id="cb13-67"><a href="#cb13-67"></a></span>
+<span id="cb13-68"><a href="#cb13-68"></a><span class="fu">## Full Worked Example: SQL-Only Feature View Registration</span></span>
+<span id="cb13-69"><a href="#cb13-69"></a></span>
+<span id="cb13-70"><a href="#cb13-70"></a><span class="fu">### Step 1: Create the tags (once per Feature Store schema)</span></span>
+<span id="cb13-71"><a href="#cb13-71"></a></span>
+<span id="cb13-72"><a href="#cb13-72"></a><span class="in">```sql</span></span>
+<span id="cb13-73"><a href="#cb13-73"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_OBJECT;</span>
+<span id="cb13-74"><a href="#cb13-74"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_USER;</span>
+<span id="cb13-75"><a href="#cb13-75"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_VIEW_METADATA;</span>
+<span id="cb13-76"><a href="#cb13-76"></a><span class="in">```</span></span>
+<span id="cb13-77"><a href="#cb13-77"></a></span>
+<span id="cb13-78"><a href="#cb13-78"></a><span class="fu">### Step 2: Create the Dynamic Table with TAGs</span></span>
+<span id="cb13-79"><a href="#cb13-79"></a></span>
+<span id="cb13-80"><a href="#cb13-80"></a><span class="in">```sql</span></span>
+<span id="cb13-81"><a href="#cb13-81"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> DYNAMIC <span class="kw">TABLE</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span><span class="st">"USER_ORDER_FV$V01"</span></span>
+<span id="cb13-82"><a href="#cb13-82"></a>  TARGET_LAG <span class="op">=</span> <span class="st">'1 hour'</span></span>
+<span id="cb13-83"><a href="#cb13-83"></a>  WAREHOUSE <span class="op">=</span> FS_DEV_WH</span>
+<span id="cb13-84"><a href="#cb13-84"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb13-85"><a href="#cb13-85"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb13-86"><a href="#cb13-86"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb13-87"><a href="#cb13-87"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb13-88"><a href="#cb13-88"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb13-89"><a href="#cb13-89"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb13-90"><a href="#cb13-90"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}'</span></span>
+<span id="cb13-91"><a href="#cb13-91"></a>  )</span>
+<span id="cb13-92"><a href="#cb13-92"></a><span class="kw">AS</span></span>
+<span id="cb13-93"><a href="#cb13-93"></a>  <span class="kw">SELECT</span></span>
+<span id="cb13-94"><a href="#cb13-94"></a>      USER_ID,</span>
+<span id="cb13-95"><a href="#cb13-95"></a>      <span class="fu">SUM</span>(TOTAL_AMT)   <span class="kw">AS</span> ORDER_TOTAL_AMT_SUM,</span>
+<span id="cb13-96"><a href="#cb13-96"></a>      <span class="fu">COUNT</span>(ORDER_ID)   <span class="kw">AS</span> ORDER_CNT,</span>
+<span id="cb13-97"><a href="#cb13-97"></a>      <span class="fu">AVG</span>(TOTAL_AMT)    <span class="kw">AS</span> ORDER_TOTAL_AMT_AVG,</span>
+<span id="cb13-98"><a href="#cb13-98"></a>      <span class="fu">MAX</span>(ORDER_TS)     <span class="kw">AS</span> LAST_ORDER_TS</span>
+<span id="cb13-99"><a href="#cb13-99"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_DATA<span class="ch">.</span>ORDERS</span>
+<span id="cb13-100"><a href="#cb13-100"></a>  <span class="kw">GROUP</span> <span class="kw">BY</span> USER_ID;</span>
+<span id="cb13-101"><a href="#cb13-101"></a><span class="in">```</span></span>
+<span id="cb13-102"><a href="#cb13-102"></a></span>
+<span id="cb13-103"><a href="#cb13-103"></a><span class="fu">### Step 3: Verify via the Python API</span></span>
+<span id="cb13-104"><a href="#cb13-104"></a></span>
+<span id="cb13-105"><a href="#cb13-105"></a><span class="in">```python</span></span>
+<span id="cb13-106"><a href="#cb13-106"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureStore</span>
+<span id="cb13-107"><a href="#cb13-107"></a></span>
+<span id="cb13-108"><a href="#cb13-108"></a>fs <span class="op">=</span> FeatureStore(session, database<span class="op">=</span><span class="st">"FEATURE_STORE_DEMO"</span>, name<span class="op">=</span><span class="st">"FEATURE_STORE"</span>)</span>
+<span id="cb13-109"><a href="#cb13-109"></a>fv <span class="op">=</span> fs.get_feature_view(<span class="st">"USER_ORDER_FV"</span>, <span class="st">"V01"</span>)</span>
+<span id="cb13-110"><a href="#cb13-110"></a><span class="bu">print</span>(fv.name, fv.version, fv.status)</span>
+<span id="cb13-111"><a href="#cb13-111"></a>fv.feature_df.limit(<span class="dv">5</span>).show()</span>
+<span id="cb13-112"><a href="#cb13-112"></a><span class="in">```</span></span>
+<span id="cb13-113"><a href="#cb13-113"></a></span>
+<span id="cb13-114"><a href="#cb13-114"></a>If the tags are correct, the Feature View appears in <span class="in">`fs.list_feature_views()`</span> and the Snowsight Feature Store UI.</span>
+<span id="cb13-115"><a href="#cb13-115"></a></span>
+<span id="cb13-116"><a href="#cb13-116"></a><span class="fu">## View-Based Feature View via SQL</span></span>
+<span id="cb13-117"><a href="#cb13-117"></a></span>
+<span id="cb13-118"><a href="#cb13-118"></a>For View-based (external) Feature Views, the pattern is identical except the object is a <span class="in">`VIEW`</span> and the type is <span class="in">`EXTERNAL_FEATURE_VIEW`</span>:</span>
+<span id="cb13-119"><a href="#cb13-119"></a></span>
+<span id="cb13-120"><a href="#cb13-120"></a><span class="in">```sql</span></span>
+<span id="cb13-121"><a href="#cb13-121"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> VIEW FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span><span class="st">"USER_SNAPSHOT_FV$V01"</span></span>
+<span id="cb13-122"><a href="#cb13-122"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb13-123"><a href="#cb13-123"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb13-124"><a href="#cb13-124"></a>      <span class="st">'{"type": "EXTERNAL_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb13-125"><a href="#cb13-125"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb13-126"><a href="#cb13-126"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb13-127"><a href="#cb13-127"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb13-128"><a href="#cb13-128"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "SNAPSHOT_TS"}'</span></span>
+<span id="cb13-129"><a href="#cb13-129"></a>  )</span>
+<span id="cb13-130"><a href="#cb13-130"></a><span class="kw">AS</span></span>
+<span id="cb13-131"><a href="#cb13-131"></a>  <span class="kw">SELECT</span> USER_ID, SNAPSHOT_TS, FEATURE_A, FEATURE_B</span>
+<span id="cb13-132"><a href="#cb13-132"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>USER_DAILY_SNAPSHOT;</span>
+<span id="cb13-133"><a href="#cb13-133"></a><span class="in">```</span></span>
+<span id="cb13-134"><a href="#cb13-134"></a></span>
+<span id="cb13-135"><a href="#cb13-135"></a><span class="fu">## Entity Registration via SQL</span></span>
+<span id="cb13-136"><a href="#cb13-136"></a></span>
+<span id="cb13-137"><a href="#cb13-137"></a>The Python SDK's <span class="in">`fs.register_entity()`</span> creates a TAG in the Feature Store schema. Each entity is represented by a tag named <span class="in">`SNOWML_FEATURE_STORE_ENTITY_&lt;ENTITY_NAME&gt;`</span>. Creating the tag manually is sufficient:</span>
+<span id="cb13-138"><a href="#cb13-138"></a></span>
+<span id="cb13-139"><a href="#cb13-139"></a><span class="in">```sql</span></span>
+<span id="cb13-140"><a href="#cb13-140"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_USER;</span>
+<span id="cb13-141"><a href="#cb13-141"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_PRODUCT;</span>
+<span id="cb13-142"><a href="#cb13-142"></a><span class="in">```</span></span>
+<span id="cb13-143"><a href="#cb13-143"></a></span>
+<span id="cb13-144"><a href="#cb13-144"></a>The entity's join key mapping is stored as the tag **value** when applied to a Feature View (not on the tag definition itself). The SDK discovers entities by scanning tags with the <span class="in">`SNOWML_FEATURE_STORE_ENTITY_`</span> prefix.</span>
+<span id="cb13-145"><a href="#cb13-145"></a></span>
+<span id="cb13-146"><a href="#cb13-146"></a><span class="fu">## Adding Tags to an Existing Object</span></span>
+<span id="cb13-147"><a href="#cb13-147"></a></span>
+<span id="cb13-148"><a href="#cb13-148"></a>If you created a Dynamic Table via SQL without tags (e.g., to use <span class="in">`BACKFILL FROM`</span> or <span class="in">`IMMUTABLE WHERE`</span>), you can add the tags after creation:</span>
+<span id="cb13-149"><a href="#cb13-149"></a></span>
+<span id="cb13-150"><a href="#cb13-150"></a><span class="in">```sql</span></span>
+<span id="cb13-151"><a href="#cb13-151"></a><span class="kw">ALTER</span> DYNAMIC <span class="kw">TABLE</span> FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span><span class="st">"USER_ORDER_FV$V02"</span></span>
+<span id="cb13-152"><a href="#cb13-152"></a>  <span class="kw">SET</span> TAG</span>
+<span id="cb13-153"><a href="#cb13-153"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb13-154"><a href="#cb13-154"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb13-155"><a href="#cb13-155"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_USER <span class="op">=</span></span>
+<span id="cb13-156"><a href="#cb13-156"></a>      <span class="st">'USER_ID'</span>,</span>
+<span id="cb13-157"><a href="#cb13-157"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb13-158"><a href="#cb13-158"></a>      <span class="st">'{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}'</span>;</span>
+<span id="cb13-159"><a href="#cb13-159"></a><span class="in">```</span></span>
+<span id="cb13-160"><a href="#cb13-160"></a></span>
+<span id="cb13-161"><a href="#cb13-161"></a><span class="fu">## Inspecting Tags on Existing Feature Views</span></span>
+<span id="cb13-162"><a href="#cb13-162"></a></span>
+<span id="cb13-163"><a href="#cb13-163"></a>To see what tags the SDK applied to a Feature View:</span>
+<span id="cb13-164"><a href="#cb13-164"></a></span>
+<span id="cb13-165"><a href="#cb13-165"></a><span class="in">```sql</span></span>
+<span id="cb13-166"><a href="#cb13-166"></a><span class="kw">SELECT</span> TAG_NAME, TAG_VALUE</span>
+<span id="cb13-167"><a href="#cb13-167"></a><span class="kw">FROM</span> <span class="kw">TABLE</span>(INFORMATION_SCHEMA<span class="ch">.</span>TAG_REFERENCES(</span>
+<span id="cb13-168"><a href="#cb13-168"></a>    <span class="st">'FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"'</span>, <span class="st">'TABLE'</span></span>
+<span id="cb13-169"><a href="#cb13-169"></a>))</span>
+<span id="cb13-170"><a href="#cb13-170"></a><span class="kw">WHERE</span> TAG_NAME <span class="kw">LIKE</span> <span class="st">'SNOWML_%'</span>;</span>
+<span id="cb13-171"><a href="#cb13-171"></a><span class="in">```</span></span>
+<span id="cb13-172"><a href="#cb13-172"></a></span>
+<span id="cb13-173"><a href="#cb13-173"></a><span class="fu">## Composite Entity Example</span></span>
+<span id="cb13-174"><a href="#cb13-174"></a></span>
+<span id="cb13-175"><a href="#cb13-175"></a>For a Feature View with a multi-column entity key:</span>
+<span id="cb13-176"><a href="#cb13-176"></a></span>
+<span id="cb13-177"><a href="#cb13-177"></a><span class="in">```sql</span></span>
+<span id="cb13-178"><a href="#cb13-178"></a><span class="kw">CREATE</span> TAG <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span></span>
+<span id="cb13-179"><a href="#cb13-179"></a>  FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM;</span>
+<span id="cb13-180"><a href="#cb13-180"></a></span>
+<span id="cb13-181"><a href="#cb13-181"></a><span class="kw">CREATE</span> <span class="kw">OR</span> <span class="kw">REPLACE</span> DYNAMIC <span class="kw">TABLE</span></span>
+<span id="cb13-182"><a href="#cb13-182"></a>  FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span><span class="st">"ORDER_LINEITEM_FV$V01"</span></span>
+<span id="cb13-183"><a href="#cb13-183"></a>  TARGET_LAG <span class="op">=</span> <span class="st">'1 hour'</span></span>
+<span id="cb13-184"><a href="#cb13-184"></a>  WAREHOUSE <span class="op">=</span> FS_DEV_WH</span>
+<span id="cb13-185"><a href="#cb13-185"></a>  <span class="kw">WITH</span> TAG (</span>
+<span id="cb13-186"><a href="#cb13-186"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_OBJECT <span class="op">=</span></span>
+<span id="cb13-187"><a href="#cb13-187"></a>      <span class="st">'{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}'</span>,</span>
+<span id="cb13-188"><a href="#cb13-188"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM <span class="op">=</span></span>
+<span id="cb13-189"><a href="#cb13-189"></a>      <span class="st">'ORDER_ID,LINE_NUMBER'</span>,</span>
+<span id="cb13-190"><a href="#cb13-190"></a>    FEATURE_STORE_DEMO<span class="ch">.</span>FEATURE_STORE<span class="ch">.</span>SNOWML_FEATURE_VIEW_METADATA <span class="op">=</span></span>
+<span id="cb13-191"><a href="#cb13-191"></a>      <span class="st">'{"entities": ["ORDER_ITEM"], "timestamp_col": "SHIP_DATE"}'</span></span>
+<span id="cb13-192"><a href="#cb13-192"></a>  )</span>
+<span id="cb13-193"><a href="#cb13-193"></a><span class="kw">AS</span></span>
+<span id="cb13-194"><a href="#cb13-194"></a>  <span class="kw">SELECT</span> ORDER_ID, LINE_NUMBER, EXTENDED_PRICE, SHIP_DATE</span>
+<span id="cb13-195"><a href="#cb13-195"></a>  <span class="kw">FROM</span> FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_DATA<span class="ch">.</span>ORDER_ITEMS;</span>
+<span id="cb13-196"><a href="#cb13-196"></a><span class="in">```</span></span>
+<span id="cb13-197"><a href="#cb13-197"></a></span>
+<span id="cb13-198"><a href="#cb13-198"></a><span class="fu">## When to Use SQL-Only Registration</span></span>
+<span id="cb13-199"><a href="#cb13-199"></a></span>
+<span id="cb13-200"><a href="#cb13-200"></a><span class="pp">|</span> Scenario <span class="pp">|</span> Recommendation <span class="pp">|</span></span>
+<span id="cb13-201"><a href="#cb13-201"></a><span class="pp">|----------|---------------|</span></span>
+<span id="cb13-202"><a href="#cb13-202"></a><span class="pp">|</span> Standard Feature View development <span class="pp">|</span> Use the Python SDK -- simpler, validated, forward-compatible <span class="pp">|</span></span>
+<span id="cb13-203"><a href="#cb13-203"></a><span class="pp">|</span> CI/CD with dbt or Terraform (no Python) <span class="pp">|</span> SQL-only with pinned <span class="in">`pkg_version`</span> <span class="pp">|</span></span>
+<span id="cb13-204"><a href="#cb13-204"></a><span class="pp">|</span> Advanced DT features (<span class="in">`BACKFILL`</span>, <span class="in">`IMMUTABLE WHERE`</span>, <span class="in">`INITIALIZATION_WAREHOUSE`</span>) <span class="pp">|</span> Create via SQL, then add TAGs per this appendix <span class="pp">|</span></span>
+<span id="cb13-205"><a href="#cb13-205"></a><span class="pp">|</span> Quick ad-hoc exploration <span class="pp">|</span> Python SDK <span class="pp">|</span></span>
+<span id="cb13-206"><a href="#cb13-206"></a><span class="pp">|</span> Production pipelines on Airflow SQL operators <span class="pp">|</span> SQL-only with pinned <span class="in">`pkg_version`</span> <span class="pp">|</span></span>
+<span id="cb13-207"><a href="#cb13-207"></a></span>
+<span id="cb13-208"><a href="#cb13-208"></a><span class="fu">## Cross-References</span></span>
+<span id="cb13-209"><a href="#cb13-209"></a></span>
+<span id="cb13-210"><a href="#cb13-210"></a><span class="ss">- </span><span class="co">[</span><span class="ot">Chapter 4: Feature Views</span><span class="co">](../../04_feature_views/index.qmd)</span> -- versioning, naming convention (<span class="in">`&lt;NAME&gt;$&lt;VERSION&gt;`</span>), schema evolution</span>
+<span id="cb13-211"><a href="#cb13-211"></a><span class="ss">- </span><span class="co">[</span><span class="ot">Chapter 4: External Scheduling</span><span class="co">](../../04_feature_views/index.qmd#sec-external-scheduling)</span> -- suspend/resume/refresh via SQL</span>
+<span id="cb13-212"><a href="#cb13-212"></a><span class="ss">- </span><span class="co">[</span><span class="ot">Chapter 11: Operations</span><span class="co">](../../11_operations/index.qmd)</span> -- TAG_REFERENCES queries, metadata discovery</span>
+<span id="cb13-213"><a href="#cb13-213"></a><span class="ss">- </span><span class="co">[</span><span class="ot">Chapter 12: CI/CD</span><span class="co">](../../12_advanced_patterns/index.qmd)</span> -- config-driven deployment where SQL-only may be preferred</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
+</div></div></div></div></div>
+</div> <!-- /content -->
+<footer class="footer"><div class="nav-footer"><div class="nav-footer-center"><div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/D_tag_convention/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div></div></footer><script>
+/**
+ * Sidebar toggle controls for Quarto book layout.
+ * Buttons are appended to <body> (fixed position) so they remain
+ * accessible even when a sidebar is collapsed to zero width.
+ * State is persisted in localStorage across page navigations.
+ */
+(function () {
+  "use strict";
+
+  var STORAGE_LEFT  = "sf-sidebar-left-collapsed";
+  var STORAGE_RIGHT = "sf-sidebar-right-collapsed";
+
+  var CHEVRON_LEFT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M10.5 3.5L6 8l4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEVRON_RIGHT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M5.5 3.5L10 8l-4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function positionLeftBtn(btn, sidebar, collapsed) {
+    if (collapsed) {
+      btn.style.left = "0px";
+    } else {
+      btn.style.left = sidebar.offsetWidth + "px";
+    }
+  }
+
+  function init() {
+    var sidebar       = document.getElementById("quarto-sidebar");
+    var marginSidebar = document.getElementById("quarto-margin-sidebar");
+    var body          = document.body;
+
+    if (!sidebar && !marginSidebar) return;
+
+    var leftOff  = localStorage.getItem(STORAGE_LEFT) === "true";
+    var rightOff = localStorage.getItem(STORAGE_RIGHT) === "true";
+
+    // --- Left sidebar toggle ---
+    if (sidebar) {
+      var btnL = document.createElement("button");
+      btnL.id = "sf-toggle-left";
+      btnL.className = "sf-sidebar-toggle";
+      btnL.setAttribute("type", "button");
+      btnL.setAttribute("aria-label", "Toggle chapter navigation");
+      btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+      body.appendChild(btnL);
+
+      if (leftOff) body.classList.add("sf-left-collapsed");
+
+      // Position after layout settles
+      requestAnimationFrame(function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+
+      btnL.addEventListener("click", function () {
+        leftOff = !leftOff;
+        body.classList.toggle("sf-left-collapsed", leftOff);
+        localStorage.setItem(STORAGE_LEFT, String(leftOff));
+        btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+        btnL.setAttribute("aria-expanded", String(!leftOff));
+        // Reposition after CSS transition completes
+        setTimeout(function () {
+          positionLeftBtn(btnL, sidebar, leftOff);
+        }, 320);
+        // Immediate position for collapsed
+        if (leftOff) btnL.style.left = "0px";
+      });
+
+      // Reposition on window resize
+      window.addEventListener("resize", function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+    }
+
+    // --- Right sidebar toggle ---
+    if (marginSidebar) {
+      var btnR = document.createElement("button");
+      btnR.id = "sf-toggle-right";
+      btnR.className = "sf-sidebar-toggle";
+      btnR.setAttribute("type", "button");
+      btnR.setAttribute("aria-label", "Toggle table of contents");
+      btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+      body.appendChild(btnR);
+
+      if (rightOff) body.classList.add("sf-right-collapsed");
+
+      btnR.addEventListener("click", function () {
+        rightOff = !rightOff;
+        body.classList.toggle("sf-right-collapsed", rightOff);
+        localStorage.setItem(STORAGE_RIGHT, String(rightOff));
+        btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+        btnR.setAttribute("aria-expanded", String(!rightOff));
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+
+
+
+</body></html>

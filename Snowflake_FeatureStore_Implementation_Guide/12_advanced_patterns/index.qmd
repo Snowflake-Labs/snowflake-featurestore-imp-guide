@@ -25,16 +25,17 @@ After completing this chapter, you will be able to:
 
 ---
 
-## Platform capabilities and preview status (March 2026)
+## Platform capabilities and preview status (April 2026)
 
-Several capabilities were previously described as **private preview** with general availability (GA) expected around **March 2026**. As of **late March 2026**, treat the following as **may be GA or in public preview depending on region and account**—always confirm in [Snowflake release notes](https://docs.snowflake.com/en/release-notes/new-features) and your account’s feature bundle before planning production work.
+Several Feature Store capabilities are at different stages of the release lifecycle. Always confirm in [Snowflake release notes](https://docs.snowflake.com/en/release-notes/new-features) and your account’s feature bundle before planning production work.
 
-| Capability | Notes |
-|------------|--------|
-| **RollupConfig** (hierarchical aggregations) | Verify current availability; API names may evolve. |
-| **Time-aggregated Feature Views** (Temporal Aggregation / `Feature` class) | Same guidance—confirm preview vs GA in documentation. |
-| **Feature tiling** | Performance optimization for windowed aggregates; confirm support status. |
-| **Streaming Feature Views** | Rollout may extend into **March–April 2026**; near-term options remain short Dynamic Table refresh or Snowpipe → staging → View-based FVs. |
+| Capability | Status | Notes |
+|------------|--------|-------|
+| **RollupConfig** (hierarchical aggregations) | Verify availability | API names may evolve. |
+| **Time-windowed Aggregation** (`Feature` class, tiling) | Available via `snowflake-ml-python >= 1.24.0` | Client-side SDK feature — no account enablement needed. Generates standard SQL under the hood. Official docs may be limited; use `help(Feature)`. See [Chapter 7](../07_aggregations_api/index.qmd). |
+| **Streaming Feature Views** | Private Preview (`snowflake-ml-python >= 1.36`) | Postgres-backed online store, dual-write kappa path, 2–3s E2E freshness. Account enablement required. See internal chapter for details. |
+| **Postgres Online Store** (batch FVs) | Private Preview (`snowflake-ml-python >= 1.36`) | Drop-in replacement for Hybrid Table OFT with <20ms p50 reads. Account enablement required. |
+| **REST Ingest / Query API** | Private Preview | HTTP endpoints for streaming ingestion and online feature retrieval. Bundled with Postgres online store. |
 
 ::: {.callout-note}
 These callouts are **not** removed when features graduate—timelines shift. Re-check Snowflake documentation before committing architecture.
@@ -67,14 +68,12 @@ realtime_fv = FeatureView(
 
 **Workaround 2 -- External streaming into a View-based Feature View.** An external pipeline (Kafka Connect, Snowpipe Streaming, or a custom producer) writes into a staging table. A View-based Feature View wraps that table so it is always current as of the last micro-batch:
 
-```
-  Kafka / Snowpipe Streaming
-        │
-        ▼
-  EVENTS_STAGING (table, continuously appended)
-        │
-        ▼
-  View-based Feature View (always reads latest rows)
+```{mermaid}
+%%| fig-cap: "External streaming into a View-based Feature View"
+%%| fig-alt: "Kafka writes to staging table, View-based Feature View reads latest rows"
+flowchart TB
+  K[Kafka / Snowpipe Streaming] --> S[EVENTS_STAGING table, continuously appended]
+  S --> FV[View-based Feature View always reads latest rows]
 ```
 
 ### Illustrative native streaming pattern
@@ -115,7 +114,14 @@ Large organizations rarely run a single Feature Store schema. Different business
 
 A cross-domain model (e.g., a churn model that combines marketing engagement, fraud signals, and base demographic features) pulls Feature Views from multiple Feature Store schemas at training time via `generate_dataset` or `generate_training_set`. The diagram below illustrates the topology:
 
-![Multi-Feature Store architecture feeding cross-domain ML](../_diagrams/png/dg_12_multi_fs_topology.png){fig-alt="Marketing fraud and shared feature stores feed a cross-domain model"}
+```{mermaid}
+%%| fig-cap: "Multi-Feature Store architecture feeding cross-domain ML"
+%%| fig-alt: "Marketing fraud and shared feature stores feed a cross-domain model"
+flowchart TB
+  MKT[Marketing FS] --> X[Cross-domain ML]
+  FRD[Fraud FS] --> X
+  SH[Shared FS] --> X
+```
 
 Each Feature Store instance points to its own schema. At training time the consumer session must have grants on all schemas involved.
 
@@ -162,19 +168,34 @@ training_df = shared_fs.generate_training_set(
 
 A View-based Feature View in one Feature Store can read from a materialized Feature View in another. This is useful when a domain wants to expose a curated subset of another domain's features without duplicating the underlying DT:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# In the MARKETING_FS: create a View that reads from SHARED_FS's materialized DT
 cross_domain_df = session.sql("""
     SELECT USER_ID, LIFETIME_SPEND, ACCOUNT_AGE_DAYS, LAST_LOGIN_TS
     FROM FEATURE_STORE_DEMO.SHARED_FS."USER_BASE_FV$V01"
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+cross_domain_df = session.table('FEATURE_STORE_DEMO.SHARED_FS."USER_BASE_FV$V01"').select(
+    "USER_ID", "LIFETIME_SPEND", "ACCOUNT_AGE_DAYS", "LAST_LOGIN_TS"
+)
+```
+
+:::
+
+```python
 user_base_marketing_fv = FeatureView(
     name="USER_BASE_MARKETING_FV",
     entities=[user_entity],
     feature_df=cross_domain_df,
     timestamp_col="LAST_LOGIN_TS",
-    refresh_freq=None,  # View: reads from SHARED_FS's DT at query time
+    refresh_freq=None,
     desc="Curated user base features sourced from SHARED_FS for marketing models",
 )
 
@@ -216,6 +237,51 @@ for fs_name in ["SHARED_FS", "MARKETING_FS", "FRAUD_FS"]:
     fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
 ```
 
+### Feature Sharing Patterns {#sec-sharing-patterns}
+
+The cross-domain patterns above work within a single Snowflake account. For broader sharing — across accounts, regions, or organisational boundaries — four complementary patterns cover the spectrum:
+
+**1. View-based cross-FS Feature Views (same account).** Already demonstrated in [Cross-domain Feature View](#cross-domain-feature-view-sourcing-from-another-feature-store) above: a View in the consumer's Feature Store schema wraps the provider's materialized DT. The consumer schema holds only the View definition; data stays in the provider schema and is read at query time.
+
+**2. Secure Data Sharing / Listings (cross-account).** Snowflake [Secure Data Sharing](https://docs.snowflake.com/en/user-guide/data-sharing-intro) and the [Snowflake Marketplace](https://docs.snowflake.com/en/user-guide/data-marketplace) can expose a Feature Store schema (or selected objects within it) to consumer accounts:
+
+```sql
+-- Provider account: share the Feature Store schema
+CREATE SHARE FEATURE_STORE_SHARE;
+GRANT USAGE ON DATABASE FEATURE_STORE_DEMO TO SHARE FEATURE_STORE_SHARE;
+GRANT USAGE ON SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE TO SHARE FEATURE_STORE_SHARE;
+GRANT SELECT ON ALL DYNAMIC TABLES IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE
+  TO SHARE FEATURE_STORE_SHARE;
+
+-- Consumer account: create a database from the share
+CREATE DATABASE SHARED_FEATURES FROM SHARE provider_account.FEATURE_STORE_SHARE;
+```
+
+The consumer sees read-only tables whose data is always up-to-date (no copy, no refresh). Feature Store TAGs are **not** replicated via shares, so the consumer must apply TAGs locally (see [Appendix D](../appendices/D_tag_convention/index.qmd)) or access the shared tables via direct SQL rather than the Feature Store SDK.
+
+**3. Single-definition multi-deploy via CI/CD.** For organisations that want the same Feature View definitions in multiple schemas or accounts (e.g. regional deployments), parameterise the deployment script and run it once per target. This is the same pattern used for environment promotion (see [Chapter 2: Re-register via CI/CD](../02_design_organization/index.qmd#sec-promotion) and [Repository Layout](#sec-repo-layout) above):
+
+```python
+for env in ["US_EAST", "EU_WEST", "AP_SOUTHEAST"]:
+    fs = FeatureStore(session, database=f"{env}_FEATURE_STORE",
+                      name="FEATURE_STORE", default_warehouse=f"{env}_FS_WH")
+    deploy_all_features(fs, config)  # same config, different target
+```
+
+Each deployment creates its own DTs and materialises data independently — suited for data residency requirements where data cannot leave a region.
+
+**4. Materialise once, reference many.** When multiple teams consume the same features, prefer **one DT materialisation** with **View-based Feature Views** in each consumer's schema pointing back to the shared DT. This avoids duplicate compute and storage costs:
+
+| Strategy | Compute cost | Storage cost | Data freshness | Best for |
+|----------|-------------|-------------|---------------|----------|
+| Duplicate DTs per schema | N x DT refresh | N copies | Independent per copy | Data residency, isolation |
+| Shared DT + consumer Views | 1 x DT refresh | 1 copy | Shared (same lag) | Cost optimisation, single-region |
+| Secure Data Sharing | 0 (provider refreshes) | 0 (no copy) | Always current | Cross-account, read-only |
+
+::: {.callout-tip title="Discovery and RBAC for shared features"}
+Consumers need `USAGE` on the provider's database and schema plus `SELECT` on the shared objects. Use the [Feature Catalog View](../11_operations/index.qmd#sec-feature-catalog) or `TAG_REFERENCES_ALL_COLUMNS` to discover features across schemas. See [Chapter 2: RBAC](../02_design_organization/index.qmd#sec-rbac) for the recommended role hierarchy that supports cross-schema grants.
+:::
+
 ---
 
 ## External Data Sources
@@ -226,14 +292,32 @@ Feature Views can wrap tables managed by external systems. For **dbt integration
 
 Apache Iceberg tables registered as Snowflake External Tables or Snowflake-managed Iceberg Tables can serve as Feature View sources. The Feature View wraps the Iceberg table with a View (no `refresh_freq`) since the external system controls data updates:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
+iceberg_feature_df = session.sql("""
+    SELECT USER_ID, TOTAL_AMT, ORDER_TS
+    FROM iceberg_catalog.feature_store_demo_clickstream.orders
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+iceberg_feature_df = session.table("iceberg_catalog.feature_store_demo_clickstream.orders").select(
+    "USER_ID", "TOTAL_AMT", "ORDER_TS"
+)
+```
+
+:::
+
 ```python
 iceberg_fv = FeatureView(
     name="USER_FEATURES_ICEBERG",
     entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID, TOTAL_AMT, ORDER_TS
-        FROM iceberg_catalog.feature_store_demo_clickstream.orders
-    """),
+    feature_df=iceberg_feature_df,
     timestamp_col="ORDER_TS",
     desc="User order features from Iceberg-managed table",
 )
@@ -337,6 +421,97 @@ Combine this with the environment-strategy patterns from [Chapter 2](../02_desig
 ::: {.callout-note title="Config-driven definitions vs config-driven deployment"}
 This section covers **deployment-time** config: which Feature Views to register, in which environment, at what version. For **definition-time** config — programmatically generating the `Feature` objects and `feature_df` columns from data or specification tables — see [Chapter 7: Data-Driven Feature Definitions](../07_aggregations_api/index.qmd#sec-data-driven). The two patterns complement each other: data-driven definitions produce the Feature View content, and config-driven deployment pushes it through environments.
 :::
+
+---
+
+### Reconciling Desired vs Actual State {#sec-reconciliation}
+
+Feature Store management operates on **two layers** that are not yet unified by a single tool:
+
+| Layer | Managed by | Scope |
+|-------|-----------|-------|
+| **Physical** | DCM Projects, SQL DDL, or Terraform | Dynamic Tables, Views, Tags, grants, warehouses |
+| **Logical** | Feature Store Python SDK | Entities, Feature View metadata (descriptions, versions, entity associations) |
+
+DCM Projects (see [Chapter 2: DCM Projects](../02_design_organization/index.qmd#sec-promotion)) give you declarative, plan-then-deploy control over the physical objects. But there is no `fs.plan()` or `fs.apply()` that compares a config file against the live Feature Store and surfaces a diff at the logical layer. Until a unified declarative API emerges, a **pre-deploy reconciliation script** bridges the gap:
+
+```python
+def reconcile_feature_state(
+    fs: FeatureStore,
+    desired: list[dict],
+) -> dict:
+    """Compare desired config against live Feature Store state.
+
+    Returns a report of missing, extra, and version-mismatched FVs.
+    """
+    live_fvs = {
+        fv.name: [v.version for v in fv.versions]
+        for fv in fs.list_feature_views()
+    }
+    desired_map = {d["name"]: d["version"] for d in desired}
+
+    missing   = [n for n in desired_map if n not in live_fvs]
+    extra     = [n for n in live_fvs if n not in desired_map]
+    mismatch  = [
+        n for n in desired_map
+        if n in live_fvs and desired_map[n] not in live_fvs[n]
+    ]
+
+    return {
+        "missing_in_live": missing,
+        "unexpected_in_live": extra,
+        "version_mismatch": mismatch,
+        "in_sync": len(missing) == 0
+            and len(extra) == 0
+            and len(mismatch) == 0,
+    }
+```
+
+Run this before every deployment to catch drift early. In CI, a non-empty `missing` or `mismatch` list can trigger the deployment step; a non-empty `extra` list raises a warning for manual review.
+
+**Deployment strategies.** How you handle the diff depends on your risk tolerance:
+
+| Strategy | Behaviour | Best for |
+|----------|-----------|----------|
+| **Append-only** | Never mutate existing versions; only register new ones (`V01` → `V02` → ...) | Production environments; clean audit trail; consumers stay on a known version until they opt in |
+| **Full-redeploy** | `CREATE OR REPLACE` every object from config on each deploy | Dev/test environments where speed matters more than stability |
+| **Hybrid** | Append-only in PROD; full-redeploy in DEV/TEST | Most teams — balances safety with iteration speed |
+
+::: {.callout-note title="Emerging tooling"}
+The Snowflake ecosystem is actively evolving in this space. **Snowflake CLI** (`snow object create`, `snow object describe`) provides imperative object management. The **Snowflake Terraform provider** can declare DTs and TAGs. **DCM Projects** handle plan/deploy for supported objects. None of these currently understand Feature Store Entities or Feature Views as first-class constructs — but the TAG-based registration approach (see [Appendix D](../appendices/D_tag_convention/index.qmd)) means any tool that can create a DT and apply TAGs can produce a valid Feature View. Watch for future SDK enhancements that may add a native `fs.plan()` / `fs.apply()` workflow.
+:::
+
+### Recommended Repository Layout {#sec-repo-layout}
+
+A consistent directory structure makes it easy for multiple teams to contribute Feature Views through a shared CI/CD pipeline:
+
+```
+feature-store-repo/
+├── features/                    # One directory per Feature View
+│   ├── user_purchase/
+│   │   ├── config.yaml          # Name, version, entities, refresh_freq, description
+│   │   └── feature_df.py        # Snowpark DataFrame logic (or SQL file)
+│   └── user_session/
+│       ├── config.yaml
+│       └── feature_df.py
+├── entities/
+│   └── user.yaml                # Entity name, join_keys, description
+├── scripts/
+│   ├── deploy_features.py       # Reads configs, registers Feature Views
+│   └── reconcile.py             # Pre-deploy diff (see above)
+├── tests/
+│   ├── unit/                    # DataFrame logic tests
+│   ├── integration/             # End-to-end PIT, schema, freshness tests
+│   └── conftest.py              # Snowpark session fixtures
+├── config/
+│   ├── dev.yaml                 # Environment-specific parameters
+│   ├── test.yaml
+│   └── prod.yaml
+└── .github/workflows/
+    └── feature-deploy.yml       # CI/CD pipeline (see above)
+```
+
+Each `config.yaml` is a declarative spec for one Feature View; `feature_df.py` contains the Snowpark or SQL logic that produces the `feature_df`. The deployment script iterates over `features/*/config.yaml`, calls `reconcile_feature_state()` to check for drift, and registers any missing or updated versions. Entity definitions in `entities/` are registered first since Feature Views depend on them.
 
 ---
 
@@ -447,14 +622,32 @@ Snowflake's `VARIANT`, `OBJECT`, and `ARRAY` types are first-class column types 
 
 **Embeddings and arrays.** ML embeddings are naturally represented as `ARRAY` or `VECTOR` columns, avoiding hundreds of individual dimension columns:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
+embedding_df = session.sql("""
+    SELECT USER_ID, EMBEDDING_VECTOR, LAST_UPDATED_TS
+    FROM FEATURE_STORE_DEMO.FEATURE_STORE.USER_EMBEDDINGS
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+embedding_df = session.table("FEATURE_STORE_DEMO.FEATURE_STORE.USER_EMBEDDINGS").select(
+    "USER_ID", "EMBEDDING_VECTOR", "LAST_UPDATED_TS",
+)
+```
+
+:::
+
 ```python
 embedding_fv = FeatureView(
     name="USER_EMBEDDINGS",
     entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID, EMBEDDING_VECTOR, LAST_UPDATED_TS
-        FROM FEATURE_STORE_DEMO.FEATURE_STORE.USER_EMBEDDINGS
-    """),
+    feature_df=embedding_df,
     timestamp_col="LAST_UPDATED_TS",
     desc="User embeddings as ARRAY column",
 )
@@ -469,14 +662,32 @@ X_embed = np.stack(df["EMBEDDING_VECTOR"].values)
 
 **JSON features.** User preferences, configuration objects, or other nested structures can be stored as `VARIANT` or `OBJECT` columns, preserving hierarchical structure:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
+prefs_df = session.sql("""
+    SELECT USER_ID, PREFERENCES, UPDATED_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.USER_PROFILES
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+prefs_df = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.USER_PROFILES").select(
+    "USER_ID", "PREFERENCES", "UPDATED_TS",
+)
+```
+
+:::
+
 ```python
 json_fv = FeatureView(
     name="USER_PREFERENCES",
     entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID, PREFERENCES, UPDATED_TS
-        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.USER_PROFILES
-    """),
+    feature_df=prefs_df,
     timestamp_col="UPDATED_TS",
     desc="User preferences as VARIANT/OBJECT column",
 )
@@ -579,7 +790,13 @@ X_sparse = coo_matrix((vals, (rows, cols)), shape=(len(records), len(feature_nam
 
 For production-grade wide Feature Views backed by Dynamic Tables, the recommended pattern is a **two-tier architecture**: a materialized bundled DT underneath, with an expansion View on top. The expansion View presents the same wide-column schema that consumers expect while the bundled DT stores data compactly.
 
-![Two-tier bundled Dynamic Table with expansion View](../_diagrams/png/dg_12_two_tier_bundle.png){fig-alt="Wide SQL to bundled DT then expansion view for consumers"}
+```{mermaid}
+%%| fig-cap: "Two-tier bundled Dynamic Table with expansion View"
+%%| fig-alt: "Wide SQL to bundled DT then expansion view for consumers"
+flowchart TB
+  USQL[User Feature SQL wide columns] --> BUN[MY_FEATURES__BUNDLED Dynamic Table]
+  BUN --> EXPV[MY_FEATURES View with casts from OBJECT]
+```
 
 | Object | Name | Type | Consumer-facing? |
 |--------|------|------|-----------------|
@@ -626,11 +843,387 @@ CREATE VIEW FEATURE_STORE_DEMO.FEATURE_STORE.USER_WIDE_FEATURES AS
 SELECT ... FROM FEATURE_STORE_DEMO.FEATURE_STORE.USER_WIDE_FEATURES__BUNDLED;
 ```
 
+::: {.callout-important title="TAG registration required for API visibility"}
+Option B creates the View outside the Feature Store API. It will not appear in `fs.list_feature_views()` or the Snowsight Feature Store UI unless the correct internal TAGs are applied. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the required TAG schema.
+:::
+
 `COALESCE` with the appropriate default (0 for numeric, NULL for strings) handles features that were absent from the OBJECT due to sparsity.
 
 ::: {.callout-note title="When NOT to bundle"}
 If the Feature View has **no refresh frequency** (i.e., it is a plain View with no materialization), bundling serves no purpose -- there is no stored data to compress. The packing/unpacking adds unnecessary query-time overhead. Only apply the two-tier pattern to **DT-backed Feature Views**.
 :::
+
+### Schema evolution with IMMUTABLE WHERE {#sec-object-immutable}
+
+Adding a new derived feature expression to the upstream VIEW (e.g., a computed ratio) is picked up by the bundled DT **incrementally** (`REFRESH_ACTION = INCREMENTAL`) — not as a `REINITIALIZE`. Every row in the **mutable window** whose OBJECT would gain the new key is recomputed; the full row-level recompute (ins=N/del=N) applies to the mutable region. For DTs with large history, this means recomputing all mutable rows just to add one new key.
+
+`IMMUTABLE WHERE` constrains the incremental recompute to only the **mutable window**. The constraint can be added retroactively to an existing DT:
+
+```sql
+-- 1. Protect history on the bundled DT
+ALTER DYNAMIC TABLE my_features__bundled SET
+    IMMUTABLE WHERE (ts < '2026-04-01'::TIMESTAMP_NTZ);
+
+-- 2. Replace the upstream VIEW with the new feature
+CREATE OR REPLACE VIEW feature_source_v AS
+SELECT entity_id, ts,
+       OBJECT_CONSTRUCT(* EXCLUDE (entity_id, ts)) AS features
+FROM source_with_new_derived_column;
+
+-- 3. Refresh — only mutable rows recomputed
+ALTER DYNAMIC TABLE my_features__bundled REFRESH;
+
+-- 4. (Optional) Remove constraint
+ALTER DYNAMIC TABLE my_features__bundled UNSET IMMUTABLE WHERE;
+```
+
+After the refresh, immutable rows retain their original OBJECT (e.g., keys `{A, B, C}`), while mutable rows have the full key set including the new feature (e.g., `{A, B, C, D}`). The expansion View handles this transparently -- `COALESCE(features:"D"::NUMBER, 0)` returns the default for immutable rows, the same pattern already used for sparse features.
+
+::: {.callout-tip title="OBJECT columns make heterogeneous key sets natural"}
+In a scalar DT, every row must have the same column list -- partial recompute via BACKFILL produces visible `NULL` columns. With OBJECT columns, rows with different key sets coexist naturally. A missing key is indistinguishable from a sparse feature that was absent due to `OBJECT_CONSTRUCT` dropping NULLs. Consumers already handle this via `COALESCE`, so no additional logic is needed.
+:::
+
+::: {.callout-note title="Lazy and phased backfill"}
+If the new feature is needed across all history, you can either remove the constraint and run a single full refresh, or **phase the backfill** by progressively moving the immutability boundary backward -- e.g., one month at a time -- so each refresh recomputes only a slice of history. Phased backfill spreads the compute cost across multiple windows, which is useful when the full history is too large for a single off-hours refresh or when warehouse budget is constrained. See [Chapter 4: Retroactive IMMUTABLE WHERE](../04_feature_views/index.qmd#sec-retroactive-immutable) and [Chapter 6: Optimising backfill](../06_temporal_features/index.qmd#backfill-operations) for full examples.
+:::
+
+### Choosing between SELECT * column pickup and OBJECT bundling {#sec-select-star-vs-object}
+
+Snowflake updated Dynamic Table behaviour so that a DT defined with
+`SELECT * FROM base_table` can now **pick up new columns added to that base
+table** on its next refresh, rather than failing.  This creates a new
+lightweight path for schema evolution alongside the OBJECT-bundled pattern.
+
+The two approaches solve overlapping but distinct problems:
+
+```{mermaid}
+%%| fig-cap: "SELECT * column pickup vs OBJECT-bundled schema evolution"
+%%| fig-alt: "Two paths from a base-table column add to the Feature View consumer"
+flowchart LR
+    subgraph pathA ["Path A: SELECT * pickup (automatic, uncontrolled)"]
+        A_src["Base table<br/>ADD COLUMN"] -->|"automatic trigger"| A_dt["DT SELECT *<br/>full recompute<br/>cascades downstream"]
+        A_dt --> A_cons["Consumer sees<br/>new scalar column"]
+    end
+    subgraph pathB ["Path B: OBJECT via VIEW gate (controlled)"]
+        B_src["Base or source<br/>ADD COLUMN"] -->|"no effect on DT"| B_gate["VIEW replacement<br/>(deliberate operator action)"]
+        B_gate --> B_dt["OBJECT DT<br/>INCREMENTAL on<br/>your schedule"]
+        B_dt --> B_cons["Consumer sees<br/>new key in OBJECT<br/>schema unchanged"]
+    end
+```
+
+| Dimension | SELECT \* scalar columns | OBJECT inline in DT body | OBJECT via VIEW intermediary |
+|-----------|--------------------------|--------------------------|------------------------------|
+| **Feature count** | ≤ ~100 cols (compilation grows) | Recommended for 100+ cols; schema constant | Same — schema constant |
+| **Source of new columns** | Base table physical columns only | Base table physical columns only | Any expression in the VIEW (computed ratios, windowed functions) |
+| **DT schema on column add** | New scalar column added to DT schema | DT schema unchanged (OBJECT column grows) | DT schema unchanged |
+| **Triggered by upstream ADD COLUMN?** | ⚠️ **Yes — automatic**, no human action required | ⚠️ **Yes — automatic**, no human action required | ✅ **No — gated by VIEW replacement**; nothing happens until you replace the VIEW |
+| **Who controls when recompute happens?** | Upstream table owner (you have no veto) | Upstream table owner (you have no veto) | You — VIEW replacement is a deliberate operator action |
+| **REFRESH_ACTION on column add** | `INCREMENTAL` (full row-level recompute) | `INCREMENTAL` (full row-level recompute) | `INCREMENTAL` — but only when you replace the VIEW |
+| **Pre-existing rows for new column** | Recomputed from source — **no NULLs** | Recomputed from source — **no NULLs** | Recomputed from source — **no NULLs** (or NULL for protected region if using IMMUTABLE WHERE) |
+| **Cost of column add** | Full row-level recompute (ins=N/del=N); cascades to all downstream SELECT * DTs | Full row-level recompute (ins=N/del=N); **no cascade** beyond this DT | Full row-level recompute (INCREMENTAL, ins=N/del=N) on your schedule; IMMUTABLE WHERE limits how much mutable history is recomputed |
+| **IMMUTABLE WHERE** | Respected: immutable rows get `NULL`; mutable recomputed | Respected: immutable rows get `NULL` key; mutable recomputed | ✅ Best controlled here — you choose exactly when to ALTER the VIEW and how far back the mutable window reaches |
+| **Downstream DT cascade** | ⚠️ Downstream `SELECT *` DTs also recompute; cascade multiplies cost | ✅ No cascade schema impact — downstream sees a stable OBJECT column | ✅ No cascade schema impact |
+| **Sparse features / null handling** | Explicit `NULL` scalar columns stored | `OBJECT_CONSTRUCT` drops NULL-valued keys; use `OBJECT_CONSTRUCT_KEEP_NULLS` when a complete, stable key-set is required — e.g. for position-aware or schema-validating consumers | Same — use `OBJECT_CONSTRUCT_KEEP_NULLS` in the VIEW or DT body when downstream must always see a full key-set |
+| **Consumer query change on add** | None if using `SELECT *` (but schema changes) | OBJECT path extraction on new key | OBJECT path extraction on new key |
+| **Version / group control** | ❌ None — new columns visible immediately to all consumers | ❌ None — new keys appear immediately, automatically | ✅ Explicit — VIEW definition is the gate; you decide what enters the bundle and when |
+| **Computed expressions** | No | No | Yes — VIEW can add ratios, flags, windowed computations |
+| **Data-driven derivations** | No | ✅ TRANSFORM + OBJECT_KEYS auto-expand with new keys | ✅ LATERAL FLATTEN + OBJECT_AGG auto-expand with new keys in presentation VIEW |
+| **Multi-team / production safety** | ⚠️ Risky — any upstream schema change triggers recompute across all consumers | ⚠️ Moderate — recompute contained to this DT, but still uncontrolled | ✅ Safe — upstream changes are inert until intentionally promoted through the VIEW |
+
+::: {.callout-warning title="SELECT * and inline OBJECT_CONSTRUCT(*) are triggered by upstream schema changes you do not control"}
+Both the `SELECT *` scalar pattern and the inline `OBJECT_CONSTRUCT(* EXCLUDE ...)` pattern respond **automatically** to any `ADD COLUMN` on the upstream base table.  You — or your consumers — do not need to take any action; the recompute simply happens on the next refresh.
+
+In a multi-team or production environment this means an upstream table owner adding a new
+column (perhaps for an unrelated purpose) will trigger a full row-level recompute
+(ins=N/del=N) on your DT.  For the `SELECT *` scalar pattern this cascade continues into
+every downstream `SELECT *` DT, multiplying the cost.
+
+**The VIEW intermediary pattern provides a gate.**  An `ADD COLUMN` on the source leaves
+the DT completely unaffected until you deliberately replace the VIEW.  You control
+the timing, you can apply `IMMUTABLE WHERE` to limit how much history is recomputed, and
+you can review and test the change before it enters production consumers.
+:::
+
+**Use SELECT \* scalar pickup when:**
+
+- The DT is a thin pass-through over a single managed base table **that you own and control**.
+- Feature count stays below ~100 columns.
+- Consumers tolerate dynamic schemas (or use their own `SELECT *`).
+- No explicit consumer version gate is needed, and no uncontrolled upstream owners.
+- Dev/experimentation contexts where the automatic recompute is acceptable.
+
+**Use inline OBJECT_CONSTRUCT(*) in the DT body when:**
+
+- Feature count ≥ 100 columns, or you want a stable DT schema regardless of source width.
+- You own (or tightly coordinate with) the base table — unintended upstream `ADD COLUMN`
+  will still trigger an automatic full recompute on this DT.
+- You want data-driven derivations to auto-expand with no operational intervention
+  (see confirmed pattern below).
+- Downstream DTs read from this DT and must not gain new scalar columns or be recomputed
+  (the OBJECT column is stable; downstream is insulated from the cascade).
+
+**Use VIEW intermediary → OBJECT DT when:**
+
+- The source table is owned by another team, or you need explicit control over which
+  upstream columns enter the feature bundle and when.
+- New features include **computed expressions** (ratios, flags, windowed functions) that
+  do not exist as physical base-table columns.
+- You want to gate schema changes behind a human review step before recompute occurs.
+- You need fine-grained backfill control: use `IMMUTABLE WHERE` to recompute only the
+  mutable region, and progressively move the boundary backward to backfill history as
+  budget permits.  With SELECT * / inline OBJECT you have no such gate.
+- The LATERAL FLATTEN + OBJECT_AGG presentation layer still auto-adapts to new keys
+  without any VIEW changes (confirmed by prototype).
+
+::: {.callout-tip title="Confirmed: inline OBJECT_CONSTRUCT(*) + TRANSFORM auto-evolves with source schema"}
+Both `OBJECT_CONSTRUCT(* EXCLUDE ...)` written directly in the DT body and downstream
+`TRANSFORM + OBJECT_KEYS` derivation chains have been confirmed to auto-evolve when new
+columns are added to the base table — with `INCREMENTAL` refresh action throughout.
+
+```sql
+-- Single DT: passthrough OBJECT + auto-squared derived features
+-- When a new column is added to source_base_table, both raw_features
+-- and derived_features update automatically on next refresh.
+CREATE DYNAMIC TABLE FEATURE_STORE."USER_FEATURES_DERIVED$V01"
+    TARGET_LAG   = '1 hour'
+    WAREHOUSE    = FS_WH
+    REFRESH_MODE = INCREMENTAL
+AS
+WITH src AS (
+    SELECT
+        USER_ID,
+        EVENT_TS,
+        OBJECT_CONSTRUCT(* EXCLUDE (USER_ID, EVENT_TS)) AS raw_features
+    FROM SOURCE_DB.DATA.USER_FEATURES_BASE
+)
+SELECT
+    USER_ID,
+    EVENT_TS,
+    raw_features,
+    ARRAYS_TO_OBJECT(
+        TRANSFORM(OBJECT_KEYS(raw_features), k -> k || '_sq'),
+        TRANSFORM(OBJECT_KEYS(raw_features),
+                  k -> (GET(raw_features, k)::FLOAT
+                        * GET(raw_features, k)::FLOAT)::FLOAT)
+    ) AS derived_sq_features
+FROM src;
+```
+
+When `USER_FEATURES_BASE` gains a new column (e.g., `RISK_SCORE`):
+- `raw_features` automatically gains `RISK_SCORE` key on next refresh
+- `derived_sq_features` automatically gains `RISK_SCORE_sq` key
+- No VIEW update, no DT recreation, no new version registration
+- `REFRESH_ACTION = INCREMENTAL` throughout
+
+The VIEW intermediary is the right choice when new features require **computed
+expressions** that do not exist as physical base-table columns.  In that case, replace
+the VIEW — the `OBJECT(*)` DT picks up the new derived column incrementally
+(`REFRESH_ACTION = INCREMENTAL`), and any downstream presentation queries using
+LATERAL FLATTEN + OBJECT_AGG will automatically include the new key's transformed value.
+
+For test results and detailed behaviour, see
+[`_internal_development/dt_schema_evolution/internal_notes.md`](https://github.com/snowflake-eng/snowflake-featurestore-imp-guide/blob/main/_internal_development/dt_schema_evolution/internal_notes.md).
+:::
+
+See [Chapter 4: Incremental Column Pickup with SELECT *](../04_feature_views/index.qmd#sec-select-star-evolution) for the full DT behaviour details, backfill semantics, and `IMMUTABLE WHERE` interaction.
+
+### ARRAY-based feature bundles {#sec-array-bundles}
+
+OBJECT bundling stores features as named key-value pairs. For **fixed-width, positionally-defined** feature vectors — e.g. homogeneous numeric features where the consumer knows the schema in advance — `ARRAY_CONSTRUCT` and `ARRAY_CONSTRUCT_COMPACT` offer an alternative with different null and storage semantics.
+
+#### SQL NULL vs JSON null in Snowflake arrays
+
+Snowflake distinguishes two null-like values inside semi-structured arrays:
+
+| Value | How produced | Array representation | Stored? |
+|-------|-------------|---------------------|---------|
+| SQL `NULL` | Column IS NULL or absent | `undefined` | No — sparse gap, efficient |
+| JSON null | `PARSE_JSON('null')` | `null` | Yes — real element |
+
+This has a direct consequence for which ARRAY variant you choose:
+
+```sql
+WITH T AS (
+    SELECT
+        NULL          AS SQL_NULL,
+        'hello'       AS HELLO,
+        PARSE_JSON('null') AS JSON_NULL,
+        'goodbye'     AS GOODBYE,
+        3::DOUBLE     AS THREE_DOUBLE,
+        4             AS FOUR_INT
+)
+SELECT
+    ARRAY_CONSTRUCT(*)         AS ac,
+    ARRAY_CONSTRUCT_COMPACT(*) AS acc
+FROM T;
+```
+
+```
+ac  = [undefined, "hello", null, "goodbye", 3.0, 4]   -- SQL NULL → undefined gap
+acc = [           "hello", null, "goodbye", 3.0, 4]   -- SQL NULL removed; JSON null kept
+```
+
+- **`ARRAY_CONSTRUCT(*)`** preserves all positions. SQL `NULL` becomes an `undefined` element — a sparse gap that does **not** consume the same storage as a real element. JSON null is preserved as a real `null` element.
+- **`ARRAY_CONSTRUCT_COMPACT(*)`** drops SQL `NULL` arguments entirely, shifting remaining elements left. JSON null values are preserved. Use when you want to exclude absent features from the bundle entirely.
+
+#### Storage characteristics
+
+Snowflake arrays are stored as semi-structured VARIANT data internally:
+
+- **Dense typed arrays** (`ARRAY(FLOAT)`, used for VECTOR-ready serving) fill every position — absent values are replaced with `0.0` — and consume nearly constant storage regardless of sparsity.
+- **Semi-structured sparse arrays** (VARIANT ARRAY via `ARRAY_CONSTRUCT` with SQL NULLs) store only the present elements; undefined gaps do not materialise as bytes.
+- The practical per-cell size limit (128 MB) applies to the full ARRAY value, not individual elements.
+
+**Measured storage comparison (100K rows, 200-feature schema, uncompressed logical bytes):**
+
+| Format | 10% sparsity | 50% sparsity | 90% sparsity |
+|--------|------------:|------------:|------------:|
+| **OBJECT** (named key-value, NULLs absent) | 567 MB | 315 MB | **63 MB** |
+| **Dense `ARRAY(FLOAT)`** (COALESCE → 0.0) | 449 MB | 445 MB | 441 MB |
+| **Sparse positional OBJECT** (integer-keyed proxy) | 531 MB | 295 MB | **59 MB** |
+
+*Actual Snowflake compressed storage is substantially smaller (Zstandard typically 5–10×), but relative ratios hold.*
+
+Key conclusions:
+
+- **OBJECT and dense ARRAY cross over at approximately 40% sparsity.** Below ~40% (most features present), dense ARRAY is more compact — JSON key-value encoding overhead outweighs the benefit of dropped NULL keys. Above ~40%, OBJECT becomes progressively more compact.
+- **At 90% sparsity, OBJECT is ~7× more compact** than dense ARRAY (63 MB vs 441 MB).
+- **Dense ARRAY cost is nearly flat across sparsity levels** — absent values are zero-filled, so all N float values are always serialised.
+
+For Feature Views where features are **mostly present** (low sparsity), dense ARRAY can be the more compact at-rest format. For genuinely **sparse feature sets** (>~40% of values absent), OBJECT is the better storage choice.
+
+::: {.callout-warning title="There is no SQL-native sparse positional ARRAY"}
+`ARRAY_INSERT(arr, pos, val)` in Snowflake is an **insert-and-shift** operation, not a set-at-position operation. Chaining `ARRAY_INSERT` calls to build a sparse positional array (with features at known fixed positions) displaces earlier elements, producing an array with incorrect positions and wrong size. There is no SQL primitive equivalent to `arr[pos] = val`.
+
+Consequences for Feature Store design:
+
+- You cannot construct a correctly-positioned sparse ARRAY from individual feature columns in pure SQL.
+- Any Feature View that needs features at stable positional indices must use a **dense ARRAY** with explicit 0.0 fill (`ARRAY_CONSTRUCT(COALESCE(f1, 0.0), COALESCE(f2, 0.0), ...)`) or the TRANSFORM+OBJECT path described below.
+- The only SQL workaround is to store features in an **OBJECT with integer string keys** and densify at read time using `TRANSFORM + ARRAY_GENERATE_RANGE`.
+:::
+
+#### Null preservation with ARRAY_CONSTRUCT and OBJECT_CONSTRUCT_KEEP_NULLS
+
+When downstream consumers require a **complete, fixed-width representation** — for example, a model serving layer that expects a specific array length, or a schema-validating consumer that must see every key — you need to explicitly preserve NULLs:
+
+| Goal | OBJECT equivalent | ARRAY equivalent |
+|------|-------------------|-----------------|
+| Drop absent features | `OBJECT_CONSTRUCT(...)` | `ARRAY_CONSTRUCT_COMPACT(...)` |
+| Preserve absent features as null | `OBJECT_CONSTRUCT_KEEP_NULLS(...)` | `ARRAY_CONSTRUCT(...)` (SQL NULL → `undefined`) |
+| Preserve absent features as JSON null | Explicit `COALESCE(col, PARSE_JSON('null'))` per column | `ARRAY_CONSTRUCT(COALESCE(col, PARSE_JSON('null')), ...)` |
+
+::: {.callout-warning title="ARRAY_CONSTRUCT(*) and column ordering"}
+`ARRAY_CONSTRUCT(*)` positional order follows the column order of the source table or query. This order is **not guaranteed** to be stable across DT recreations or schema changes unless the query uses an explicit column list. For Feature Views where consumers depend on positional indexing, always use an explicit column list rather than `*`:
+
+```sql
+ARRAY_CONSTRUCT(FEATURE_A, FEATURE_B, FEATURE_C) AS features_array
+```
+
+Schema evolution (adding a new feature) requires either appending to the end of the explicit list and updating all consumers, or creating a new Feature View version — there is no equivalent of the OBJECT key-based pickup for positional arrays.
+:::
+
+#### TRANSFORM + ARRAY_GENERATE_RANGE: O(1)-compile densification {#sec-transform-hof}
+
+When a downstream consumer requires a dense numeric array or `VECTOR` — for ML training export, embedding distance queries, or model serving — the recommended path is **Higher-Order Function (HOF) densification** via `TRANSFORM` rather than `ARRAY_CONSTRUCT`.
+
+**Why this matters: compilation cost at scale.**
+
+`ARRAY_CONSTRUCT(f1, f2, ..., fN)` with N explicit columns is compiled by the Snowflake query planner as N independent expressions — the plan scales as **O(N^1.5)**. A 1,000-feature `ARRAY_CONSTRUCT` takes ~2 seconds just to compile, and this cost is paid on every DT refresh that recompiles the query.
+
+`TRANSFORM(ARRAY_GENERATE_RANGE(0, N), i -> expr(i))` compiles as a **single lambda expression** regardless of N — **O(1) compilation time**, approximately 100–140 ms across the 200–1,000 feature range:
+
+| Width | `ARRAY_CONSTRUCT` compile | `TRANSFORM+RANGE` compile |
+|------:|-------------------------:|-------------------------:|
+| 200 | 79 ms | 119 ms *(ARRAY_CONSTRUCT faster below ~200)* |
+| 500 | 747 ms | 139 ms *(5.4× faster)* |
+| 1,000 | 2,061 ms | 105 ms *(20× faster)* |
+
+**The crossover is around 200 features.** Below ~200, `ARRAY_CONSTRUCT` is slightly faster to compile. Above 200 — which is the normal range for real-world Feature Views — `TRANSFORM` wins decisively.
+
+The canonical pattern for densifying an OBJECT or sparse ARRAY to a dense `VECTOR`:
+
+```sql
+-- Densify from OBJECT with integer string keys → VECTOR(FLOAT, N)
+SELECT
+    entity_id,
+    event_ts,
+    TRANSFORM(
+        ARRAY_GENERATE_RANGE(0, 500),
+        i -> COALESCE(GET(features, i::VARCHAR)::FLOAT, 0.0)
+    )::VECTOR(FLOAT, 500) AS feature_vec
+FROM feature_store.user_features_obj_v01;
+```
+
+```sql
+-- Densify from a pre-built ARRAY(FLOAT) column → VECTOR(FLOAT, N)
+-- Use when the ARRAY was materialised by a prior DT layer
+SELECT
+    entity_id,
+    event_ts,
+    TRANSFORM(
+        ARRAY_GENERATE_RANGE(0, 500),
+        i -> COALESCE(GET(arr, i)::FLOAT, 0.0)
+    )::VECTOR(FLOAT, 500) AS feature_vec
+FROM feature_store.user_features_arr_v01;
+```
+
+**Important**: the O(1) compilation benefit of TRANSFORM only applies when reading from an **existing ARRAY or OBJECT column**. If you start from individual scalar columns and build the ARRAY within the same query using `ARRAY_CONSTRUCT`, you pay the O(N^1.5) cost there. This is why an intermediate materialisation layer (an ARRVEC DT, or an OBJECT DT) is architecturally valuable: the O(N^1.5) cost is paid once at materialisation time; all subsequent reads and downstream DT definitions operate in O(1) compile.
+
+::: {.callout-tip title="Use TRANSFORM-based DT definitions for ARRVEC layers at width > 200"}
+If your Feature Store includes a dense ARRAY (`ARRAY(FLOAT)`) DT as a materialisation layer for VECTOR serving, define it using `TRANSFORM + ARRAY_GENERATE_RANGE` reading from an upstream OBJECT DT or ARRAY column — not `ARRAY_CONSTRUCT` over individual scalar columns. This makes the DT definition itself O(1) to compile, which matters most at refresh-triggered recompilation of wide Feature Views.
+:::
+
+#### Sparse-at-rest, dense-on-read architecture {#sec-sparse-at-rest}
+
+The probe results confirm a practical three-layer architecture for sparse numeric feature sets destined for ML consumption:
+
+```{mermaid}
+%%| fig-cap: "Sparse-at-rest, dense-on-read pipeline for ML feature serving"
+%%| fig-alt: "OBJECT DT (sparse at rest) to ARRVEC DT (dense ARRAY) to VECTOR export"
+flowchart LR
+    SRC["Source table\n(sparse columns)"] --> OBJ["OBJECT DT\nOBJECT_CONSTRUCT\n(NULL keys dropped)\nSparse at rest"]
+    OBJ --> ARR["ARRVEC DT\nTRANSFORM + RANGE\nO(1) compile\nDense 0-fill"]
+    ARR --> VEC["VECTOR(FLOAT, N)\ncast at export\nML training / serving"]
+    OBJ -.->|"High sparsity:\nskip ARRVEC"| COO["Sparse export\nFLATTEN → COO\nor OBJECT→dict"]
+```
+
+**Layer 1 — OBJECT DT (sparse at rest):** `OBJECT_CONSTRUCT` with NULL-omission stores only the non-null features. At >40% sparsity this is substantially more compact than a dense ARRAY (up to 7× at 90% sparsity). Schema evolution (adding or dropping features via VIEW replacement) is incremental. This layer serves key-based feature retrieval for all non-VECTOR consumers.
+
+**Layer 2 — ARRVEC DT (dense ARRAY, optional):** A second DT reads from the OBJECT DT and materialises a dense `ARRAY(FLOAT)` using `TRANSFORM + ARRAY_GENERATE_RANGE`. The DT definition compiles in O(1) regardless of feature width. This layer exists solely to serve consumers that need VECTOR casting or sequential array access. It is **not needed** if VECTOR casting happens only at query time (the TRANSFORM can be applied in the retrieval query directly from the OBJECT layer).
+
+**VECTOR cast at export boundary:** `::VECTOR(FLOAT, N)` is applied at the point where data leaves Snowflake for ML training or serving. VECTOR is always dense and fixed-width; it does not preserve sparse semantics.
+
+**High-sparsity alternative — sparse export path:** For feature sets where >60–70% of values are absent, densifying to `VECTOR(FLOAT, N)` at export materialises a large volume of zeros that consume transfer bandwidth and client memory. In these cases prefer a **COO-style sparse export**:
+
+```sql
+-- Sparse export: FLATTEN OBJECT → (entity, feature_name, value) tuples
+-- Transfer volume proportional to non-zero entries only
+SELECT
+    entity_id,
+    event_ts,
+    f.key   AS feature_name,
+    f.value::FLOAT AS feature_value
+FROM feature_store.user_features_obj_v01,
+LATERAL FLATTEN(input => features) f;
+```
+
+The COO representation can be reconstructed into a sparse tensor or scipy sparse matrix on the client without ever materialising the full dense array.
+
+#### When to use ARRAY vs OBJECT bundling
+
+| Consideration | OBJECT bundle | Dense ARRAY (`ARRAY(FLOAT)`) |
+|--------------|---------------|------------------------------|
+| **Consumer access pattern** | Key-based extraction (`features:col_name`) | Positional indexing; direct VECTOR cast |
+| **Schema stability** | Named keys tolerate incremental addition | Fixed-width; any addition requires new version |
+| **Homogeneous feature types** | Mixed types natural; cast at extraction | Homogeneous numeric; type locked at ARRAY build |
+| **Storage at low sparsity (<40%)** | More verbose than dense ARRAY (JSON key overhead) | ✅ More compact |
+| **Storage at high sparsity (>40%)** | ✅ More compact; up to 7× at 90% sparsity | Nearly constant — zero-fill wastes space |
+| **Schema evolution** | Incremental key pickup via VIEW gate | No equivalent — new version required |
+| **VECTOR serving** | Requires TRANSFORM HOF densification at read | ✅ Direct `::VECTOR(FLOAT, N)` cast; TRANSFORM O(1) for downstream DTs |
+| **DT definition compile cost** | O(1) for OBJECT_CONSTRUCT(*) | O(N^1.5) for ARRAY_CONSTRUCT; O(1) if reading from existing ARRAY/OBJECT |
+| **Sparse positional construction** | ❌ No SQL set-at-position primitive; integer-keyed OBJECT is the workaround | ❌ ARRAY_INSERT is insert-and-shift, not set-at-position |
+
+For the majority of Feature Store use cases — heterogeneous feature types, named access, and schema evolution — **OBJECT bundling is the recommended at-rest pattern**. The ARRVEC (dense ARRAY) layer is a purpose-built serving layer added on top for consumers that require `VECTOR` types or sequential positional access. Both layers can be served from a single OBJECT DT source using the TRANSFORM HOF densification pattern.
 
 ### Type fidelity and metadata
 
@@ -650,7 +1243,15 @@ Maintain a metadata table or manifest that records each packed feature's origina
 
 When wide Feature Views serve multiple query patterns (parameter discovery, point lookups, full key-value scans), a **DT cascade** pre-materialises multiple representations from a single source:
 
-![Dynamic Table cascade wide bundled expansion and optional KV](../_diagrams/png/dg_12_dt_cascade.png){fig-alt="DT1 wide feeds DT2 bundled and expansion view optional DT3 KV"}
+```{mermaid}
+%%| fig-cap: "Dynamic Table cascade wide bundled expansion and optional KV"
+%%| fig-alt: "DT1 wide feeds DT2 bundled and expansion view optional DT3 KV"
+flowchart TD
+  DT1[DT1 wide aggregated] --> DT2[DT2 bundled OBJECT]
+  DT1 --> EXP[Expansion View]
+  DT2 --> DT3[DT3 optional KV flatten]
+  DT2 --> EXP
+```
 
 | Representation | Best for |
 |---------------|----------|
@@ -689,7 +1290,7 @@ FROM my_features__bundled;
 Set `TARGET_LAG = DOWNSTREAM` on intermediate DTs so the cascade is driven by a concrete lag on the leaf DT (see [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) for `DOWNSTREAM` behavior). Only create DT3 (the KV materialization) if multiple consumers run frequent KV-pattern queries and the resulting row count (`entity_count * feature_count`) is manageable.
 
 ::: {.callout-tip title="Primary key-based change reduction in cascades (April 2026)"}
-DT cascades benefit from **primary key derivation**. When an intermediate DT's query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`, Snowflake derives a unique key and uses it for **value-based change filtering** -- rows where the PK exists in both the old and new versions with identical values are filtered out before propagating to the next stage. This reduces the volume of changes flowing through the cascade, even if an upstream stage uses full refresh. Downstream stages can opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); this is not yet available through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+DT cascades benefit from **primary key derivation**. When an intermediate DT's query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`, Snowflake derives a unique key and uses it for **value-based change filtering** -- rows where the PK exists in both the old and new versions with identical values are filtered out before propagating to the next stage. This reduces the volume of changes flowing through the cascade, even if an upstream stage uses full refresh. Downstream stages can opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); this is not yet available through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 :::
 
 ::: {.callout-note}
@@ -854,7 +1455,7 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 
 **Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 4](../04_feature_views/index.qmd), [Chapter 5](../05_feature_pipelines/index.qmd), and [Chapter 11](../11_operations/index.qmd) for detailed guidance and workarounds.
 
-Even when a DT cannot avoid full refresh, **downstream DTs can still process incrementally** if the full-refresh DT has a system-derived unique key (e.g., from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`). Set `REFRESH_MODE = INCREMENTAL` on the downstream DT via SQL. Similarly, source tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a `RELY` primary key. These are SQL-level capabilities not yet in the Feature Store Python API -- see [Chapter 5](../05_feature_pipelines/index.qmd) for the full pattern and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+Even when a DT cannot avoid full refresh, **downstream DTs can still process incrementally** if the full-refresh DT has a system-derived unique key (e.g., from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`). Set `REFRESH_MODE = INCREMENTAL` on the downstream DT via SQL. Similarly, source tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a `RELY` primary key. These are SQL-level capabilities not yet in the Feature Store Python API -- see [Chapter 5](../05_feature_pipelines/index.qmd) for the full pattern and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 
 ---
 
@@ -864,9 +1465,12 @@ Even when a DT cannot avoid full refresh, **downstream DTs can still process inc
 |---------|----------|-------------------|
 | **Streaming / low latency** | Near real-time features | Short-refresh DTs or external pipelines until native streaming is GA |
 | **Multi-Feature Store** | Domain isolation, cross-domain ML | RBAC grants must span schemas for training; use a shared `ML_TRAINING` role |
+| **Feature sharing** | Cross-account / cross-region feature access | Secure Data Sharing for zero-copy; single-def multi-deploy for data residency; materialise once + Views for cost |
 | **Multi-region / DR** | Geographic resilience | Database replication works; Online Feature Tables need per-region provisioning |
 | **External data sources** | Iceberg integration | View-based FVs wrap external tables; dbt covered in Ch05 |
 | **CI/CD** | Automated, auditable deployments | Parameterise database/schema for environment promotion |
+| **State reconciliation** | Detecting drift between config and live Feature Store | Pre-deploy diff script; append-only vs full-redeploy strategies |
+| **Repository layout** | Consistent multi-team Feature View management | `features/*/config.yaml` + `feature_df.py`; shared entities, scripts, and CI workflows |
 | **Testing** | Preventing production incidents | Minimum bar: unit, PIT, schema, freshness tests |
 | **Wide & sparse data** | 100+ feature columns, sparse data, sensor/OHE tables | Hybrid storage (keys + OBJECT), two-tier FV, DT cascade; expand at last moment |
 | **Semi-structured features** | Embeddings, JSON, packed columns | `ARRAY`, `VARIANT`, `OBJECT_CONSTRUCT`; unpack in Python/R/Spark |

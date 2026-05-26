@@ -159,7 +159,14 @@ Compound entities use multiple columns together as the join key. Essential for m
 
 ### Why Compound Keys?
 
-![Product-supplier compound key relationship](../_diagrams/png/dg_03_product_supplier.png){fig-alt="Product links to multiple supplier rows requiring compound key"}
+```{mermaid}
+%%| fig-cap: "Product-supplier compound key relationship"
+%%| fig-alt: "Product links to multiple supplier rows requiring compound key"
+flowchart LR
+  P[PRODUCT P001 Widget Pro] --> J[(PRODUCT_SUPPLIER)]
+  J --> R1[P001 S001 10.00]
+  J --> R2[P001 S002 9.50]
+```
 
 ### Defining Compound Entities
 
@@ -218,7 +225,15 @@ Relationships used throughout this guide (database `FEATURE_STORE_DEMO`, source 
 - **PRODUCT** (`PRODUCT_ID`) → belongs to → **CATEGORY** (`CATEGORY_ID`)
 - **PRODUCT_SUPPLIER** (`PRODUCT_ID`, `SUPPLIER_ID`) is the compound key for supplier-specific product facts
 
-![Clickstream entity relationships](../_diagrams/png/dg_03_entity_web.png){fig-alt="Visitor user household session order and product relationships"}
+```{mermaid}
+%%| fig-cap: "Clickstream entity relationships"
+%%| fig-alt: "Visitor user household session order and product relationships"
+flowchart TB
+  V[VISITOR] --> U[USER] --> H[HOUSEHOLD]
+  U --> S[SESSION]
+  U --> O[ORDER] --> OI[ORDER_ITEM]
+  P[PRODUCT] --> C[CATEGORY]
+```
 
 ### Implementing Hierarchies
 
@@ -334,8 +349,13 @@ A common design question is: the ML model operates at a **parent** grain (e.g., 
 
 ```python
 ORDER = Entity(name="ORDER", join_keys=["ORDER_ID"])
+```
 
-# Aggregate lineitem data to the order level
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 order_agg_df = session.sql("""
     SELECT
         ORDER_ID,
@@ -346,7 +366,25 @@ order_agg_df = session.sql("""
     FROM ORDER_ITEMS
     GROUP BY ORDER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+order_items = session.table("ORDER_ITEMS")
+order_agg_df = order_items.group_by("ORDER_ID").agg(
+    F.sum("EXTENDED_PRICE").alias("ORDER_TOTAL_AMT"),
+    F.count("*").alias("LINE_COUNT"),
+    F.sum(F.when(F.col("RETURN_FLAG") == "R", 1).otherwise(0)).alias("RETURN_LINE_CNT"),
+    F.max("SHIP_DATE").alias("LAST_SHIP_DATE"),
+)
+```
+
+:::
+
+```python
 order_lineitem_agg_fv = FeatureView(
     name="ORDER_LINEITEM_AGG_FV",
     entities=[ORDER],
@@ -421,8 +459,11 @@ SKU_WEEK = Entity(
 
 **Key distinction:** The time-grain join key (e.g., `FORECAST_DATE`) defines the **analysis granularity** -- it determines which row the spine matches on. The `timestamp_col` on the Feature View still serves its standard role: it records **when** the feature row was computed or became valid, enabling PIT correctness if features are refreshed incrementally.
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Feature View at the store-day grain
 store_day_features_df = session.sql("""
     SELECT
         STORE_ID,
@@ -434,7 +475,25 @@ store_day_features_df = session.sql("""
     FROM SALES
     GROUP BY STORE_ID, SALE_DATE
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+sales = session.table("SALES")
+store_day_features_df = sales.group_by("STORE_ID", F.col("SALE_DATE").alias("FORECAST_DATE")).agg(
+    F.sum("QUANTITY").alias("DAILY_UNITS_SOLD"),
+    F.sum("REVENUE").alias("DAILY_REVENUE"),
+    F.count_distinct("PRODUCT_ID").alias("DISTINCT_PRODUCTS_SOLD"),
+    F.max("UPDATED_TS").alias("FEATURE_TS"),
+)
+```
+
+:::
+
+```python
 store_day_fv = FeatureView(
     name="STORE_DAY_SALES_FV",
     entities=[STORE_DAY],

@@ -59,7 +59,24 @@ user_entity = Entity(name="USER", join_keys=["USER_ID"])
 
 ### The Feature Pipeline Landscape
 
-![Feature pipeline architectures: internal temporal and external patterns](../_diagrams/png/dg_05_pipeline_landscape.png){fig-alt="Three pipeline patterns from source tables to feature views"}
+```{mermaid}
+%%| fig-cap: "Feature pipeline architectures: internal, temporal, and external patterns"
+%%| fig-alt: "Three pipeline patterns from source tables to feature views"
+flowchart TB
+  subgraph INT ["INTERNAL"]
+    direction LR
+    ST1[Source Tables] --> FV1[Dynamic Table Feature View]
+  end
+  subgraph TEM ["TEMPORAL API"]
+    direction LR
+    ST2[Source Tables] --> FV2[Tiled FV + aggregations]
+  end
+  subgraph EXT ["EXTERNAL"]
+    direction LR
+    ST3[Source Tables] --> DBT[dbt] --> TV[Tables / Views] --> FV3[View-based FV]
+  end
+  INT ~~~ TEM ~~~ EXT
+```
 
 - **INTERNAL:** Snowflake-managed automatic refresh and incremental compute.
 - **TEMPORAL API:** Snowflake-managed optimized temporal aggregation (windows + tiling).
@@ -94,15 +111,17 @@ Dynamic Tables are ideal when you:
 
 > 📁 **Full code:** [`_code/dynamic_table_pattern.py`](_code/dynamic_table_pattern.py)
 
-The `feature_df` can be defined using either `session.sql()` or the Snowpark DataFrame API -- both produce the same Dynamic Table:
+The `feature_df` can be defined using either `session.sql()` or the Snowpark DataFrame API -- both produce the same Dynamic Table. See [Chapter 4: SQL vs Snowpark DataFrame API](../04_feature_views/index.qmd#sec-sql-vs-snowpark) for guidance on choosing.
+
+::: {.panel-tabset group="lang"}
+
+## SQL
 
 ```python
 from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
-import snowflake.snowpark.functions as F
 
-# Option A: SQL string
 user_purchase_df = session.sql("""
-    SELECT 
+    SELECT
         USER_ID,
         COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
         SUM(TOTAL_AMT) AS SPEND_SUM,
@@ -111,8 +130,14 @@ user_purchase_df = session.sql("""
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
     GROUP BY USER_ID
 """)
+```
 
-# Option B: Snowpark DataFrame API (equivalent result)
+## Snowpark DataFrame
+
+```python
+from snowflake.ml.feature_store import FeatureStore, FeatureView, Entity
+import snowflake.snowpark.functions as F
+
 orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
 user_purchase_df = orders.group_by("USER_ID").agg(
     F.count_distinct("ORDER_ID").alias("ORDER_CNT"),
@@ -122,12 +147,14 @@ user_purchase_df = orders.group_by("USER_ID").agg(
 )
 ```
 
+:::
+
 Both approaches produce a lazy Snowpark DataFrame -- no data moves until the Feature View is registered and the Dynamic Table is materialized.
 
 ::: {.callout-tip}
 ## Reading generated SQL
 
-The DataFrame API emits SQL that is sometimes dense or deeply nested. For review, debugging, or side-by-side comparison with hand-written SQL, use a dialect-aware formatter (for example **SQLGlot** with `pretty=True`, optionally hoisting derived tables to CTEs). Trade-offs, alternatives (SQLFluff, sqlfmt, IDE tools), and an R **dbplyr** note are covered in [Appendix C: Formatting machine-generated SQL](../appendices/C_snowpark_to_dynamic_table/index.md#sec-sql-formatting).
+The DataFrame API emits SQL that is sometimes dense or deeply nested. For review, debugging, or side-by-side comparison with hand-written SQL, use a dialect-aware formatter (for example **SQLGlot** with `pretty=True`, optionally hoisting derived tables to CTEs). Trade-offs, alternatives (SQLFluff, sqlfmt, IDE tools), and an R **dbplyr** note are covered in [Appendix C: Formatting machine-generated SQL](../appendices/C_snowpark_to_dynamic_table/index.qmd#sec-sql-formatting).
 :::
 
 ```python
@@ -193,62 +220,275 @@ LIMIT 10;
 
 ---
 
+### Python Transforms in Feature Views {#sec-python-transforms}
+
+Not all feature logic can be expressed in pure SQL. Python UDFs, UDTFs, and UDAFs let you embed custom Python (including Pandas, NumPy, or scikit-learn) directly in a Feature View's `feature_df`, with the transform running inside the Dynamic Table refresh.
+
+::: {.callout-tip title="Model-generic vs model-specific transforms"}
+Feature Views should contain **model-generic** transforms — logic that is useful across multiple models and consumers (e.g. text normalisation, geo-hashing, z-scoring within a partition). **Model-specific** preprocessing (scaling, encoding, target transformations) belongs in the model pipeline so that each model can apply its own scheme. See [Chapter 9: Preprocessing](../09_preprocessing/index.qmd) for model-dependent patterns using sklearn and Snowflake ML pipelines.
+:::
+
+**Options at a glance:**
+
+| Approach | Granularity | Incremental-safe | Best for |
+|----------|------------|-------------------|----------|
+| **Snowpark DataFrame API** | Row/column | Yes | Joins, filters, window functions expressible as SQL |
+| **SQL UDF** | One row in, one value out | Yes | Encapsulating repeated SQL patterns for consistency |
+| **Scalar Python UDF** | One row in, one value out | Yes (if `IMMUTABLE`) | Row-level transforms requiring Python libraries |
+| **Vectorized Python UDF** | Pandas Series batch | Yes (if `IMMUTABLE`) | Batch math, NumPy operations |
+| **UDTF** (`end_partition`) | Partition in, rows out | Yes (non-SQL UDTFs) | Per-entity statistics, sessionisation, sequence features |
+| **UDAF** (`aggregate`/`merge`/`finish`) | Group in, one value out | Check docs | Custom aggregate logic without `ARRAY_AGG` workarounds |
+
+::: {.callout-important title="Prefer native SQL and SQL UDFs over Python UDFs"}
+If the transform can be expressed using **built-in Snowflake SQL functions**, always prefer that — native functions run in the optimised SQL engine and are significantly faster than Python UDFs, which incur serialisation overhead and a Python runtime per row or batch. For example, SHA2 hashing is available as `SHA2(LOWER(TRIM(email)), 256)` in SQL. If you want to **encapsulate a repeated SQL pattern** for consistency across Feature Views, use a **SQL UDF** instead of a Python UDF. Reserve Python UDFs for logic that genuinely requires Python libraries (e.g. NLP tokenisation, custom statistical models, third-party packages).
+:::
+
+**Example: Scalar Python UDF in a Feature View.** A hash-based anonymiser applied during feature materialisation. This example is **for illustration purposes only** — in practice, use the native `SHA2()` function or a SQL UDF (shown below) for better performance:
+
+```python
+from snowflake.snowpark.functions import udf, col
+from snowflake.snowpark.types import StringType
+
+@udf(name="FEATURE_STORE.HASH_EMAIL", input_types=[StringType()],
+     return_type=StringType(), immutable=True, replace=True,
+     packages=["hashlib"])
+def hash_email(email: str) -> str:
+    import hashlib
+    return hashlib.sha256(email.lower().strip().encode()).hexdigest()
+
+feature_df = (
+    session.table("CLICKSTREAM_DATA.USERS")
+    .select(
+        col("USER_ID"),
+        hash_email(col("EMAIL")).alias("EMAIL_HASH"),
+        col("SIGNUP_TS"),
+    )
+)
+```
+
+The **preferred approach** for this specific transform would be a SQL UDF or inline SQL:
+
+```sql
+-- SQL UDF for reusable pattern encapsulation
+CREATE OR REPLACE FUNCTION FEATURE_STORE.HASH_EMAIL_SQL(email VARCHAR)
+  RETURNS VARCHAR
+  IMMUTABLE
+AS $$
+  SHA2(LOWER(TRIM(email)), 256)
+$$;
+```
+
+```python
+# Or simply use the built-in function inline via Snowpark
+from snowflake.snowpark.functions import sha2, lower, trim, col, lit
+
+feature_df = (
+    session.table("CLICKSTREAM_DATA.USERS")
+    .select(
+        col("USER_ID"),
+        sha2(lower(trim(col("EMAIL"))), lit(256)).alias("EMAIL_HASH"),
+        col("SIGNUP_TS"),
+    )
+)
+```
+
+Register as a Feature View in the usual way — the UDF or expression is embedded in the generated DT SQL. Because scalar UDFs declared `IMMUTABLE` (and all native SQL functions) are deterministic, the DT can use incremental refresh.
+
+**Example: UDTF partition — z-score within each user's transactions.**
+
+```python
+from snowflake.snowpark.functions import col, table_function
+from snowflake.snowpark.types import StructType, StructField, FloatType, StringType
+
+class ZScorePartition:
+    def process(self, user_id, amount):
+        self._rows.append((user_id, amount))
+
+    def end_partition(self):
+        import statistics
+        amounts = [r[1] for r in self._rows]
+        mu = statistics.mean(amounts)
+        sigma = statistics.stdev(amounts) if len(amounts) > 1 else 1.0
+        for uid, amt in self._rows:
+            yield (uid, amt, (amt - mu) / sigma)
+
+    def __init__(self):
+        self._rows = []
+
+zscore_udtf = session.udtf.register(
+    ZScorePartition,
+    output_schema=StructType([
+        StructField("USER_ID", StringType()),
+        StructField("AMOUNT", FloatType()),
+        StructField("AMOUNT_ZSCORE", FloatType()),
+    ]),
+    input_types=[StringType(), FloatType()],
+    name="FEATURE_STORE.ZSCORE_PARTITION",
+    replace=True,
+)
+
+feature_df = (
+    session.table("CLICKSTREAM_DATA.ORDERS")
+    .join_table_function(
+        zscore_udtf(col("USER_ID"), col("TOTAL_AMT"))
+        .over(partition_by=col("USER_ID"))
+    )
+)
+```
+
+::: {.callout-note title="Python UDAFs"}
+Python UDAFs use a handler class with `aggregate()`, `merge()`, and `finish()` methods — suitable for custom aggregation logic (e.g. weighted median, HyperLogLog) that cannot be expressed with built-in SQL aggregates. They can replace the common workaround of `ARRAY_AGG` + scalar UDF. See the [Snowflake UDAF documentation](https://docs.snowflake.com/en/developer-guide/udf/python/udf-python-tabular-udafs) for the handler interface and examples.
+:::
+
+::: {.callout-warning title="DT refresh constraints for UDFs and UDTFs"}
+Scalar and vectorized Python UDFs marked `IMMUTABLE` are eligible for **incremental** DT refresh; `VOLATILE` Python UDFs are not. **Python UDTFs** (including those with `end_partition()`) also support incremental refresh — but SQL-based UDTFs do not, and `SELECT` blocks reading from **UDTFs** must explicitly specify columns (no `*`). Python **UDAFs** are not explicitly documented for DT incremental refresh — check the [supported queries reference](https://docs.snowflake.com/en/user-guide/dynamic-tables/supported-queries) for the latest status. For high-frequency Feature Views, prefer native SQL functions or Snowpark DataFrame expressions where possible. See [Appendix C: Python UDFs and UDTFs in Dynamic Tables](../appendices/C_snowpark_to_dynamic_table/index.qmd#sec-udf-udtf-dt) for additional constraints and immutability requirements.
+
+Note: the `SELECT *` restriction above applies specifically to **UDTF sources**. For DTs that use `SELECT * FROM a regular base table`, Snowflake has updated behaviour so that new columns added to the base table are now picked up incrementally on the next refresh rather than failing. See [Chapter 4: Incremental Column Pickup with SELECT *](../04_feature_views/index.qmd#sec-select-star-evolution) for the semantics, backfill behaviour, and current limitations.
+:::
+
+---
+
 ## Chained Feature View Pipelines {#sec-chaining}
 
 Feature Views can reference other Feature Views (or their underlying Dynamic Tables / Views) as their `feature_df` source, creating **multi-stage pipelines** within the Feature Store. This is a natural way to layer transformations: base Feature Views handle raw-to-feature computation, and downstream Feature Views combine or enrich those outputs.
 
 ::: {.callout-warning}
-## Views cannot appear in the middle of a DT chain
-Snowflake does **not** allow a Dynamic Table to read from a View that queries another Dynamic Table (DT -> View -> DT). Views can only appear at the **end** of a pipeline (DT -> DT -> View is fine). If your pipeline has intermediate stages that feed a downstream DT, each intermediate stage must itself be a Dynamic Table -- not a View. See the [Dynamic Table limitations](https://docs.snowflake.com/en/user-guide/dynamic-tables-limitations) documentation.
+## Views in the middle of a DT chain require a refresh boundary
 
-In Feature Store terms: if a downstream Feature View is DT-backed (`refresh_freq` set), all upstream Feature Views it references must also be DT-backed. A View-based Feature View can only be a **terminal consumer** in the chain.
+By default, Snowflake does **not** allow a Dynamic Table to read from a View that queries another Dynamic Table (DT → View → DT), because it cannot coordinate the refresh graph across the view boundary.
+
+There are two solutions:
+
+1. **Remove the view** -- If you control the intermediate stage, make it a DT instead of a View. Intermediate DTs use `refresh_freq="DOWNSTREAM"` so they only refresh when a downstream consumer needs fresh data.
+
+2. **Wrap the view in `DYNAMIC_TABLE_REFRESH_BOUNDARY()`** -- When you cannot or do not want to remove the view (e.g., you are reading through a third-party or shared view), wrap the reference:
+
+    ```sql
+    CREATE OR REPLACE DYNAMIC TABLE MY_DOWNSTREAM_DT
+      TARGET_LAG = '15 minutes'
+      WAREHOUSE = FS_DEV_WH
+    AS
+      SELECT s.*, p.category
+      FROM MY_UPSTREAM_DT s
+      JOIN DYNAMIC_TABLE_REFRESH_BOUNDARY(v_product_lookup) p
+        ON s.product_id = p.product_id;
+    ```
+
+    The boundary decouples the two pipelines: `MY_UPSTREAM_DT` refreshes in a coordinated group with `MY_DOWNSTREAM_DT`, while `v_product_lookup` is read at whatever state it is in at refresh time (no snapshot isolation on that edge). A failure in the upstream of `v_product_lookup` does **not** block `MY_DOWNSTREAM_DT` from refreshing.
+
+**Trade-off:** Inputs wrapped in a refresh boundary lose snapshot isolation -- joined inputs may reflect different points in time. Use the boundary only on inputs where temporal consistency with the rest of the pipeline is not required (e.g., slowly changing lookup tables, shared reference data).
+
+In Feature Store terms: if a downstream Feature View is DT-backed (`refresh_freq` set), all upstream Feature Views it directly references must also be DT-backed, or you must wrap the view using the SQL pattern above (outside the Python API). A View-based Feature View can only be a **terminal consumer** in an unmodified chain.
+
+See [Data consistency and pipeline boundaries](https://docs.snowflake.com/en/user-guide/dynamic-tables/data-consistency) for the full reference.
 :::
 
 ### How Chaining Works
 
-![Chained Feature View pipeline from source tables to combined FV](../_diagrams/png/dg_05_chained_fv.png){fig-alt="Orders and events feed base feature views then a combined feature view"}
+```{mermaid}
+%%| fig-cap: "Chained Feature View pipeline from source tables to combined FV"
+%%| fig-alt: "Orders and events feed base feature views then a combined feature view"
+flowchart TB
+  O[ORDERS] --> B1[USER_ORDER_BASE_FV DT]
+  E[EVENTS] --> B2[USER_EVENT_BASE_FV DT]
+  B1 & B2 --> C[USER_COMBINED_FV]
+```
 
 ### Example: Base + Derived Feature Views
 
+**Base layer -- order aggregates per user (DT-backed):**
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Base layer: order aggregates per user (DT-backed)
+order_base_df = session.sql("""
+    SELECT USER_ID,
+           DATE_TRUNC('day', ORDER_TS)::TIMESTAMP_NTZ AS ORDER_DATE,
+           SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+           COUNT(ORDER_ID) AS ORDER_CNT
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID, DATE_TRUNC('day', ORDER_TS)
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+order_base_df = (
+    orders
+    .with_column("ORDER_DATE", F.date_trunc("day", F.col("ORDER_TS")).cast("TIMESTAMP_NTZ"))
+    .group_by("USER_ID", "ORDER_DATE")
+    .agg(
+        F.sum("TOTAL_AMT").alias("ORDER_TOTAL_AMT_SUM"),
+        F.count("ORDER_ID").alias("ORDER_CNT"),
+    )
+)
+```
+
+:::
+
+**Base layer -- event aggregates per user (DT-backed):**
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
+event_base_df = session.sql("""
+    SELECT USER_ID,
+           DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
+           COUNT(EVENT_ID) AS EVENT_CNT,
+           COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
+    GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+events = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS")
+event_base_df = (
+    events
+    .with_column("ACTIVITY_DATE", F.date_trunc("day", F.col("EVENT_TS")).cast("TIMESTAMP_NTZ"))
+    .group_by("USER_ID", "ACTIVITY_DATE")
+    .agg(
+        F.count("EVENT_ID").alias("EVENT_CNT"),
+        F.count_distinct("PRODUCT_ID").alias("PRODUCT_DISTINCT_CNT"),
+    )
+)
+```
+
+:::
+
+```python
 user_order_base = FeatureView(
-    name="USER_ORDER_BASE_FV",
-    entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID,
-               DATE_TRUNC('day', ORDER_TS)::TIMESTAMP_NTZ AS ORDER_DATE,
-               SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
-               COUNT(ORDER_ID) AS ORDER_CNT
-        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
-        GROUP BY USER_ID, DATE_TRUNC('day', ORDER_TS)
-    """),
-    timestamp_col="ORDER_DATE",
-    refresh_freq="1 hour",
-    desc="Base: daily order aggregates per user",
+    name="USER_ORDER_BASE_FV", entities=[user_entity],
+    feature_df=order_base_df, timestamp_col="ORDER_DATE",
+    refresh_freq="1 hour", desc="Base: daily order aggregates per user",
 )
 fs.register_feature_view(user_order_base, version="V01", block=True)
 
-# Base layer: event aggregates per user (DT-backed)
 user_event_base = FeatureView(
-    name="USER_EVENT_BASE_FV",
-    entities=[user_entity],
-    feature_df=session.sql("""
-        SELECT USER_ID,
-               DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
-               COUNT(EVENT_ID) AS EVENT_CNT,
-               COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
-        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
-        GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
-    """),
-    timestamp_col="ACTIVITY_DATE",
-    refresh_freq="1 hour",
-    desc="Base: daily event aggregates per user",
+    name="USER_EVENT_BASE_FV", entities=[user_entity],
+    feature_df=event_base_df, timestamp_col="ACTIVITY_DATE",
+    refresh_freq="1 hour", desc="Base: daily event aggregates per user",
 )
 fs.register_feature_view(user_event_base, version="V01", block=True)
+```
 
-# Derived layer: join both base FVs into a combined view
-# References the underlying DTs by their $-delimited object names
+**Derived layer -- join both base FVs into a combined view:**
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 combined_df = session.sql("""
     SELECT
         o.USER_ID,
@@ -261,7 +501,27 @@ combined_df = session.sql("""
     JOIN FEATURE_STORE.USER_EVENT_BASE_FV$V01 e
         ON o.USER_ID = e.USER_ID AND o.ORDER_DATE = e.ACTIVITY_DATE
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+order_base = session.table('FEATURE_STORE."USER_ORDER_BASE_FV$V01"')
+event_base = session.table('FEATURE_STORE."USER_EVENT_BASE_FV$V01"')
+combined_df = order_base.join(
+    event_base,
+    (order_base["USER_ID"] == event_base["USER_ID"])
+    & (order_base["ORDER_DATE"] == event_base["ACTIVITY_DATE"]),
+).select(
+    order_base["USER_ID"], order_base["ORDER_DATE"],
+    order_base["ORDER_TOTAL_AMT_SUM"], order_base["ORDER_CNT"],
+    event_base["EVENT_CNT"], event_base["PRODUCT_DISTINCT_CNT"],
+)
+```
+
+:::
+
+```python
 user_combined_fv = FeatureView(
     name="USER_COMBINED_FV",
     entities=[user_entity],
@@ -321,7 +581,7 @@ When the downstream Feature View is View-based (`refresh_freq=None`), it reads f
 Beyond avoiding latency stacking, DT-to-View chaining enables **transformations that are not compatible with incremental DT refresh**. Some SQL operations prevent a DT from using incremental mode (e.g., non-deterministic functions, certain window functions, or self-referential patterns). By placing these in a View layer on top of incrementally-refreshed base DTs, you get the best of both worlds: efficient incremental refresh for the heavy data processing, with flexible transforms applied at read time.
 
 ::: {.callout-tip title="DT-to-DT alternative with primary key derivation (April 2026)"}
-If the upstream full-refresh DT produces a **system-derived unique key** -- for example, its query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1` -- a downstream DT can now opt into `REFRESH_MODE = INCREMENTAL` and process only the actual row-level changes between upstream full refreshes, rather than falling back to a View layer. This is a SQL-level capability (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); the Feature Store Python API does not yet expose it, so apply the same plain-DT or post-registration `ALTER` pattern described elsewhere in this chapter. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+If the upstream full-refresh DT produces a **system-derived unique key** -- for example, its query uses `GROUP BY` or `QUALIFY ROW_NUMBER() = 1` -- a downstream DT can now opt into `REFRESH_MODE = INCREMENTAL` and process only the actual row-level changes between upstream full refreshes, rather than falling back to a View layer. This is a SQL-level capability (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`); the Feature Store Python API does not yet expose it, so apply the same plain-DT or post-registration `ALTER` pattern described elsewhere in this chapter. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 :::
 
 This also allows the inclusion of **context or timestamp functions** (`CURRENT_TIMESTAMP()`, `DATEDIFF(... , CURRENT_DATE())`, etc.) in feature derivations. These are non-deterministic and would force a DT into full-refresh mode, but in a View they evaluate fresh on every query -- useful for real-time serving features like "days since last order" or "time since account creation."
@@ -509,13 +769,95 @@ user_purchase_fv = FeatureView(
 fs.register_feature_view(feature_view=user_purchase_fv, version="V01")
 ```
 
+### Hybrid Pattern: dbt Upstream + Aggregation API {#sec-dbt-hybrid}
+
+For teams that prefer dbt for source-layer transformations but need **PIT-correct temporal aggregations**, combine dbt-managed tables with the Feature Store Aggregation API:
+
+```{mermaid}
+%%| fig-cap: "Hybrid pipeline: dbt cleans data, Aggregation API creates tiled features"
+%%| fig-alt: "dbt model to dbt table to Aggregation API Feature View"
+flowchart LR
+  RAW[Raw source] -->|dbt model| DBT[dbt-managed table]
+  DBT -->|View FV| VFV[View-based FV]
+  DBT -->|Aggregation API| AFV[Tiled Agg FV]
+  VFV --> GTS["generate_training_set()"]
+  AFV --> GTS
+```
+
+1. **dbt model** cleans and joins raw data into a dbt-managed table (e.g. `USER_ORDERS_CLEANED`)
+2. **View-based Feature View** wraps the dbt table for simple columns (latest-state features)
+3. **Aggregation API Feature View** reads from the same dbt table to produce tiled temporal aggregations (e.g. 7-day spend, 30-day order count) — these get PIT-correct retrieval via `generate_training_set`
+
+```python
+from snowflake.ml.feature_store import FeatureView, Entity
+from snowflake.ml.feature_store.feature_view import FeatureViewSliceConfig
+
+# The dbt table is already materialized
+dbt_source = session.table("FEATURE_STORE_DEMO.DBT_FEATURES.USER_ORDERS_CLEANED")
+
+# View FV for simple columns
+simple_fv = FeatureView(
+    name="USER_ORDER_BASICS",
+    entities=[user_entity],
+    feature_df=dbt_source.select("USER_ID", "LIFETIME_ORDER_CNT", "LAST_ORDER_TS"),
+    timestamp_col="LAST_ORDER_TS",
+    desc="Basic order stats - dbt managed",
+)
+fs.register_feature_view(simple_fv, version="V01")
+
+# Aggregation API FV for temporal features (tiled, PIT-correct)
+from snowflake.ml.feature_store import Aggregation
+
+agg_fv = fs.create_feature_view_from_aggregation(
+    name="USER_ORDER_AGGS",
+    entities=[user_entity],
+    source=dbt_source,
+    aggregations=[
+        Aggregation(column="TOTAL_AMT", func="SUM", windows=["7d", "30d"]),
+        Aggregation(column="ORDER_ID", func="COUNT", windows=["7d", "30d"]),
+    ],
+    timestamp_col="ORDER_TS",
+    refresh_freq="1 hour",
+    desc="Tiled temporal aggregations on dbt-cleaned orders",
+)
+fs.register_feature_view(agg_fv, version="V01")
+```
+
+Both Feature Views can then be combined in `generate_training_set` — the View FV returns latest-state values while the Aggregation FV provides PIT-correct windowed aggregates.
+
+### dbt vs Dynamic Table: When to Use Which {#sec-dbt-vs-dt}
+
+| | **dbt-only** | **Hybrid (dbt + Agg API)** | **DT-only** |
+|---|---|---|---|
+| **Orchestration** | dbt scheduler / dbt Cloud | dbt + FS DT refresh | FS DT auto-refresh |
+| **Incremental** | dbt incremental models | dbt incremental + DT incremental | DT incremental |
+| **PIT retrieval** | Latest state only (View FV) | PIT-correct for tiled aggs | PIT-correct for tiled aggs |
+| **Team fit** | SQL-first / analytics engineering | Mixed dbt + ML platform | ML platform / Snowpark |
+| **When to choose** | Features from existing dbt models; no temporal aggregation needed | dbt for data quality/lineage; FS for temporal features and PIT | Greenfield or teams comfortable with FS-managed refresh |
+
+::: {.callout-warning title="PIT implications for View-based FVs"}
+A View-based Feature View backed by a dbt table returns **latest state only** — there is no historical timeline for `generate_training_set` to ASOF-join against. If your training pipeline needs point-in-time correct feature values, either use the hybrid pattern above (Aggregation API for temporal features) or maintain a slowly-changing-dimension (SCD) history in the dbt model and register it with an appropriate `timestamp_col`.
+:::
+
 ---
 
 ## Pipeline Selection Framework {#sec-selection}
 
 ### Decision Tree
 
-![Pipeline selection decision flowchart](../_diagrams/png/dg_05_pipeline_selection.png){fig-alt="Decision tree for temporal API OFT dbt and internal management"}
+```{mermaid}
+%%| fig-cap: "Pipeline selection decision flowchart"
+%%| fig-alt: "Decision tree for temporal API OFT dbt and internal management"
+flowchart TD
+  R{Primary requirement}
+  R --> T{Time-windowed aggregations?}
+  T -->|YES| TA[Temporal Aggregation API]
+  T -->|NO| RT{Sub-minute freshness?}
+  RT -->|YES| OFT[DT + Online Feature Tables]
+  RT -->|NO| DBT{Existing dbt or Airflow?}
+  DBT -->|YES| EO[External orchestration or migrate hot paths to DT]
+  DBT -->|NO| IM[Internal Management DT]
+```
 
 ### Selection Matrix
 
@@ -693,7 +1035,11 @@ See [Chapter 11: Operations](../11_operations/index.qmd) for comprehensive monit
 
 **Solution**: Use deterministic SQL compatible with DT incremental refresh. Check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration -- if it shows `FULL` when you expected `INCREMENTAL`, review your `feature_df` SQL.
 
-You can also inspect refresh mode and history through the Feature Store Python API:
+You can also inspect refresh mode and history:
+
+::: {.panel-tabset}
+
+## Python API
 
 ```python
 fv = fs.get_feature_view("MY_FV", "v1")
@@ -705,6 +1051,27 @@ print(f"Reason:       {fv.refresh_mode_reason}")
 # Review recent refresh history -- REFRESH_ACTION shows whether each refresh was INCREMENTAL or FULL
 fs.get_refresh_history(fv).show()
 ```
+
+## SQL
+
+```sql
+-- Check current refresh mode
+SELECT NAME, REFRESH_MODE, REFRESH_MODE_REASON, SCHEDULING_STATE
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES())
+WHERE NAME = 'MY_FV$V1'
+  AND SCHEMA_NAME = 'FEATURE_STORE';
+
+-- Review recent refresh history
+SELECT NAME, STATE, REFRESH_ACTION, REFRESH_START_TIME, REFRESH_END_TIME,
+       STATISTICS:numInsertedRows::INT AS ROWS_INSERTED
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'FEATURE_STORE_DEMO.FEATURE_STORE.MY_FV$V1'
+))
+ORDER BY REFRESH_START_TIME DESC
+LIMIT 10;
+```
+
+:::
 
 ::: {.callout-warning title="Avoid AUTO refresh mode in production"}
 When the DT engine assigns `AUTO` refresh mode, it uses internal heuristics to decide between `INCREMENTAL` and `FULL` on each refresh cycle. These heuristics can be overly conservative (forcing `FULL` when `INCREMENTAL` would work), inconsistent across engine versions, and opaque to monitoring. For production Feature Views, explicitly set `refresh_mode="INCREMENTAL"` on the `FeatureView` constructor and verify the DT confirms that mode after registration:
@@ -775,8 +1142,8 @@ SHOW UNIQUE KEYS IN FEATURE_STORE."MY_BASE_FV$V01";
 **Important caveats:**
 
 - `REFRESH_MODE = AUTO` does **not** resolve to incremental in this scenario -- you must set `INCREMENTAL` explicitly.
-- This is a **SQL-level capability**; the Feature Store Python API does not yet expose `RELY` primary keys or per-DT refresh mode overrides. Use `ALTER DYNAMIC TABLE` after API registration, or create the upstream stage as a plain DT outside the Feature Store (the same pattern recommended in [Section 3](../appendices/C_snowpark_to_dynamic_table/index.md) and the [DT-to-DT Chaining](#sec-chaining) section above for cases where the API lags behind SQL features).
-- See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys) for the full list of supported patterns.
+- This is a **SQL-level capability**; the Feature Store Python API does not yet expose `RELY` primary keys or per-DT refresh mode overrides. Use `ALTER DYNAMIC TABLE` after API registration, or create the upstream stage as a plain DT outside the Feature Store (the same pattern recommended in [Section 3](../appendices/C_snowpark_to_dynamic_table/index.qmd) and the [DT-to-DT Chaining](#sec-chaining) section above for cases where the API lags behind SQL features).
+- See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization) for the full list of supported patterns.
 :::
 
 ### ❌ Pitfall 3: Partial Leading-Edge Interval in Streaming/Continuous Sources {#sec-partial-interval}
@@ -843,6 +1210,45 @@ See also: [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_featur
 
 **Solution**: Implement monitoring and alerting for pipeline health.
 
+### ⚠️ Pitfall 6: Unexpected column additions from SELECT * DTs
+
+**Problem**: A DT defined with `SELECT * FROM base_table` now picks up new columns added to the base table on the next refresh. If downstream consumers — training pipelines, serving jobs, or downstream DTs with explicit column lists — are not expecting the new column, this can cause schema mismatch errors or unintentional model input changes.
+
+**Solution**: Use `SELECT *` DTs for pass-through Feature Views only when column additions are coordinated across source and consumer teams, and consumers are written to tolerate dynamic schemas. If you need an explicit gate before new columns reach consumers:
+
+- Use an explicit column list in the DT query (`SELECT USER_ID, COL_A, COL_B FROM base_table`) — new base-table columns will not appear until you update the DT definition.
+- Or use the OBJECT-bundled approach ([Chapter 12: `#sec-select-star-vs-object`](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)), where the upstream VIEW definition controls exactly which features enter the bundle.
+
+Pre-existing rows in the DT will be **fully recomputed** from source for the new column (not NULL-filled), as the INCREMENTAL refresh action triggers a full row-level delete + re-insert. The compute cost is equivalent to a full refresh. Use `IMMUTABLE WHERE` if you need to protect historical rows from this recompute, in which case those protected rows will receive `NULL` for the new column. See [Chapter 4: Incremental Column Pickup with SELECT *](../04_feature_views/index.qmd#sec-select-star-evolution) for full details.
+
+### ❌ Pitfall 7: All-DOWNSTREAM Pipeline Never Refreshes
+
+**Problem**: In a chained Feature View pipeline, every Feature View has `refresh_freq="DOWNSTREAM"` (or the equivalent SQL `TARGET_LAG = DOWNSTREAM`). The pipeline produces no data and raises **no error** -- refreshes simply never trigger.
+
+**Why it happens**: `DOWNSTREAM` means "only refresh when a downstream consumer needs fresh data." If the terminal Feature View (the one consumed by training or serving) is also set to `DOWNSTREAM`, no DT in the chain has a time-based target lag, so nothing ever initiates a refresh.
+
+**Solution**: At least one Feature View in the chain -- the terminal (leaf) consumer that drives the pipeline -- must have an explicit time-based `refresh_freq`:
+
+```python
+# ✅ Intermediate stages: refresh only when needed
+base_fv = FeatureView(
+    name="USER_ORDER_BASE",
+    entities=[user_entity],
+    feature_df=base_df,
+    refresh_freq="DOWNSTREAM",   # only refreshes when downstream asks
+)
+
+# ✅ Terminal stage: owns the clock for the entire pipeline
+combined_fv = FeatureView(
+    name="USER_COMBINED_FEATURES",
+    entities=[user_entity],
+    feature_df=combined_df,
+    refresh_freq="30 minutes",   # drives the whole chain
+)
+```
+
+Verify by querying `INFORMATION_SCHEMA.DYNAMIC_TABLES()` after registration -- any DT with `TARGET_LAG_TYPE = 'USER_DEFINED'` is clock-driven; DTs showing only `DOWNSTREAM` are waiting for a downstream trigger. If every DT in your Feature Store schema shows `DOWNSTREAM`, the pipeline will never refresh.
+
 ---
 
 ## Summary
@@ -850,7 +1256,9 @@ See also: [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_featur
 | Pipeline Pattern | Orchestration | Freshness | Best For |
 |------------------|---------------|-----------|----------|
 | **External (dbt)** | External tool | Minutes-hours | Existing dbt investments |
+| **Hybrid (dbt + Agg API)** | dbt + Snowflake | Mixed | dbt for source quality; FS for temporal/PIT features |
 | **Internal (DT)** | Snowflake | Seconds-minutes | New implementations |
+| **Python transforms** | UDF/UDTF/UDAF in DT | Follows DT | Custom Python logic (hashing, parsing, partition stats) |
 | **Chained FVs** | Snowflake (DT graph) | Configurable (DOWNSTREAM minimises stacking) | Multi-stage pipelines, base + derived features |
 | **Temporal API** | Snowflake | Configurable | Time-windowed aggs with tiling; see [Ch07](../07_aggregations_api/index.qmd) |
 | **Rollup** | Snowflake | Follows source | Hierarchical entity aggregation; see [Ch07](../07_aggregations_api/index.qmd#sec-rollup) |

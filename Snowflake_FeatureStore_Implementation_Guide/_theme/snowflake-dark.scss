@@ -77,6 +77,11 @@ $toc-active-border: $sf-blue;
   letter-spacing: 0.06em;
 }
 
+.sidebar-navigation .chapter-number {
+  color: $sf-blue !important;
+  font-weight: 700;
+}
+
 // ---------------------------------------------------------------------------
 // Navbar
 // ---------------------------------------------------------------------------

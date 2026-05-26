@@ -53,7 +53,20 @@ fs = FeatureStore(
 
 ### The Data Leakage Problem
 
-![Data leakage vs point-in-time correctness](../_diagrams/png/dg_06_data_leakage.png){fig-alt="Without PIT future data leaks into labels with PIT only past data is used"}
+```{mermaid}
+%%| fig-cap: "Data leakage vs point-in-time correctness"
+%%| fig-alt: "Without PIT future data leaks into labels with PIT only past data is used"
+flowchart LR
+  subgraph GOOD["✅ With PIT"]
+    direction TB
+    L2[Label Jan 15 churn] --> F2[Features only through Jan 14] --> R2[Realistic metrics]
+  end
+  subgraph BAD["❌ Without PIT"]
+    direction TB
+    L1[Label Jan 15 churn] --> F1[Features include Jan 16-31 data] --> R1[Inflated metrics]
+  end
+  GOOD ~~~ BAD
+```
 
 ### Real-World Impact
 
@@ -73,11 +86,13 @@ fs = FeatureStore(
 
 The training spine uses **`SESSIONS`**: `SESSION_START_TS` is the instant you want features "as of"; `IS_CONVERTED` is the label. User-level features come from **`EVENTS`**, aggregated into **daily snapshots** — one row per user per active day. This gives the ASOF join multiple timestamps per entity to choose from, so different spine events retrieve different historical snapshots.
 
-```{python}
-user_entity = Entity(name="USER", join_keys=["USER_ID"], desc="Clickstream user")
+The `feature_df` for daily event snapshots:
 
-# 1. Feature View: daily event snapshots — one row per user per active day
-#    Multiple rows per entity over time = meaningful ASOF selection
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 user_event_df = session.sql("""
     SELECT
         USER_ID,
@@ -87,7 +102,44 @@ user_event_df = session.sql("""
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
     GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+events = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS")
+user_event_df = (
+    events
+    .with_column("ACTIVITY_DATE", F.date_trunc("day", F.col("EVENT_TS")).cast("TIMESTAMP_NTZ"))
+    .group_by("USER_ID", "ACTIVITY_DATE")
+    .agg(
+        F.count("EVENT_ID").alias("EVENT_CNT"),
+        F.count_distinct("PRODUCT_ID").alias("PRODUCT_DISTINCT_CNT"),
+    )
+)
+```
+
+:::
+
+```{python}
+#| echo: false
+#| output: false
+user_entity = Entity(name="USER", join_keys=["USER_ID"], desc="Clickstream user")
+
+user_event_df = session.sql("""
+    SELECT
+        USER_ID,
+        DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
+        COUNT(EVENT_ID) AS EVENT_CNT,
+        COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
+    GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
+""")
+```
+
+```{python}
 user_event_fv = FeatureView(
     name="USER_DAILY_EVENT_STATS",
     entities=[user_entity],
@@ -97,12 +149,10 @@ user_event_fv = FeatureView(
     desc="Daily event activity snapshots per user — one row per active day",
 )
 
-# 2. Register at version V01
 registered_fv = fs.register_feature_view(
     feature_view=user_event_fv, version="V01", block=True, overwrite=True,
 )
 
-# 3. Spine: entity + when + label (SESSIONS)
 training_spine = session.sql("""
     SELECT
         s.USER_ID,
@@ -112,8 +162,6 @@ training_spine = session.sql("""
     WHERE s.USER_ID IS NOT NULL
 """)
 
-# 4. Training set: ASOF join — for each session, retrieve the user's most
-#    recent daily snapshot on or before PREDICTION_TS
 training_set = fs.generate_dataset(
     name="CH06_PIT_DEMO",
     spine_df=training_spine,
@@ -122,8 +170,6 @@ training_set = fs.generate_dataset(
     output_type="dataset",
 )
 
-# Show a sample — note how different PREDICTION_TS values for the same user
-# retrieve different daily snapshots via the ASOF join
 training_set.read.to_snowpark_dataframe().select(
     "USER_ID", "PREDICTION_TS", "LABEL", "EVENT_CNT", "PRODUCT_DISTINCT_CNT"
 ).limit(8).show()
@@ -133,7 +179,21 @@ training_set.read.to_snowpark_dataframe().select(
 
 The Feature Store uses **ASOF joins** (temporal joins) to retrieve the most recent feature row **on or before** each spine timestamp, per entity. This only works meaningfully when the Feature View contains **multiple rows per entity over time** (e.g., daily snapshots, periodic aggregations):
 
-![ASOF join selects latest feature snapshot on or before spine time](../_diagrams/png/dg_06_asof_mechanics.png){fig-alt="Spine rows map to the correct historical feature snapshot per entity"}
+```{mermaid}
+%%| fig-cap: "ASOF join selects latest feature snapshot on or before spine time"
+%%| fig-alt: "Spine rows map to the correct historical feature snapshot per entity"
+flowchart LR
+  subgraph SP[Spine]
+    s1[usr001 Jan15]
+    s2[usr001 Jan20]
+  end
+  subgraph FV[Feature snapshots]
+    f1[Jan14 cnt 8]
+    f2[Jan18 cnt 15]
+  end
+  s1 -->|ASOF| f1
+  s2 -->|ASOF| f2
+```
 
 ---
 
@@ -289,43 +349,99 @@ Benefits:
 - New team members do not need to memorise per-Feature-View timestamp naming.
 :::
 
+**Pattern 1: Daily event snapshots** -- one row per user per active day. ASOF picks the most recent day <= spine TS.
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Pattern 1: Daily event snapshots — one row per user per active day
-# Each day's activity is a separate snapshot; ASOF picks the most recent day ≤ spine TS
+event_daily_df = session.sql("""
+    SELECT
+        USER_ID,
+        DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
+        COUNT(EVENT_ID) AS EVENT_CNT,
+        COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
+    GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+events = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS")
+event_daily_df = (
+    events
+    .with_column("ACTIVITY_DATE", F.date_trunc("day", F.col("EVENT_TS")).cast("TIMESTAMP_NTZ"))
+    .group_by("USER_ID", "ACTIVITY_DATE")
+    .agg(
+        F.count("EVENT_ID").alias("EVENT_CNT"),
+        F.count_distinct("PRODUCT_ID").alias("PRODUCT_DISTINCT_CNT"),
+    )
+)
+```
+
+:::
+
+```python
 user_event_fv = FeatureView(
     name="USER_DAILY_EVENT_STATS",
-    feature_df=session.sql("""
-        SELECT
-            USER_ID,
-            DATE_TRUNC('day', EVENT_TS)::TIMESTAMP_NTZ AS ACTIVITY_DATE,
-            COUNT(EVENT_ID) AS EVENT_CNT,
-            COUNT(DISTINCT PRODUCT_ID) AS PRODUCT_DISTINCT_CNT
-        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS
-        GROUP BY USER_ID, DATE_TRUNC('day', EVENT_TS)
-    """),
+    feature_df=event_daily_df,
     entities=[user_entity],
     timestamp_col="ACTIVITY_DATE",
     refresh_freq="1 hour",
-    desc="Daily event activity per user — one row per active day",
+    desc="Daily event activity per user -- one row per active day",
 )
+```
 
-# Pattern 2: Daily order snapshots — one row per user per day with orders
+**Pattern 2: Daily order snapshots** -- one row per user per day with orders.
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
+order_daily_df = session.sql("""
+    SELECT
+        USER_ID,
+        DATE_TRUNC('day', ORDER_TS)::TIMESTAMP_NTZ AS ORDER_DATE,
+        SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) AS ORDER_CNT,
+        AVG(TOTAL_AMT) AS ORDER_TOTAL_AMT_AVG
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID, DATE_TRUNC('day', ORDER_TS)
+""")
+```
+
+## Snowpark DataFrame
+
+```python
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+order_daily_df = (
+    orders
+    .with_column("ORDER_DATE", F.date_trunc("day", F.col("ORDER_TS")).cast("TIMESTAMP_NTZ"))
+    .group_by("USER_ID", "ORDER_DATE")
+    .agg(
+        F.sum("TOTAL_AMT").alias("ORDER_TOTAL_AMT_SUM"),
+        F.count("ORDER_ID").alias("ORDER_CNT"),
+        F.avg("TOTAL_AMT").alias("ORDER_TOTAL_AMT_AVG"),
+    )
+)
+```
+
+:::
+
+```python
 user_order_fv = FeatureView(
     name="USER_DAILY_ORDER_STATS",
-    feature_df=session.sql("""
-        SELECT
-            USER_ID,
-            DATE_TRUNC('day', ORDER_TS)::TIMESTAMP_NTZ AS ORDER_DATE,
-            SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
-            COUNT(ORDER_ID) AS ORDER_CNT,
-            AVG(TOTAL_AMT) AS ORDER_TOTAL_AMT_AVG
-        FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
-        GROUP BY USER_ID, DATE_TRUNC('day', ORDER_TS)
-    """),
+    feature_df=order_daily_df,
     entities=[user_entity],
     timestamp_col="ORDER_DATE",
     refresh_freq="1 hour",
-    desc="Daily order activity per user — one row per order day",
+    desc="Daily order activity per user -- one row per order day",
 )
 
 # Pattern 3: Periodic snapshots from an external pipeline (e.g. dbt/Airflow)
@@ -417,10 +533,21 @@ Backfill matters when you **add new features** and need historical rows material
 
 > 📁 **Full code:** [`_code/backfill_operations.py`](_code/backfill_operations.py)
 
+::: {.panel-tabset}
+
+## Python API
+
 ```python
-# Manual refresh (triggers Dynamic Table refresh for registered materialized FV)
 fs.refresh_feature_view(registered_fv)
 ```
+
+## SQL
+
+```sql
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_DAILY_EVENT_STATS$V01" REFRESH;
+```
+
+:::
 
 | Situation | Guidance |
 |-----------|----------|
@@ -432,7 +559,7 @@ View-backed Feature Views (no `refresh_freq`) compute from source at query time�
 
 ### Optimising backfill with IMMUTABLE WHERE
 
-For Dynamic Tables with large historical partitions that rarely change, the [`IMMUTABLE WHERE`](https://docs.snowflake.com/en/user-guide/dynamic-tables-immutability-constraints) clause tells Snowflake to **skip** rows matching a predicate during incremental refresh. This can significantly reduce refresh time and cost for append-heavy workloads where historical data is stable:
+For Dynamic Tables with large historical partitions that rarely change, the [`IMMUTABLE WHERE`](https://docs.snowflake.com/en/user-guide/dynamic-tables/frozen-regions) clause tells Snowflake to **skip** rows matching a predicate during incremental refresh. This can significantly reduce refresh time and cost for append-heavy workloads where historical data is stable:
 
 ```sql
 CREATE OR REPLACE DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01"
@@ -447,6 +574,10 @@ AS
 
 ::: {.callout-note}
 `IMMUTABLE WHERE` is a Dynamic Table SQL feature not currently exposed through the Feature Store Python API. Apply it post-registration via `ALTER DYNAMIC TABLE ... SET IMMUTABLE WHERE (...)`, or create the DT via SQL and register a View-based Feature View over it. The predicate is ignored on the first refresh and applied on subsequent refreshes. See the [immutability constraints documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) for supported predicate patterns.
+:::
+
+::: {.callout-important title="TAG registration required for API visibility"}
+Dynamic Tables created directly via SQL in the Feature Store schema are not visible to `fs.list_feature_views()` or the Snowsight Feature Store UI unless the correct internal TAGs are applied. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the required TAG schema. This applies to all SQL-created objects in this section.
 :::
 
 ### Lookup tables for dynamic history depth {#sec-lookup-tables}

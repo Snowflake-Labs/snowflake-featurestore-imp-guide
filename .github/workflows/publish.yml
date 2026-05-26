@@ -21,7 +21,9 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'Snowflake-Labs/snowflake-featurestore-imp-guide'
+    if: >-
+      github.repository == 'Snowflake-Labs/snowflake-featurestore-imp-guide' ||
+      github.repository == 'snowflake-eng/snowflake-featurestore-imp-guide'
     runs-on: ubuntu-latest
     
     steps:
@@ -41,14 +43,32 @@ jobs:
           pip install snowflake-ml-python snowflake-snowpark-python
 
       - name: Set up Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: '1.6.43'
+        run: |
+          wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v1.6.43/quarto-1.6.43-linux-amd64.deb" -O quarto.deb
+          sudo dpkg -i quarto.deb
+          rm quarto.deb
+          quarto --version
 
-      - name: Render Quarto Book (HTML only, from freeze cache)
+      - name: Render Quarto Book — internal (includes preview chapters)
+        if: github.repository == 'snowflake-eng/snowflake-featurestore-imp-guide'
+        run: |
+          cd Snowflake_FeatureStore_Implementation_Guide
+          QUARTO_PROFILE=internal quarto render --to html --no-execute
+
+      - name: Render Quarto Book — public
+        if: github.repository == 'Snowflake-Labs/snowflake-featurestore-imp-guide'
         run: |
           cd Snowflake_FeatureStore_Implementation_Guide
           quarto render --to html --no-execute
+
+      - name: Determine output directory
+        id: output-dir
+        run: |
+          if [ "${{ github.repository }}" = "snowflake-eng/snowflake-featurestore-imp-guide" ]; then
+            echo "path=Snowflake_FeatureStore_Implementation_Guide/_site-internal" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=Snowflake_FeatureStore_Implementation_Guide/_site" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -56,10 +76,12 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'Snowflake_FeatureStore_Implementation_Guide/_site'
+          path: ${{ steps.output-dir.outputs.path }}
 
   deploy:
-    if: github.repository == 'Snowflake-Labs/snowflake-featurestore-imp-guide'
+    if: >-
+      github.repository == 'Snowflake-Labs/snowflake-featurestore-imp-guide' ||
+      github.repository == 'snowflake-eng/snowflake-featurestore-imp-guide'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -1,0 +1,2436 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="keywords" content="snowflake, feature store, ml, machine learning, mlops">
+<meta name="description" content="Comprehensive guide to implementing Snowflake Feature Store for production ML, covering design patterns, temporal features, aggregations, online serving, and CI/CD.">
+
+<title>14&nbsp; Streaming Feature Views – Snowflake Feature Store Implementation Guide (Internal)</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<link href="../appendices/A_sample_data/index.html" rel="next">
+<link href="../13_migration_guide/index.html" rel="prev">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-23bbe8b5e4efc1e257f6d59dce478b08.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-88f976c52a096bfcf50c5d13e133667b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "sidebar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "start",
+  "type": "textbox",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+<script src="../site_libs/quarto-diagram/mermaid.min.js"></script>
+<script src="../site_libs/quarto-diagram/mermaid-init.js"></script>
+<link href="../site_libs/quarto-diagram/mermaid.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Snowflake Feature Store Implementation Guide">
+<meta property="og:description" content="Best practices for building production ML feature platforms with Snowflake Feature Store — entities, Feature Views, pipelines, online serving, and operations.">
+<meta property="og:site_name" content="Snowflake Feature Store Implementation Guide (Internal)">
+</head>
+
+<body class="nav-sidebar docked quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+      // Hack to workaround the fact that safari doesn't
+      // properly recolor the scrollbar when toggling (#1455)
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        window.scrollTo(0, 1);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const darkModeDefault = authorPrefersDark;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+  <nav class="quarto-secondary-nav">
+    <div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../08a_streaming_feature_views/index.html">Preview Features</a></li><li class="breadcrumb-item"><a href="../08a_streaming_feature_views/index.html"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></a></li></ol></nav>
+        <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+        </a>
+      <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
+        <i class="bi bi-search"></i>
+      </button>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation docked overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="sidebar-title mb-0 py-0">
+      <a href="../">Snowflake Feature Store Implementation Guide (Internal)</a> 
+        <div class="sidebar-tools-main">
+    <a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide" title="Source Code" class="quarto-navigation-tool px-1" aria-label="Source Code"><i class="bi bi-github"></i></a>
+  <a href="" class="quarto-color-scheme-toggle quarto-navigation-tool  px-1" onclick="window.quartoToggleColorScheme(); return false;" title="Toggle dark mode"><i class="bi"></i></a>
+</div>
+    </div>
+      </div>
+        <div class="mt-2 flex-shrink-0 align-items-center">
+        <div class="sidebar-search">
+        <div id="quarto-search" class="" title="Search"></div>
+        </div>
+        </div>
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Snowflake Feature Store Implementation Guide</span></a>
+  </div>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
+ <span class="menu-text">Getting Started</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../00_introduction/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Introduction</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../01_concepts/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">1</span>&nbsp; <span class="chapter-title">Core Concepts</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true">
+ <span class="menu-text">Design &amp; Architecture</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../02_design_organization/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Design &amp; Organization</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../03_entities_hierarchies/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">3</span>&nbsp; <span class="chapter-title">Entities &amp; Hierarchies</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../04_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true">
+ <span class="menu-text">Feature Engineering</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-3" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../05_feature_pipelines/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Feature Pipelines</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../06_temporal_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Temporal Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../07_aggregations_api/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Aggregations API</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true">
+ <span class="menu-text">Production</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-4" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../08_online_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Online Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../09_preprocessing/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Preprocessing</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../10_training_inference/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Training &amp; Inference</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true">
+ <span class="menu-text">Operations &amp; Advanced</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../11_operations/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">11</span>&nbsp; <span class="chapter-title">Operations</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../12_advanced_patterns/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">12</span>&nbsp; <span class="chapter-title">Advanced Patterns</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../13_migration_guide/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">13</span>&nbsp; <span class="chapter-title">Migration Guide</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true">
+ <span class="menu-text">Preview Features</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-6" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../08a_streaming_feature_views/index.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true">
+ <span class="menu-text">Appendices</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-7" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../appendices/A_sample_data/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../appendices/A_sample_data/data_manager/streamlit_app.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../appendices/B_setup/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">C</span>&nbsp; <span class="chapter-title">Environment Setup</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../appendices/C_snowpark_to_dynamic_table/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">D</span>&nbsp; <span class="chapter-title">Snowpark to Dynamic Table</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../appendices/D_tag_convention/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+    </ul>
+    </div>
+</nav>
+<div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview"><span class="header-section-number">14.1</span> Overview</a></li>
+  <li><a href="#learning-objectives" id="toc-learning-objectives" class="nav-link" data-scroll-target="#learning-objectives"><span class="header-section-number">14.2</span> Learning Objectives</a></li>
+  <li><a href="#prerequisites" id="toc-prerequisites" class="nav-link" data-scroll-target="#prerequisites"><span class="header-section-number">14.3</span> Prerequisites</a></li>
+  <li><a href="#rbac-setup" id="toc-rbac-setup" class="nav-link" data-scroll-target="#rbac-setup"><span class="header-section-number">14.4</span> RBAC Setup</a></li>
+  <li><a href="#sec-online-service" id="toc-sec-online-service" class="nav-link" data-scroll-target="#sec-online-service"><span class="header-section-number">14.5</span> Provisioning the Online Service</a></li>
+  <li><a href="#batch-feature-views-with-postgres-online-store" id="toc-batch-feature-views-with-postgres-online-store" class="nav-link" data-scroll-target="#batch-feature-views-with-postgres-online-store"><span class="header-section-number">14.6</span> Batch Feature Views with Postgres Online Store</a></li>
+  <li><a href="#stream-feature-views" id="toc-stream-feature-views" class="nav-link" data-scroll-target="#stream-feature-views"><span class="header-section-number">14.7</span> Stream Feature Views</a>
+  <ul class="collapse">
+  <li><a href="#sec-stream-source" id="toc-sec-stream-source" class="nav-link" data-scroll-target="#sec-stream-source"><span class="header-section-number">14.7.1</span> Register a Stream Source</a></li>
+  <li><a href="#sec-transformation-fn" id="toc-sec-transformation-fn" class="nav-link" data-scroll-target="#sec-transformation-fn"><span class="header-section-number">14.7.2</span> Define the Transformation Function</a></li>
+  <li><a href="#sec-create-stream-fv" id="toc-sec-create-stream-fv" class="nav-link" data-scroll-target="#sec-create-stream-fv"><span class="header-section-number">14.7.3</span> Create a Stream Feature View</a></li>
+  </ul></li>
+  <li><a href="#sec-streaming-aggregation" id="toc-sec-streaming-aggregation" class="nav-link" data-scroll-target="#sec-streaming-aggregation"><span class="header-section-number">14.8</span> Streaming with Time-Windowed Aggregation</a></li>
+  <li><a href="#sec-ingest" id="toc-sec-ingest" class="nav-link" data-scroll-target="#sec-ingest"><span class="header-section-number">14.9</span> Ingesting Events</a>
+  <ul class="collapse">
+  <li><a href="#python-sdk" id="toc-python-sdk" class="nav-link" data-scroll-target="#python-sdk"><span class="header-section-number">14.9.1</span> Python SDK</a></li>
+  <li><a href="#rest-ingest-api" id="toc-rest-ingest-api" class="nav-link" data-scroll-target="#rest-ingest-api"><span class="header-section-number">14.9.2</span> REST Ingest API</a></li>
+  </ul></li>
+  <li><a href="#sec-query" id="toc-sec-query" class="nav-link" data-scroll-target="#sec-query"><span class="header-section-number">14.10</span> Querying Online Features</a>
+  <ul class="collapse">
+  <li><a href="#python-sdk-1" id="toc-python-sdk-1" class="nav-link" data-scroll-target="#python-sdk-1"><span class="header-section-number">14.10.1</span> Python SDK</a></li>
+  <li><a href="#rest-query-api" id="toc-rest-query-api" class="nav-link" data-scroll-target="#rest-query-api"><span class="header-section-number">14.10.2</span> REST Query API</a></li>
+  </ul></li>
+  <li><a href="#sec-architecture" id="toc-sec-architecture" class="nav-link" data-scroll-target="#sec-architecture"><span class="header-section-number">14.11</span> Architecture: Dual-Write Kappa Path</a></li>
+  <li><a href="#performance-characteristics" id="toc-performance-characteristics" class="nav-link" data-scroll-target="#performance-characteristics"><span class="header-section-number">14.12</span> Performance Characteristics</a></li>
+  <li><a href="#known-limitations" id="toc-known-limitations" class="nav-link" data-scroll-target="#known-limitations"><span class="header-section-number">14.13</span> Known Limitations</a></li>
+  <li><a href="#when-to-use-streaming-vs-batch-feature-views" id="toc-when-to-use-streaming-vs-batch-feature-views" class="nav-link" data-scroll-target="#when-to-use-streaming-vs-batch-feature-views"><span class="header-section-number">14.14</span> When to Use Streaming vs Batch Feature Views</a></li>
+  </ul>
+<div class="toc-actions"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/08a_streaming_feature_views/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../08a_streaming_feature_views/index.html">Preview Features</a></li><li class="breadcrumb-item"><a href="../08a_streaming_feature_views/index.html"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></a></li></ol></nav>
+<div class="quarto-title">
+<div class="quarto-title-block"><div><h1 class="title"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<p class="subtitle lead">Real-time feature ingestion with Postgres-backed online serving</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Keywords</div>
+    <p>snowflake, feature store, ml, machine learning, mlops</p>
+  </div>
+</div>
+
+</header>
+
+
+<div class="callout callout-style-default callout-important callout-titled" title="Internal / NDA-Only Content">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Important</span>Internal / NDA-Only Content
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This chapter covers <strong>Private Preview</strong> functionality (<code>snowflake-ml-python &gt;= 1.36</code>). Share only with Snowflake internal teams (SE/FE) and customers under NDA. Contact your Snowflake account team to enable Private Preview features.</p>
+<p>This chapter is excluded from the public GitHub Pages site. To render locally, use:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1"></a><span class="bu">cd</span> Snowflake_FeatureStore_Implementation_Guide</span>
+<span id="cb1-2"><a href="#cb1-2"></a><span class="ex">quarto</span> render <span class="at">--profile</span> internal <span class="at">--to</span> html</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+<section id="overview" class="level2" data-number="14.1">
+<h2 data-number="14.1" class="anchored" data-anchor-id="overview"><span class="header-section-number">14.1</span> Overview</h2>
+<p>Streaming Feature Views introduce a <strong>write-first</strong> architecture for features that need near-real-time freshness. Instead of the traditional “batch offline table -&gt; periodic online sync” model described in <a href="../08_online_features/index.html">Chapter 8</a>, streaming features flow through a <strong>dual-write kappa path</strong>:</p>
+<ol type="1">
+<li>Events arrive via the Python SDK (<code>fs.stream_ingest()</code>) or the REST Ingest API</li>
+<li>An optional <code>transformation_fn</code> applies per-event transformations server-side</li>
+<li>Features land directly in a <strong>Postgres-backed online store</strong> (&lt;20ms p50 read latency)</li>
+<li>Asynchronously, events are historized to the offline Snowflake table for training and monitoring</li>
+</ol>
+<p>This flips the current model: <strong>online is the source of truth</strong>, with offline as the durable mirror.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Capability</th>
+<th>Batch FV (Ch8)</th>
+<th>Streaming FV</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Online store</strong></td>
+<td>Hybrid Table</td>
+<td>Managed Postgres</td>
+</tr>
+<tr class="even">
+<td><strong>Freshness</strong></td>
+<td>10s+ (<code>target_lag</code> on sync Task)</td>
+<td>2-3s end-to-end</td>
+</tr>
+<tr class="odd">
+<td><strong>Source of truth</strong></td>
+<td>Offline (DT)</td>
+<td>Online (Postgres)</td>
+</tr>
+<tr class="even">
+<td><strong>Transformation</strong></td>
+<td>Full SQL / Snowpark DataFrame</td>
+<td>Per-event pandas function</td>
+</tr>
+<tr class="odd">
+<td><strong>Aggregation</strong></td>
+<td>Tiled via <code>Feature</code> class + DT refresh</td>
+<td>Continuous (<code>FeatureAggregationMethod.CONTINUOUS</code>)</td>
+</tr>
+<tr class="even">
+<td><strong>SDK version</strong></td>
+<td><code>snowflake-ml-python &gt;= 1.7.0</code></td>
+<td><code>snowflake-ml-python &gt;= 1.36</code></td>
+</tr>
+<tr class="odd">
+<td><strong>Account enablement</strong></td>
+<td>GA (Hybrid Table OFT)</td>
+<td>Private Preview (account flag required)</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="learning-objectives" class="level2" data-number="14.2">
+<h2 data-number="14.2" class="anchored" data-anchor-id="learning-objectives"><span class="header-section-number">14.2</span> Learning Objectives</h2>
+<p>After completing this chapter, you will be able to:</p>
+<ul>
+<li>Provision the Postgres-backed online service and configure Producer/Consumer RBAC</li>
+<li>Register a <code>StreamSource</code> with a typed event schema</li>
+<li>Create a Stream Feature View with <code>StreamConfig</code>, including a <code>transformation_fn</code> and historical backfill</li>
+<li>Combine streaming ingestion with time-windowed aggregation using <code>FeatureAggregationMethod.CONTINUOUS</code></li>
+<li>Ingest events via the Python SDK and the REST Ingest API</li>
+<li>Query features from the Postgres online store via Python and the REST Query API</li>
+<li>Understand the dual-write architecture: online-first with async offline historization</li>
+</ul>
+<hr>
+</section>
+<section id="prerequisites" class="level2" data-number="14.3">
+<h2 data-number="14.3" class="anchored" data-anchor-id="prerequisites"><span class="header-section-number">14.3</span> Prerequisites</h2>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1"></a>pip install <span class="st">"snowflake-ml-python&gt;=1.36"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Your account must be enabled for the Feature Store Private Preview. You also need a <strong>Programmatic Access Token (PAT)</strong> for online service authentication:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_PAT</span><span class="op">=</span><span class="st">"&lt;your_pat_token&gt;"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>This chapter uses the same <strong>clickstream</strong> sample context as the rest of the guide: database <code>FEATURE_STORE_DEMO</code>, source schema <code>CLICKSTREAM_DATA</code>, Feature Store schema <code>FEATURE_STORE</code>, warehouse <code>FS_DEV_WH</code>.</p>
+<hr>
+</section>
+<section id="rbac-setup" class="level2" data-number="14.4">
+<h2 data-number="14.4" class="anchored" data-anchor-id="rbac-setup"><span class="header-section-number">14.4</span> RBAC Setup</h2>
+<p>The online service uses separate <strong>Producer</strong> and <strong>Consumer</strong> roles to control who can ingest data versus who can query features.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb4-1"><a href="#cb4-1"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_PRODUCER_ROLE;</span>
+<span id="cb4-2"><a href="#cb4-2"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_CONSUMER_ROLE;</span>
+<span id="cb4-3"><a href="#cb4-3"></a><span class="kw">GRANT</span> <span class="kw">ROLE</span> FS_PRODUCER_ROLE <span class="kw">TO</span> <span class="kw">ROLE</span> SYSADMIN;</span>
+<span id="cb4-4"><a href="#cb4-4"></a><span class="kw">GRANT</span> <span class="kw">ROLE</span> FS_CONSUMER_ROLE <span class="kw">TO</span> <span class="kw">ROLE</span> SYSADMIN;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Grant the producer role to services or users that will push events. Grant the consumer role to inference services that read features.</p>
+<hr>
+</section>
+<section id="sec-online-service" class="level2" data-number="14.5">
+<h2 data-number="14.5" class="anchored" data-anchor-id="sec-online-service"><span class="header-section-number">14.5</span> Provisioning the Online Service</h2>
+<p>The online service is provisioned once per Feature Store. It creates the Postgres-backed serving layer that all online Feature Views (batch and streaming) use.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureStore, Entity, CreationMode</span>
+<span id="cb5-2"><a href="#cb5-2"></a></span>
+<span id="cb5-3"><a href="#cb5-3"></a>fs <span class="op">=</span> FeatureStore(</span>
+<span id="cb5-4"><a href="#cb5-4"></a>    session<span class="op">=</span>session,</span>
+<span id="cb5-5"><a href="#cb5-5"></a>    database<span class="op">=</span><span class="st">"FEATURE_STORE_DEMO"</span>,</span>
+<span id="cb5-6"><a href="#cb5-6"></a>    name<span class="op">=</span><span class="st">"FEATURE_STORE"</span>,</span>
+<span id="cb5-7"><a href="#cb5-7"></a>    default_warehouse<span class="op">=</span><span class="st">"FS_DEV_WH"</span>,</span>
+<span id="cb5-8"><a href="#cb5-8"></a>    creation_mode<span class="op">=</span>CreationMode.CREATE_IF_NOT_EXIST,</span>
+<span id="cb5-9"><a href="#cb5-9"></a>)</span>
+<span id="cb5-10"><a href="#cb5-10"></a></span>
+<span id="cb5-11"><a href="#cb5-11"></a>create_result <span class="op">=</span> fs.create_online_service(<span class="st">"FS_PRODUCER_ROLE"</span>, <span class="st">"FS_CONSUMER_ROLE"</span>)</span>
+<span id="cb5-12"><a href="#cb5-12"></a><span class="bu">print</span>(create_result)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Provisioning takes several minutes on first creation. Poll until the status reaches <code>RUNNING</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1"></a><span class="im">import</span> time</span>
+<span id="cb6-2"><a href="#cb6-2"></a></span>
+<span id="cb6-3"><a href="#cb6-3"></a>status <span class="op">=</span> fs.get_online_service_status()</span>
+<span id="cb6-4"><a href="#cb6-4"></a><span class="cf">while</span> status.status <span class="op">!=</span> <span class="st">"RUNNING"</span>:</span>
+<span id="cb6-5"><a href="#cb6-5"></a>    time.sleep(<span class="dv">30</span>)</span>
+<span id="cb6-6"><a href="#cb6-6"></a>    status <span class="op">=</span> fs.get_online_service_status()</span>
+<span id="cb6-7"><a href="#cb6-7"></a>    <span class="bu">print</span>(<span class="ss">f"Status: </span><span class="sc">{</span>status<span class="sc">.</span>status<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb6-8"><a href="#cb6-8"></a></span>
+<span id="cb6-9"><a href="#cb6-9"></a><span class="bu">print</span>(<span class="ss">f"Endpoints: </span><span class="sc">{</span>status<span class="sc">.</span>endpoints<span class="sc">}</span><span class="ss">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Once running, retrieve the REST endpoint URLs for later use:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> online_service</span>
+<span id="cb7-2"><a href="#cb7-2"></a></span>
+<span id="cb7-3"><a href="#cb7-3"></a>query_url <span class="op">=</span> online_service.endpoint_url(status, <span class="st">"query"</span>)</span>
+<span id="cb7-4"><a href="#cb7-4"></a>ingest_url <span class="op">=</span> online_service.endpoint_url(status, <span class="st">"ingest"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<hr>
+</section>
+<section id="batch-feature-views-with-postgres-online-store" class="level2" data-number="14.6">
+<h2 data-number="14.6" class="anchored" data-anchor-id="batch-feature-views-with-postgres-online-store"><span class="header-section-number">14.6</span> Batch Feature Views with Postgres Online Store</h2>
+<p>Before diving into streaming, note that the Postgres online store also works with standard batch Feature Views. This is a drop-in replacement for the Hybrid Table path in <a href="../08_online_features/index.html">Chapter 8</a>, offering lower read latency.</p>
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="lang">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" href="" aria-current="page">SQL</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false" href="">Snowpark DataFrame</a></li></ul>
+<div class="tab-content" data-group="lang">
+<div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb8-2"><a href="#cb8-2"></a></span>
+<span id="cb8-3"><a href="#cb8-3"></a>user_entity <span class="op">=</span> Entity(name<span class="op">=</span><span class="st">"USER"</span>, join_keys<span class="op">=</span>[<span class="st">"USER_ID"</span>])</span>
+<span id="cb8-4"><a href="#cb8-4"></a>fs.register_entity(user_entity)</span>
+<span id="cb8-5"><a href="#cb8-5"></a></span>
+<span id="cb8-6"><a href="#cb8-6"></a>feature_df <span class="op">=</span> session.sql(<span class="st">"""</span></span>
+<span id="cb8-7"><a href="#cb8-7"></a><span class="st">    SELECT</span></span>
+<span id="cb8-8"><a href="#cb8-8"></a><span class="st">        USER_ID,</span></span>
+<span id="cb8-9"><a href="#cb8-9"></a><span class="st">        SUM(TOTAL_AMT)   AS ORDER_TOTAL_AMT_SUM,</span></span>
+<span id="cb8-10"><a href="#cb8-10"></a><span class="st">        COUNT(ORDER_ID)   AS ORDER_CNT,</span></span>
+<span id="cb8-11"><a href="#cb8-11"></a><span class="st">        AVG(TOTAL_AMT)    AS ORDER_TOTAL_AMT_AVG,</span></span>
+<span id="cb8-12"><a href="#cb8-12"></a><span class="st">        MAX(ORDER_TS)     AS LAST_ORDER_TS</span></span>
+<span id="cb8-13"><a href="#cb8-13"></a><span class="st">    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS</span></span>
+<span id="cb8-14"><a href="#cb8-14"></a><span class="st">    GROUP BY USER_ID</span></span>
+<span id="cb8-15"><a href="#cb8-15"></a><span class="st">"""</span>)</span>
+<span id="cb8-16"><a href="#cb8-16"></a></span>
+<span id="cb8-17"><a href="#cb8-17"></a>batch_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb8-18"><a href="#cb8-18"></a>    name<span class="op">=</span><span class="st">"USER_ORDER_FEATURES_PG"</span>,</span>
+<span id="cb8-19"><a href="#cb8-19"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb8-20"><a href="#cb8-20"></a>    feature_df<span class="op">=</span>feature_df,</span>
+<span id="cb8-21"><a href="#cb8-21"></a>    timestamp_col<span class="op">=</span><span class="st">"LAST_ORDER_TS"</span>,</span>
+<span id="cb8-22"><a href="#cb8-22"></a>    refresh_freq<span class="op">=</span><span class="st">"1 hour"</span>,</span>
+<span id="cb8-23"><a href="#cb8-23"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb8-24"><a href="#cb8-24"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb8-25"><a href="#cb8-25"></a>        target_lag<span class="op">=</span><span class="st">"10s"</span>,</span>
+<span id="cb8-26"><a href="#cb8-26"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb8-27"><a href="#cb8-27"></a>    ),</span>
+<span id="cb8-28"><a href="#cb8-28"></a>    desc<span class="op">=</span><span class="st">"User order features with Postgres online serving"</span>,</span>
+<span id="cb8-29"><a href="#cb8-29"></a>)</span>
+<span id="cb8-30"><a href="#cb8-30"></a></span>
+<span id="cb8-31"><a href="#cb8-31"></a>registered_fv <span class="op">=</span> fs.register_feature_view(batch_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div id="tabset-1-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-2-tab">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1"></a><span class="im">import</span> snowflake.snowpark.functions <span class="im">as</span> F</span>
+<span id="cb9-2"><a href="#cb9-2"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb9-3"><a href="#cb9-3"></a></span>
+<span id="cb9-4"><a href="#cb9-4"></a>user_entity <span class="op">=</span> Entity(name<span class="op">=</span><span class="st">"USER"</span>, join_keys<span class="op">=</span>[<span class="st">"USER_ID"</span>])</span>
+<span id="cb9-5"><a href="#cb9-5"></a>fs.register_entity(user_entity)</span>
+<span id="cb9-6"><a href="#cb9-6"></a></span>
+<span id="cb9-7"><a href="#cb9-7"></a>orders <span class="op">=</span> session.table(<span class="st">"FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"</span>)</span>
+<span id="cb9-8"><a href="#cb9-8"></a>feature_df <span class="op">=</span> orders.group_by(<span class="st">"USER_ID"</span>).agg(</span>
+<span id="cb9-9"><a href="#cb9-9"></a>    F.<span class="bu">sum</span>(<span class="st">"TOTAL_AMT"</span>).alias(<span class="st">"ORDER_TOTAL_AMT_SUM"</span>),</span>
+<span id="cb9-10"><a href="#cb9-10"></a>    F.count(<span class="st">"ORDER_ID"</span>).alias(<span class="st">"ORDER_CNT"</span>),</span>
+<span id="cb9-11"><a href="#cb9-11"></a>    F.avg(<span class="st">"TOTAL_AMT"</span>).alias(<span class="st">"ORDER_TOTAL_AMT_AVG"</span>),</span>
+<span id="cb9-12"><a href="#cb9-12"></a>    F.<span class="bu">max</span>(<span class="st">"ORDER_TS"</span>).alias(<span class="st">"LAST_ORDER_TS"</span>),</span>
+<span id="cb9-13"><a href="#cb9-13"></a>)</span>
+<span id="cb9-14"><a href="#cb9-14"></a></span>
+<span id="cb9-15"><a href="#cb9-15"></a>batch_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb9-16"><a href="#cb9-16"></a>    name<span class="op">=</span><span class="st">"USER_ORDER_FEATURES_PG"</span>,</span>
+<span id="cb9-17"><a href="#cb9-17"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb9-18"><a href="#cb9-18"></a>    feature_df<span class="op">=</span>feature_df,</span>
+<span id="cb9-19"><a href="#cb9-19"></a>    timestamp_col<span class="op">=</span><span class="st">"LAST_ORDER_TS"</span>,</span>
+<span id="cb9-20"><a href="#cb9-20"></a>    refresh_freq<span class="op">=</span><span class="st">"1 hour"</span>,</span>
+<span id="cb9-21"><a href="#cb9-21"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb9-22"><a href="#cb9-22"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb9-23"><a href="#cb9-23"></a>        target_lag<span class="op">=</span><span class="st">"10s"</span>,</span>
+<span id="cb9-24"><a href="#cb9-24"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb9-25"><a href="#cb9-25"></a>    ),</span>
+<span id="cb9-26"><a href="#cb9-26"></a>    desc<span class="op">=</span><span class="st">"User order features with Postgres online serving"</span>,</span>
+<span id="cb9-27"><a href="#cb9-27"></a>)</span>
+<span id="cb9-28"><a href="#cb9-28"></a></span>
+<span id="cb9-29"><a href="#cb9-29"></a>registered_fv <span class="op">=</span> fs.register_feature_view(batch_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+</div>
+<p>The only difference from <a href="../08_online_features/index.html">Chapter 8</a> is <code>store_type=OnlineStoreType.POSTGRES</code> in the <code>OnlineConfig</code>. Everything else – <code>refresh_freq</code>, <code>target_lag</code>, the Feature Store API – works identically.</p>
+<hr>
+</section>
+<section id="stream-feature-views" class="level2" data-number="14.7">
+<h2 data-number="14.7" class="anchored" data-anchor-id="stream-feature-views"><span class="header-section-number">14.7</span> Stream Feature Views</h2>
+<p>Stream Feature Views are the core new capability. They consist of three components:</p>
+<ol type="1">
+<li>A <strong>StreamSource</strong> that defines the event schema</li>
+<li>A <strong>StreamConfig</strong> that links the source to a transformation function and optional backfill data</li>
+<li>A <strong>FeatureView</strong> registered with <code>stream_config</code> instead of <code>feature_df</code></li>
+</ol>
+<section id="sec-stream-source" class="level3" data-number="14.7.1">
+<h3 data-number="14.7.1" class="anchored" data-anchor-id="sec-stream-source"><span class="header-section-number">14.7.1</span> Register a Stream Source</h3>
+<p>A <code>StreamSource</code> defines the schema for real-time events. Column names and types must exactly match what is sent through the SDK or REST API.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> StreamSource</span>
+<span id="cb10-2"><a href="#cb10-2"></a><span class="im">from</span> snowflake.snowpark.types <span class="im">import</span> (</span>
+<span id="cb10-3"><a href="#cb10-3"></a>    StructType, StructField, StringType, DoubleType,</span>
+<span id="cb10-4"><a href="#cb10-4"></a>    TimestampType, TimestampTimeZone,</span>
+<span id="cb10-5"><a href="#cb10-5"></a>)</span>
+<span id="cb10-6"><a href="#cb10-6"></a></span>
+<span id="cb10-7"><a href="#cb10-7"></a>clickstream_events <span class="op">=</span> StreamSource(</span>
+<span id="cb10-8"><a href="#cb10-8"></a>    name<span class="op">=</span><span class="st">"CLICKSTREAM_EVENTS"</span>,</span>
+<span id="cb10-9"><a href="#cb10-9"></a>    schema<span class="op">=</span>StructType([</span>
+<span id="cb10-10"><a href="#cb10-10"></a>        StructField(<span class="st">"USER_ID"</span>, StringType()),</span>
+<span id="cb10-11"><a href="#cb10-11"></a>        StructField(<span class="st">"EVENT_TS"</span>, TimestampType(TimestampTimeZone.NTZ)),</span>
+<span id="cb10-12"><a href="#cb10-12"></a>        StructField(<span class="st">"EVENT_TYPE"</span>, StringType()),</span>
+<span id="cb10-13"><a href="#cb10-13"></a>        StructField(<span class="st">"PRODUCT_ID"</span>, StringType()),</span>
+<span id="cb10-14"><a href="#cb10-14"></a>        StructField(<span class="st">"AMOUNT"</span>, DoubleType()),</span>
+<span id="cb10-15"><a href="#cb10-15"></a>    ]),</span>
+<span id="cb10-16"><a href="#cb10-16"></a>    desc<span class="op">=</span><span class="st">"Real-time clickstream events for feature computation"</span>,</span>
+<span id="cb10-17"><a href="#cb10-17"></a>)</span>
+<span id="cb10-18"><a href="#cb10-18"></a></span>
+<span id="cb10-19"><a href="#cb10-19"></a>fs.register_stream_source(clickstream_events)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Manage stream sources with:</p>
+<ul>
+<li><code>fs.list_stream_sources()</code> – list all registered sources</li>
+<li><code>fs.delete_stream_source(name)</code> – remove a source</li>
+</ul>
+</section>
+<section id="sec-transformation-fn" class="level3" data-number="14.7.2">
+<h3 data-number="14.7.2" class="anchored" data-anchor-id="sec-transformation-fn"><span class="header-section-number">14.7.2</span> Define the Transformation Function</h3>
+<p>The <code>transformation_fn</code> is a plain pandas function that receives and returns a <code>pd.DataFrame</code>. It runs server-side on each ingested micro-batch.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb11-2"><a href="#cb11-2"></a></span>
+<span id="cb11-3"><a href="#cb11-3"></a><span class="kw">def</span> process_clickstream(df: pd.DataFrame) <span class="op">-&gt;</span> pd.DataFrame:</span>
+<span id="cb11-4"><a href="#cb11-4"></a>    <span class="co">"""Per-event feature derivation on the hot path."""</span></span>
+<span id="cb11-5"><a href="#cb11-5"></a>    df[<span class="st">"IS_PURCHASE"</span>] <span class="op">=</span> (df[<span class="st">"EVENT_TYPE"</span>] <span class="op">==</span> <span class="st">"purchase"</span>).astype(<span class="bu">int</span>)</span>
+<span id="cb11-6"><a href="#cb11-6"></a>    df[<span class="st">"IS_HIGH_VALUE"</span>] <span class="op">=</span> (df[<span class="st">"AMOUNT"</span>] <span class="op">&gt;</span> <span class="fl">100.0</span>).astype(<span class="bu">int</span>)</span>
+<span id="cb11-7"><a href="#cb11-7"></a>    <span class="cf">return</span> df</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="callout callout-style-default callout-warning callout-titled" title="Hot-Path Transformation Constraints">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Warning</span>Hot-Path Transformation Constraints
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The <code>transformation_fn</code> is intentionally constrained to <strong>per-event (row-level) operations</strong>:</p>
+<ul>
+<li>Column derivation, filtering, type casting, simple conditional logic</li>
+<li><strong>Not supported:</strong> joins against external tables, multi-step ETL, UDTFs, or operations that require global state</li>
+</ul>
+<p>Think of it as a “map” function, not a “reduce.” For aggregation across events, use the time-windowed aggregation approach described <a href="#sec-streaming-aggregation">below</a>.</p>
+</div>
+</div>
+</section>
+<section id="sec-create-stream-fv" class="level3" data-number="14.7.3">
+<h3 data-number="14.7.3" class="anchored" data-anchor-id="sec-create-stream-fv"><span class="header-section-number">14.7.3</span> Create a Stream Feature View</h3>
+<p>Combine the stream source, transformation, and optional backfill data into a Feature View:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> StreamConfig, FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb12-2"><a href="#cb12-2"></a></span>
+<span id="cb12-3"><a href="#cb12-3"></a>backfill_df <span class="op">=</span> session.table(<span class="st">"FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS"</span>)</span>
+<span id="cb12-4"><a href="#cb12-4"></a></span>
+<span id="cb12-5"><a href="#cb12-5"></a>stream_cfg <span class="op">=</span> StreamConfig(</span>
+<span id="cb12-6"><a href="#cb12-6"></a>    stream_source<span class="op">=</span>clickstream_events,</span>
+<span id="cb12-7"><a href="#cb12-7"></a>    transformation_fn<span class="op">=</span>process_clickstream,</span>
+<span id="cb12-8"><a href="#cb12-8"></a>    backfill_df<span class="op">=</span>backfill_df,</span>
+<span id="cb12-9"><a href="#cb12-9"></a>)</span>
+<span id="cb12-10"><a href="#cb12-10"></a></span>
+<span id="cb12-11"><a href="#cb12-11"></a>stream_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb12-12"><a href="#cb12-12"></a>    name<span class="op">=</span><span class="st">"USER_REALTIME_EVENTS"</span>,</span>
+<span id="cb12-13"><a href="#cb12-13"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb12-14"><a href="#cb12-14"></a>    stream_config<span class="op">=</span>stream_cfg,</span>
+<span id="cb12-15"><a href="#cb12-15"></a>    timestamp_col<span class="op">=</span><span class="st">"EVENT_TS"</span>,</span>
+<span id="cb12-16"><a href="#cb12-16"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb12-17"><a href="#cb12-17"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb12-18"><a href="#cb12-18"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb12-19"><a href="#cb12-19"></a>    ),</span>
+<span id="cb12-20"><a href="#cb12-20"></a>    desc<span class="op">=</span><span class="st">"Real-time clickstream features with per-event transforms"</span>,</span>
+<span id="cb12-21"><a href="#cb12-21"></a>)</span>
+<span id="cb12-22"><a href="#cb12-22"></a></span>
+<span id="cb12-23"><a href="#cb12-23"></a>registered_stream_fv <span class="op">=</span> fs.register_feature_view(stream_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Key differences from a batch Feature View:</p>
+<ul>
+<li><code>stream_config</code> replaces <code>feature_df</code> – you cannot pass both</li>
+<li>No <code>refresh_freq</code> – the online store updates as events arrive (2-3s E2E freshness)</li>
+<li>The <code>backfill_df</code> pre-populates the online store with historical data so features are available immediately after registration</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="sec-streaming-aggregation" class="level2" data-number="14.8">
+<h2 data-number="14.8" class="anchored" data-anchor-id="sec-streaming-aggregation"><span class="header-section-number">14.8</span> Streaming with Time-Windowed Aggregation</h2>
+<p>The most powerful pattern combines stream ingestion with the <code>Feature</code> class aggregations from <a href="../07_aggregations_api/index.html">Chapter 7</a>. This produces rolling-window metrics (e.g., “total spend in last 48 hours”) that update continuously as new events arrive.</p>
+<p>The key enabler is <code>FeatureAggregationMethod.CONTINUOUS</code>, which instructs the online service to maintain running aggregates at ingest time rather than waiting for periodic tile refreshes from the offline store.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> Feature, FeatureView, StreamConfig, OnlineConfig, OnlineStoreType</span>
+<span id="cb13-2"><a href="#cb13-2"></a><span class="im">from</span> snowflake.ml.feature_store.spec.enums <span class="im">import</span> FeatureAggregationMethod</span>
+<span id="cb13-3"><a href="#cb13-3"></a></span>
+<span id="cb13-4"><a href="#cb13-4"></a>features <span class="op">=</span> [</span>
+<span id="cb13-5"><a href="#cb13-5"></a>    Feature.<span class="bu">sum</span>(<span class="st">"AMOUNT"</span>, <span class="st">"48h"</span>).alias(<span class="st">"TOTAL_SPEND_48H"</span>),</span>
+<span id="cb13-6"><a href="#cb13-6"></a>    Feature.count(<span class="st">"AMOUNT"</span>, <span class="st">"48h"</span>).alias(<span class="st">"TXN_COUNT_48H"</span>),</span>
+<span id="cb13-7"><a href="#cb13-7"></a>    Feature.avg(<span class="st">"AMOUNT"</span>, <span class="st">"24h"</span>).alias(<span class="st">"AVG_SPEND_24H"</span>),</span>
+<span id="cb13-8"><a href="#cb13-8"></a>]</span>
+<span id="cb13-9"><a href="#cb13-9"></a></span>
+<span id="cb13-10"><a href="#cb13-10"></a>stream_agg_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb13-11"><a href="#cb13-11"></a>    name<span class="op">=</span><span class="st">"USER_REALTIME_AGG_FEATURES"</span>,</span>
+<span id="cb13-12"><a href="#cb13-12"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb13-13"><a href="#cb13-13"></a>    stream_config<span class="op">=</span>stream_cfg,</span>
+<span id="cb13-14"><a href="#cb13-14"></a>    timestamp_col<span class="op">=</span><span class="st">"EVENT_TS"</span>,</span>
+<span id="cb13-15"><a href="#cb13-15"></a>    refresh_freq<span class="op">=</span><span class="st">"1 minute"</span>,</span>
+<span id="cb13-16"><a href="#cb13-16"></a>    feature_granularity<span class="op">=</span><span class="st">"1 minute"</span>,</span>
+<span id="cb13-17"><a href="#cb13-17"></a>    features<span class="op">=</span>features,</span>
+<span id="cb13-18"><a href="#cb13-18"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb13-19"><a href="#cb13-19"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb13-20"><a href="#cb13-20"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb13-21"><a href="#cb13-21"></a>    ),</span>
+<span id="cb13-22"><a href="#cb13-22"></a>    feature_aggregation_method<span class="op">=</span>FeatureAggregationMethod.CONTINUOUS,</span>
+<span id="cb13-23"><a href="#cb13-23"></a>    desc<span class="op">=</span><span class="st">"Real-time user transaction aggregations with continuous processing"</span>,</span>
+<span id="cb13-24"><a href="#cb13-24"></a>)</span>
+<span id="cb13-25"><a href="#cb13-25"></a></span>
+<span id="cb13-26"><a href="#cb13-26"></a>registered_agg_fv <span class="op">=</span> fs.register_feature_view(stream_agg_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="callout callout-style-default callout-tip callout-titled" title="Batch vs Continuous Aggregation">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Batch vs Continuous Aggregation
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Without <code>FeatureAggregationMethod.CONTINUOUS</code>, aggregation tiles are refreshed on the <code>refresh_freq</code> schedule from the offline store. With <code>CONTINUOUS</code>, the online service maintains running aggregates as events arrive – giving you feature freshness measured in seconds rather than minutes.</p>
+<p>Use <code>CONTINUOUS</code> for features where staleness directly impacts model quality (fraud detection, real-time recommendations). Use batch tiling for features where minute-level freshness is acceptable (daily spend trends, weekly engagement scores).</p>
+</div>
+</div>
+<hr>
+</section>
+<section id="sec-ingest" class="level2" data-number="14.9">
+<h2 data-number="14.9" class="anchored" data-anchor-id="sec-ingest"><span class="header-section-number">14.9</span> Ingesting Events</h2>
+<section id="python-sdk" class="level3" data-number="14.9.1">
+<h3 data-number="14.9.1" class="anchored" data-anchor-id="python-sdk"><span class="header-section-number">14.9.1</span> Python SDK</h3>
+<p>Push events through the Python SDK. Events are validated against the stream source schema and fanned out to all consuming Feature Views.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1"></a>new_events <span class="op">=</span> [</span>
+<span id="cb14-2"><a href="#cb14-2"></a>    {</span>
+<span id="cb14-3"><a href="#cb14-3"></a>        <span class="st">"USER_ID"</span>: <span class="st">"user_001"</span>,</span>
+<span id="cb14-4"><a href="#cb14-4"></a>        <span class="st">"EVENT_TS"</span>: <span class="st">"2026-04-10 10:00:00"</span>,</span>
+<span id="cb14-5"><a href="#cb14-5"></a>        <span class="st">"EVENT_TYPE"</span>: <span class="st">"purchase"</span>,</span>
+<span id="cb14-6"><a href="#cb14-6"></a>        <span class="st">"PRODUCT_ID"</span>: <span class="st">"SKU_42"</span>,</span>
+<span id="cb14-7"><a href="#cb14-7"></a>        <span class="st">"AMOUNT"</span>: <span class="fl">149.99</span>,</span>
+<span id="cb14-8"><a href="#cb14-8"></a>    },</span>
+<span id="cb14-9"><a href="#cb14-9"></a>    {</span>
+<span id="cb14-10"><a href="#cb14-10"></a>        <span class="st">"USER_ID"</span>: <span class="st">"user_002"</span>,</span>
+<span id="cb14-11"><a href="#cb14-11"></a>        <span class="st">"EVENT_TS"</span>: <span class="st">"2026-04-10 10:01:00"</span>,</span>
+<span id="cb14-12"><a href="#cb14-12"></a>        <span class="st">"EVENT_TYPE"</span>: <span class="st">"page_view"</span>,</span>
+<span id="cb14-13"><a href="#cb14-13"></a>        <span class="st">"PRODUCT_ID"</span>: <span class="st">"SKU_17"</span>,</span>
+<span id="cb14-14"><a href="#cb14-14"></a>        <span class="st">"AMOUNT"</span>: <span class="fl">0.0</span>,</span>
+<span id="cb14-15"><a href="#cb14-15"></a>    },</span>
+<span id="cb14-16"><a href="#cb14-16"></a>]</span>
+<span id="cb14-17"><a href="#cb14-17"></a></span>
+<span id="cb14-18"><a href="#cb14-18"></a>accepted <span class="op">=</span> fs.stream_ingest(clickstream_events, new_events)</span>
+<span id="cb14-19"><a href="#cb14-19"></a><span class="bu">print</span>(<span class="ss">f"Ingested </span><span class="sc">{</span>accepted<span class="sc">}</span><span class="ss"> / </span><span class="sc">{</span><span class="bu">len</span>(new_events)<span class="sc">}</span><span class="ss"> records"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="rest-ingest-api" class="level3" data-number="14.9.2">
+<h3 data-number="14.9.2" class="anchored" data-anchor-id="rest-ingest-api"><span class="header-section-number">14.9.2</span> REST Ingest API</h3>
+<p>For non-Python services, use the REST endpoint directly. All requests require a PAT-based <code>Snowflake Token</code> authorization header.</p>
+<p><strong>Endpoint:</strong> <code>POST &lt;ingest_url&gt;/ingest</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1"></a><span class="ex">curl</span> <span class="at">-X</span> POST <span class="st">"</span><span class="va">${INGEST_URL}</span><span class="st">/ingest"</span> <span class="dt">\</span></span>
+<span id="cb15-2"><a href="#cb15-2"></a>  <span class="at">-H</span> <span class="st">"Authorization: Snowflake Token=</span><span class="dt">\"</span><span class="va">${SNOWFLAKE_PAT}</span><span class="dt">\"</span><span class="st">"</span> <span class="dt">\</span></span>
+<span id="cb15-3"><a href="#cb15-3"></a>  <span class="at">-H</span> <span class="st">"Content-Type: application/json"</span> <span class="dt">\</span></span>
+<span id="cb15-4"><a href="#cb15-4"></a>  <span class="at">-d</span> <span class="st">'{</span></span>
+<span id="cb15-5"><a href="#cb15-5"></a><span class="st">    "dry_run": false,</span></span>
+<span id="cb15-6"><a href="#cb15-6"></a><span class="st">    "include_diagnostics": true,</span></span>
+<span id="cb15-7"><a href="#cb15-7"></a><span class="st">    "records": {</span></span>
+<span id="cb15-8"><a href="#cb15-8"></a><span class="st">      "CLICKSTREAM_EVENTS": [</span></span>
+<span id="cb15-9"><a href="#cb15-9"></a><span class="st">        {</span></span>
+<span id="cb15-10"><a href="#cb15-10"></a><span class="st">          "USER_ID": "user_001",</span></span>
+<span id="cb15-11"><a href="#cb15-11"></a><span class="st">          "EVENT_TS": "2026-04-10T10:00:00Z",</span></span>
+<span id="cb15-12"><a href="#cb15-12"></a><span class="st">          "EVENT_TYPE": "purchase",</span></span>
+<span id="cb15-13"><a href="#cb15-13"></a><span class="st">          "PRODUCT_ID": "SKU_42",</span></span>
+<span id="cb15-14"><a href="#cb15-14"></a><span class="st">          "AMOUNT": 149.99</span></span>
+<span id="cb15-15"><a href="#cb15-15"></a><span class="st">        }</span></span>
+<span id="cb15-16"><a href="#cb15-16"></a><span class="st">      ]</span></span>
+<span id="cb15-17"><a href="#cb15-17"></a><span class="st">    }</span></span>
+<span id="cb15-18"><a href="#cb15-18"></a><span class="st">  }'</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>records</code></td>
+<td>Yes</td>
+<td>Map of stream source name to array of event records. Schema must match the registered <code>StreamSource</code>.</td>
+</tr>
+<tr class="even">
+<td><code>dry_run</code></td>
+<td>No</td>
+<td>When <code>true</code>, validates payload without persisting. Useful for testing. Default: <code>false</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>include_diagnostics</code></td>
+<td>No</td>
+<td>When <code>true</code>, includes per-record diagnostics in the response. Default: <code>false</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="callout callout-style-default callout-tip callout-titled" title="Schema Validation with dry_run">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Schema Validation with dry_run
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Use <code>dry_run: true</code> during integration testing to validate that your event payloads match the registered schema without actually writing data. This catches type mismatches and missing columns before they cause runtime errors.</p>
+</div>
+</div>
+<hr>
+</section>
+</section>
+<section id="sec-query" class="level2" data-number="14.10">
+<h2 data-number="14.10" class="anchored" data-anchor-id="sec-query"><span class="header-section-number">14.10</span> Querying Online Features</h2>
+<section id="python-sdk-1" class="level3" data-number="14.10.1">
+<h3 data-number="14.10.1" class="anchored" data-anchor-id="python-sdk-1"><span class="header-section-number">14.10.1</span> Python SDK</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1"></a>online_df <span class="op">=</span> fs.read_feature_view(</span>
+<span id="cb16-2"><a href="#cb16-2"></a>    registered_stream_fv,</span>
+<span id="cb16-3"><a href="#cb16-3"></a>    keys<span class="op">=</span>[[<span class="st">"user_001"</span>], [<span class="st">"user_002"</span>], [<span class="st">"user_003"</span>]],</span>
+<span id="cb16-4"><a href="#cb16-4"></a>    store_type<span class="op">=</span><span class="st">"online"</span>,</span>
+<span id="cb16-5"><a href="#cb16-5"></a>)</span>
+<span id="cb16-6"><a href="#cb16-6"></a>online_df.show()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="rest-query-api" class="level3" data-number="14.10.2">
+<h3 data-number="14.10.2" class="anchored" data-anchor-id="rest-query-api"><span class="header-section-number">14.10.2</span> REST Query API</h3>
+<p><strong>Endpoint:</strong> <code>POST &lt;query_url&gt;/query</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode numberSource json number-lines code-with-copy"><code class="sourceCode json"><span id="cb17-1"><a href="#cb17-1"></a><span class="fu">{</span></span>
+<span id="cb17-2"><a href="#cb17-2"></a>  <span class="dt">"name"</span><span class="fu">:</span> <span class="st">"USER_REALTIME_AGG_FEATURES"</span><span class="fu">,</span></span>
+<span id="cb17-3"><a href="#cb17-3"></a>  <span class="dt">"version"</span><span class="fu">:</span> <span class="st">"V01"</span><span class="fu">,</span></span>
+<span id="cb17-4"><a href="#cb17-4"></a>  <span class="dt">"object_type"</span><span class="fu">:</span> <span class="st">"feature_view"</span><span class="fu">,</span></span>
+<span id="cb17-5"><a href="#cb17-5"></a>  <span class="dt">"request_rows"</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb17-6"><a href="#cb17-6"></a>    <span class="fu">{</span> <span class="dt">"entity"</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">"USER_ID"</span><span class="fu">:</span> <span class="st">"user_001"</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb17-7"><a href="#cb17-7"></a>    <span class="fu">{</span> <span class="dt">"entity"</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">"USER_ID"</span><span class="fu">:</span> <span class="st">"user_002"</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="cb17-8"><a href="#cb17-8"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb17-9"><a href="#cb17-9"></a>  <span class="dt">"features"</span><span class="fu">:</span> <span class="ot">[</span><span class="st">"TOTAL_SPEND_48H"</span><span class="ot">,</span> <span class="st">"TXN_COUNT_48H"</span><span class="ot">]</span></span>
+<span id="cb17-10"><a href="#cb17-10"></a><span class="fu">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>name</code></td>
+<td>Yes</td>
+<td>Name of the Feature View.</td>
+</tr>
+<tr class="even">
+<td><code>version</code></td>
+<td>Yes</td>
+<td>Version string (e.g., <code>"V01"</code>).</td>
+</tr>
+<tr class="odd">
+<td><code>object_type</code></td>
+<td>Yes</td>
+<td>Must be <code>"feature_view"</code>.</td>
+</tr>
+<tr class="even">
+<td><code>request_rows</code></td>
+<td>Yes</td>
+<td>Array of objects, each with an <code>entity</code> map of join key names to values.</td>
+</tr>
+<tr class="odd">
+<td><code>features</code></td>
+<td>No</td>
+<td>List of feature columns to return. Omit for all features.</td>
+</tr>
+<tr class="even">
+<td><code>include_diagnostics</code></td>
+<td>No</td>
+<td>When <code>true</code>, includes diagnostics. Default: <code>false</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Note
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Online reads require a valid <code>SNOWFLAKE_PAT</code> environment variable and your IP address must be allowed by the online service’s network policy.</p>
+</div>
+</div>
+<hr>
+</section>
+</section>
+<section id="sec-architecture" class="level2" data-number="14.11">
+<h2 data-number="14.11" class="anchored" data-anchor-id="sec-architecture"><span class="header-section-number">14.11</span> Architecture: Dual-Write Kappa Path</h2>
+<p>The streaming architecture uses a <strong>dual-write</strong> pattern inspired by kappa architecture:</p>
+<div class="cell" data-layout-align="default">
+<div class="cell-output-display">
+<div>
+<p></p><figure class="figure"><p></p>
+<div>
+<pre class="mermaid mermaid-js">flowchart LR
+    Client["Client / App"] --&gt;|"stream_ingest() or REST"| Ingest["Ingest Service"]
+    Ingest --&gt;|"transformation_fn"| PG["Postgres Online Store"]
+    Ingest --&gt;|"async historization"| SF["Snowflake Offline Table"]
+    PG --&gt;|"read_feature_view(store_type='online')"| Serve["Inference Service"]
+    SF --&gt;|"generate_training_set()"| Train["Training Pipeline"]
+    SF --&gt;|"Drift / monitoring"| Monitor["Model Monitoring"]
+</pre>
+</div>
+<p></p><figcaption> Streaming Feature View: dual-write kappa architecture</figcaption> </figure><p></p>
+</div>
+</div>
+</div>
+<p><strong>Hot path (write):</strong></p>
+<ol type="1">
+<li>Client sends events via <code>fs.stream_ingest()</code> or <code>POST /ingest</code></li>
+<li>The <code>transformation_fn</code> applies per-event derivations</li>
+<li>Transformed features land in the Postgres online store</li>
+<li>For <code>CONTINUOUS</code> aggregation FVs, running aggregates are updated in-place</li>
+</ol>
+<p><strong>Cold path (historization):</strong></p>
+<ol type="1">
+<li>Events are asynchronously persisted to a Snowflake table in the Feature Store schema</li>
+<li>For tiled aggregation FVs, tiles are materialized to the offline table on the <code>refresh_freq</code> schedule</li>
+<li>The offline table supports <code>generate_training_set()</code> for PIT-correct training data</li>
+</ol>
+<p><strong>Read paths:</strong></p>
+<ul>
+<li><strong>Online:</strong> <code>read_feature_view(..., store_type="online")</code> or REST Query API – &lt;20ms p50</li>
+<li><strong>Offline:</strong> Standard Feature Store APIs over the offline table</li>
+</ul>
+<div class="callout callout-style-default callout-important callout-titled" title="Online-First vs Offline-First">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Important</span>Online-First vs Offline-First
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This is a fundamental shift. In the batch model (<a href="../08_online_features/index.html">Chapter 8</a>), the offline Dynamic Table is the source of truth and the Hybrid Table is a lagging mirror. In the streaming model, the <strong>online Postgres store is the source of truth</strong> and the offline table is the durable copy. This means:</p>
+<ul>
+<li>Feature freshness is bounded by ingest latency (seconds), not DT refresh + sync lag (minutes)</li>
+<li>If the offline historization path fails, online serving continues unaffected</li>
+<li>Training data freshness may lag behind online serving by the async sync interval</li>
+</ul>
+</div>
+</div>
+<hr>
+</section>
+<section id="performance-characteristics" class="level2" data-number="14.12">
+<h2 data-number="14.12" class="anchored" data-anchor-id="performance-characteristics"><span class="header-section-number">14.12</span> Performance Characteristics</h2>
+<p>Based on early testing with the Private Preview:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Metric</th>
+<th>Observed Value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>End-to-end freshness (ingest to queryable)</td>
+<td>~1.2s</td>
+</tr>
+<tr class="even">
+<td>Online read latency (p50)</td>
+<td>&lt;20ms</td>
+</tr>
+<tr class="odd">
+<td>Stream FV status</td>
+<td><code>STATIC</code> (no DT refresh cycle)</td>
+</tr>
+<tr class="even">
+<td>Backfill from <code>backfill_df</code></td>
+<td>Applied at registration time</td>
+</tr>
+</tbody>
+</table>
+<p>The 1.2s E2E freshness significantly exceeds the 2-3s target from the original design. Actual performance will vary with instance size, event throughput, and transformation complexity.</p>
+<hr>
+</section>
+<section id="known-limitations" class="level2" data-number="14.13">
+<h2 data-number="14.13" class="anchored" data-anchor-id="known-limitations"><span class="header-section-number">14.13</span> Known Limitations</h2>
+<ul>
+<li><strong>Account enablement required:</strong> Private Preview features require your account to be enabled by your Snowflake account team.</li>
+<li><strong>Network policy:</strong> Online reads from external IPs require a network policy on the online service.</li>
+<li><strong>On-demand feature views:</strong> <code>RequestSource</code> and <code>OnDemandConfig</code> are not yet available in Private Preview. On the roadmap.</li>
+<li><strong>Transformation scope:</strong> <code>transformation_fn</code> is limited to per-event (row-level) pandas operations. No joins, no global aggregation, no UDTFs.</li>
+<li><strong>Stream FV status is STATIC:</strong> Stream Feature Views show <code>STATIC</code> status rather than <code>ACTIVE</code> since there is no Dynamic Table refresh cycle.</li>
+</ul>
+<hr>
+</section>
+<section id="when-to-use-streaming-vs-batch-feature-views" class="level2" data-number="14.14">
+<h2 data-number="14.14" class="anchored" data-anchor-id="when-to-use-streaming-vs-batch-feature-views"><span class="header-section-number">14.14</span> When to Use Streaming vs Batch Feature Views</h2>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Scenario</th>
+<th>Recommendation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Feature freshness measured in <strong>minutes to hours</strong></td>
+<td>Batch FV with DT + OFT sync (<a href="../08_online_features/index.html">Chapter 8</a>)</td>
+</tr>
+<tr class="even">
+<td>Feature freshness measured in <strong>seconds</strong></td>
+<td>Stream FV with Postgres online store</td>
+</tr>
+<tr class="odd">
+<td>Complex multi-table transformations</td>
+<td>Batch FV (full SQL / Snowpark DataFrame expressiveness)</td>
+</tr>
+<tr class="even">
+<td>Per-event derivations + rolling aggregates</td>
+<td>Stream FV with <code>transformation_fn</code> + <code>CONTINUOUS</code> aggregation</td>
+</tr>
+<tr class="odd">
+<td>Read latency &lt;20ms required</td>
+<td>Either, with Postgres online store (<code>OnlineStoreType.POSTGRES</code>)</td>
+</tr>
+<tr class="even">
+<td>No Private Preview access</td>
+<td>Batch FV with Hybrid Table OFT (GA) or external store (<a href="../08_online_features/index.html#sec-external-serving">Chapter 8</a>)</td>
+</tr>
+</tbody>
+</table>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Tip
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Many production systems use <strong>both patterns together</strong>: batch Feature Views for slow-changing features (demographics, 7d/30d aggregates) and streaming Feature Views for fast-changing features (recent transactions, real-time engagement). The inference service assembles both at prediction time.</p>
+</div>
+</div>
+
+
+<!-- -->
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const a = window.document.createElement('a');
+      a.classList.add('top-right');
+      a.classList.add('quarto-color-scheme-toggle');
+      a.href = "";
+      a.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      a.appendChild(i);
+      window.document.body.appendChild(a);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+    const viewSource = window.document.getElementById('quarto-view-source') ||
+                       window.document.getElementById('quarto-code-tools-source');
+    if (viewSource) {
+      const sourceUrl = viewSource.getAttribute("data-quarto-source-url");
+      viewSource.addEventListener("click", function(e) {
+        if (sourceUrl) {
+          // rstudio viewer pane
+          if (/\bcapabilities=\b/.test(window.location)) {
+            window.open(sourceUrl);
+          } else {
+            window.location.href = sourceUrl;
+          }
+        } else {
+          const modal = new bootstrap.Modal(document.getElementById('quarto-embedded-source-code-modal'));
+          modal.show();
+        }
+        return false;
+      });
+    }
+    function toggleCodeHandler(show) {
+      return function(e) {
+        const detailsSrc = window.document.querySelectorAll(".cell > details > .sourceCode");
+        for (let i=0; i<detailsSrc.length; i++) {
+          const details = detailsSrc[i].parentElement;
+          if (show) {
+            details.open = true;
+          } else {
+            details.removeAttribute("open");
+          }
+        }
+        const cellCodeDivs = window.document.querySelectorAll(".cell > .sourceCode");
+        const fromCls = show ? "hidden" : "unhidden";
+        const toCls = show ? "unhidden" : "hidden";
+        for (let i=0; i<cellCodeDivs.length; i++) {
+          const codeDiv = cellCodeDivs[i];
+          if (codeDiv.classList.contains(fromCls)) {
+            codeDiv.classList.remove(fromCls);
+            codeDiv.classList.add(toCls);
+          } 
+        }
+        return false;
+      }
+    }
+    const hideAllCode = window.document.getElementById("quarto-hide-all-code");
+    if (hideAllCode) {
+      hideAllCode.addEventListener("click", toggleCodeHandler(false));
+    }
+    const showAllCode = window.document.getElementById("quarto-show-all-code");
+    if (showAllCode) {
+      showAllCode.addEventListener("click", toggleCodeHandler(true));
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+      <a href="../13_migration_guide/index.html" class="pagination-link" aria-label="Migration Guide">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">13</span>&nbsp; <span class="chapter-title">Migration Guide</span></span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="../appendices/A_sample_data/index.html" class="pagination-link" aria-label="Sample Data">
+        <span class="nav-page-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18" data-shortcodes="false"><pre class="sourceCode numberSource markdown number-lines code-with-copy"><code class="sourceCode markdown"><span id="cb18-1"><a href="#cb18-1"></a><span class="co">---</span></span>
+<span id="cb18-2"><a href="#cb18-2"></a><span class="an">title:</span><span class="co"> "Streaming Feature Views"</span></span>
+<span id="cb18-3"><a href="#cb18-3"></a><span class="an">subtitle:</span><span class="co"> "Real-time feature ingestion with Postgres-backed online serving"</span></span>
+<span id="cb18-4"><a href="#cb18-4"></a><span class="co">---</span></span>
+<span id="cb18-5"><a href="#cb18-5"></a></span>
+<span id="cb18-6"><a href="#cb18-6"></a>::: {.callout-important title="Internal / NDA-Only Content"}</span>
+<span id="cb18-7"><a href="#cb18-7"></a>This chapter covers **Private Preview** functionality (<span class="in">`snowflake-ml-python &gt;= 1.36`</span>).</span>
+<span id="cb18-8"><a href="#cb18-8"></a>Share only with Snowflake internal teams (SE/FE) and customers under NDA.</span>
+<span id="cb18-9"><a href="#cb18-9"></a>Contact your Snowflake account team to enable Private Preview features.</span>
+<span id="cb18-10"><a href="#cb18-10"></a></span>
+<span id="cb18-11"><a href="#cb18-11"></a>This chapter is excluded from the public GitHub Pages site. To render locally, use:</span>
+<span id="cb18-12"><a href="#cb18-12"></a></span>
+<span id="cb18-13"><a href="#cb18-13"></a><span class="in">```bash</span></span>
+<span id="cb18-14"><a href="#cb18-14"></a><span class="bu">cd</span> Snowflake_FeatureStore_Implementation_Guide</span>
+<span id="cb18-15"><a href="#cb18-15"></a><span class="ex">quarto</span> render <span class="at">--profile</span> internal <span class="at">--to</span> html</span>
+<span id="cb18-16"><a href="#cb18-16"></a><span class="in">```</span></span>
+<span id="cb18-17"><a href="#cb18-17"></a>:::</span>
+<span id="cb18-18"><a href="#cb18-18"></a></span>
+<span id="cb18-19"><a href="#cb18-19"></a><span class="fu">## Overview</span></span>
+<span id="cb18-20"><a href="#cb18-20"></a></span>
+<span id="cb18-21"><a href="#cb18-21"></a>Streaming Feature Views introduce a **write-first** architecture for features that need near-real-time freshness. Instead of the traditional "batch offline table -&gt; periodic online sync" model described in [Chapter 8](../08_online_features/index.qmd), streaming features flow through a **dual-write kappa path**:</span>
+<span id="cb18-22"><a href="#cb18-22"></a></span>
+<span id="cb18-23"><a href="#cb18-23"></a><span class="ss">1. </span>Events arrive via the Python SDK (<span class="in">`fs.stream_ingest()`</span>) or the REST Ingest API</span>
+<span id="cb18-24"><a href="#cb18-24"></a><span class="ss">2. </span>An optional <span class="in">`transformation_fn`</span> applies per-event transformations server-side</span>
+<span id="cb18-25"><a href="#cb18-25"></a><span class="ss">3. </span>Features land directly in a **Postgres-backed online store** (&lt;20ms p50 read latency)</span>
+<span id="cb18-26"><a href="#cb18-26"></a><span class="ss">4. </span>Asynchronously, events are historized to the offline Snowflake table for training and monitoring</span>
+<span id="cb18-27"><a href="#cb18-27"></a></span>
+<span id="cb18-28"><a href="#cb18-28"></a>This flips the current model: **online is the source of truth**, with offline as the durable mirror.</span>
+<span id="cb18-29"><a href="#cb18-29"></a></span>
+<span id="cb18-30"><a href="#cb18-30"></a><span class="pp">|</span> Capability <span class="pp">|</span> Batch FV (Ch8) <span class="pp">|</span> Streaming FV <span class="pp">|</span></span>
+<span id="cb18-31"><a href="#cb18-31"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb18-32"><a href="#cb18-32"></a><span class="pp">|</span> **Online store** <span class="pp">|</span> Hybrid Table <span class="pp">|</span> Managed Postgres <span class="pp">|</span></span>
+<span id="cb18-33"><a href="#cb18-33"></a><span class="pp">|</span> **Freshness** <span class="pp">|</span> 10s+ (<span class="in">`target_lag`</span> on sync Task) <span class="pp">|</span> 2-3s end-to-end <span class="pp">|</span></span>
+<span id="cb18-34"><a href="#cb18-34"></a><span class="pp">|</span> **Source of truth** <span class="pp">|</span> Offline (DT) <span class="pp">|</span> Online (Postgres) <span class="pp">|</span></span>
+<span id="cb18-35"><a href="#cb18-35"></a><span class="pp">|</span> **Transformation** <span class="pp">|</span> Full SQL / Snowpark DataFrame <span class="pp">|</span> Per-event pandas function <span class="pp">|</span></span>
+<span id="cb18-36"><a href="#cb18-36"></a><span class="pp">|</span> **Aggregation** <span class="pp">|</span> Tiled via <span class="in">`Feature`</span> class + DT refresh <span class="pp">|</span> Continuous (<span class="in">`FeatureAggregationMethod.CONTINUOUS`</span>) <span class="pp">|</span></span>
+<span id="cb18-37"><a href="#cb18-37"></a><span class="pp">|</span> **SDK version** <span class="pp">|</span> <span class="in">`snowflake-ml-python &gt;= 1.7.0`</span> <span class="pp">|</span> <span class="in">`snowflake-ml-python &gt;= 1.36`</span> <span class="pp">|</span></span>
+<span id="cb18-38"><a href="#cb18-38"></a><span class="pp">|</span> **Account enablement** <span class="pp">|</span> GA (Hybrid Table OFT) <span class="pp">|</span> Private Preview (account flag required) <span class="pp">|</span></span>
+<span id="cb18-39"><a href="#cb18-39"></a></span>
+<span id="cb18-40"><a href="#cb18-40"></a><span class="fu">## Learning Objectives</span></span>
+<span id="cb18-41"><a href="#cb18-41"></a></span>
+<span id="cb18-42"><a href="#cb18-42"></a>After completing this chapter, you will be able to:</span>
+<span id="cb18-43"><a href="#cb18-43"></a></span>
+<span id="cb18-44"><a href="#cb18-44"></a><span class="ss">- </span>Provision the Postgres-backed online service and configure Producer/Consumer RBAC</span>
+<span id="cb18-45"><a href="#cb18-45"></a><span class="ss">- </span>Register a <span class="in">`StreamSource`</span> with a typed event schema</span>
+<span id="cb18-46"><a href="#cb18-46"></a><span class="ss">- </span>Create a Stream Feature View with <span class="in">`StreamConfig`</span>, including a <span class="in">`transformation_fn`</span> and historical backfill</span>
+<span id="cb18-47"><a href="#cb18-47"></a><span class="ss">- </span>Combine streaming ingestion with time-windowed aggregation using <span class="in">`FeatureAggregationMethod.CONTINUOUS`</span></span>
+<span id="cb18-48"><a href="#cb18-48"></a><span class="ss">- </span>Ingest events via the Python SDK and the REST Ingest API</span>
+<span id="cb18-49"><a href="#cb18-49"></a><span class="ss">- </span>Query features from the Postgres online store via Python and the REST Query API</span>
+<span id="cb18-50"><a href="#cb18-50"></a><span class="ss">- </span>Understand the dual-write architecture: online-first with async offline historization</span>
+<span id="cb18-51"><a href="#cb18-51"></a></span>
+<span id="cb18-52"><a href="#cb18-52"></a>---</span>
+<span id="cb18-53"><a href="#cb18-53"></a></span>
+<span id="cb18-54"><a href="#cb18-54"></a><span class="fu">## Prerequisites</span></span>
+<span id="cb18-55"><a href="#cb18-55"></a></span>
+<span id="cb18-56"><a href="#cb18-56"></a><span class="in">```python</span></span>
+<span id="cb18-57"><a href="#cb18-57"></a>pip install <span class="st">"snowflake-ml-python&gt;=1.36"</span></span>
+<span id="cb18-58"><a href="#cb18-58"></a><span class="in">```</span></span>
+<span id="cb18-59"><a href="#cb18-59"></a></span>
+<span id="cb18-60"><a href="#cb18-60"></a>Your account must be enabled for the Feature Store Private Preview. You also need a **Programmatic Access Token (PAT)** for online service authentication:</span>
+<span id="cb18-61"><a href="#cb18-61"></a></span>
+<span id="cb18-62"><a href="#cb18-62"></a><span class="in">```bash</span></span>
+<span id="cb18-63"><a href="#cb18-63"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_PAT</span><span class="op">=</span><span class="st">"&lt;your_pat_token&gt;"</span></span>
+<span id="cb18-64"><a href="#cb18-64"></a><span class="in">```</span></span>
+<span id="cb18-65"><a href="#cb18-65"></a></span>
+<span id="cb18-66"><a href="#cb18-66"></a>This chapter uses the same **clickstream** sample context as the rest of the guide: database <span class="in">`FEATURE_STORE_DEMO`</span>, source schema <span class="in">`CLICKSTREAM_DATA`</span>, Feature Store schema <span class="in">`FEATURE_STORE`</span>, warehouse <span class="in">`FS_DEV_WH`</span>.</span>
+<span id="cb18-67"><a href="#cb18-67"></a></span>
+<span id="cb18-68"><a href="#cb18-68"></a>---</span>
+<span id="cb18-69"><a href="#cb18-69"></a></span>
+<span id="cb18-70"><a href="#cb18-70"></a><span class="fu">## RBAC Setup</span></span>
+<span id="cb18-71"><a href="#cb18-71"></a></span>
+<span id="cb18-72"><a href="#cb18-72"></a>The online service uses separate **Producer** and **Consumer** roles to control who can ingest data versus who can query features.</span>
+<span id="cb18-73"><a href="#cb18-73"></a></span>
+<span id="cb18-74"><a href="#cb18-74"></a><span class="in">```sql</span></span>
+<span id="cb18-75"><a href="#cb18-75"></a><span class="kw">CREATE</span> ROLE <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_PRODUCER_ROLE;</span>
+<span id="cb18-76"><a href="#cb18-76"></a><span class="kw">CREATE</span> ROLE <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_CONSUMER_ROLE;</span>
+<span id="cb18-77"><a href="#cb18-77"></a><span class="kw">GRANT</span> ROLE FS_PRODUCER_ROLE <span class="kw">TO</span> ROLE SYSADMIN;</span>
+<span id="cb18-78"><a href="#cb18-78"></a><span class="kw">GRANT</span> ROLE FS_CONSUMER_ROLE <span class="kw">TO</span> ROLE SYSADMIN;</span>
+<span id="cb18-79"><a href="#cb18-79"></a><span class="in">```</span></span>
+<span id="cb18-80"><a href="#cb18-80"></a></span>
+<span id="cb18-81"><a href="#cb18-81"></a>Grant the producer role to services or users that will push events. Grant the consumer role to inference services that read features.</span>
+<span id="cb18-82"><a href="#cb18-82"></a></span>
+<span id="cb18-83"><a href="#cb18-83"></a>---</span>
+<span id="cb18-84"><a href="#cb18-84"></a></span>
+<span id="cb18-85"><a href="#cb18-85"></a><span class="fu">## Provisioning the Online Service {#sec-online-service}</span></span>
+<span id="cb18-86"><a href="#cb18-86"></a></span>
+<span id="cb18-87"><a href="#cb18-87"></a>The online service is provisioned once per Feature Store. It creates the Postgres-backed serving layer that all online Feature Views (batch and streaming) use.</span>
+<span id="cb18-88"><a href="#cb18-88"></a></span>
+<span id="cb18-89"><a href="#cb18-89"></a><span class="in">```python</span></span>
+<span id="cb18-90"><a href="#cb18-90"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureStore, Entity, CreationMode</span>
+<span id="cb18-91"><a href="#cb18-91"></a></span>
+<span id="cb18-92"><a href="#cb18-92"></a>fs <span class="op">=</span> FeatureStore(</span>
+<span id="cb18-93"><a href="#cb18-93"></a>    session<span class="op">=</span>session,</span>
+<span id="cb18-94"><a href="#cb18-94"></a>    database<span class="op">=</span><span class="st">"FEATURE_STORE_DEMO"</span>,</span>
+<span id="cb18-95"><a href="#cb18-95"></a>    name<span class="op">=</span><span class="st">"FEATURE_STORE"</span>,</span>
+<span id="cb18-96"><a href="#cb18-96"></a>    default_warehouse<span class="op">=</span><span class="st">"FS_DEV_WH"</span>,</span>
+<span id="cb18-97"><a href="#cb18-97"></a>    creation_mode<span class="op">=</span>CreationMode.CREATE_IF_NOT_EXIST,</span>
+<span id="cb18-98"><a href="#cb18-98"></a>)</span>
+<span id="cb18-99"><a href="#cb18-99"></a></span>
+<span id="cb18-100"><a href="#cb18-100"></a>create_result <span class="op">=</span> fs.create_online_service(<span class="st">"FS_PRODUCER_ROLE"</span>, <span class="st">"FS_CONSUMER_ROLE"</span>)</span>
+<span id="cb18-101"><a href="#cb18-101"></a><span class="bu">print</span>(create_result)</span>
+<span id="cb18-102"><a href="#cb18-102"></a><span class="in">```</span></span>
+<span id="cb18-103"><a href="#cb18-103"></a></span>
+<span id="cb18-104"><a href="#cb18-104"></a>Provisioning takes several minutes on first creation. Poll until the status reaches <span class="in">`RUNNING`</span>:</span>
+<span id="cb18-105"><a href="#cb18-105"></a></span>
+<span id="cb18-106"><a href="#cb18-106"></a><span class="in">```python</span></span>
+<span id="cb18-107"><a href="#cb18-107"></a><span class="im">import</span> time</span>
+<span id="cb18-108"><a href="#cb18-108"></a></span>
+<span id="cb18-109"><a href="#cb18-109"></a>status <span class="op">=</span> fs.get_online_service_status()</span>
+<span id="cb18-110"><a href="#cb18-110"></a><span class="cf">while</span> status.status <span class="op">!=</span> <span class="st">"RUNNING"</span>:</span>
+<span id="cb18-111"><a href="#cb18-111"></a>    time.sleep(<span class="dv">30</span>)</span>
+<span id="cb18-112"><a href="#cb18-112"></a>    status <span class="op">=</span> fs.get_online_service_status()</span>
+<span id="cb18-113"><a href="#cb18-113"></a>    <span class="bu">print</span>(<span class="ss">f"Status: </span><span class="sc">{</span>status<span class="sc">.</span>status<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb18-114"><a href="#cb18-114"></a></span>
+<span id="cb18-115"><a href="#cb18-115"></a><span class="bu">print</span>(<span class="ss">f"Endpoints: </span><span class="sc">{</span>status<span class="sc">.</span>endpoints<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb18-116"><a href="#cb18-116"></a><span class="in">```</span></span>
+<span id="cb18-117"><a href="#cb18-117"></a></span>
+<span id="cb18-118"><a href="#cb18-118"></a>Once running, retrieve the REST endpoint URLs for later use:</span>
+<span id="cb18-119"><a href="#cb18-119"></a></span>
+<span id="cb18-120"><a href="#cb18-120"></a><span class="in">```python</span></span>
+<span id="cb18-121"><a href="#cb18-121"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> online_service</span>
+<span id="cb18-122"><a href="#cb18-122"></a></span>
+<span id="cb18-123"><a href="#cb18-123"></a>query_url <span class="op">=</span> online_service.endpoint_url(status, <span class="st">"query"</span>)</span>
+<span id="cb18-124"><a href="#cb18-124"></a>ingest_url <span class="op">=</span> online_service.endpoint_url(status, <span class="st">"ingest"</span>)</span>
+<span id="cb18-125"><a href="#cb18-125"></a><span class="in">```</span></span>
+<span id="cb18-126"><a href="#cb18-126"></a></span>
+<span id="cb18-127"><a href="#cb18-127"></a>---</span>
+<span id="cb18-128"><a href="#cb18-128"></a></span>
+<span id="cb18-129"><a href="#cb18-129"></a><span class="fu">## Batch Feature Views with Postgres Online Store</span></span>
+<span id="cb18-130"><a href="#cb18-130"></a></span>
+<span id="cb18-131"><a href="#cb18-131"></a>Before diving into streaming, note that the Postgres online store also works with standard batch Feature Views. This is a drop-in replacement for the Hybrid Table path in <span class="co">[</span><span class="ot">Chapter 8</span><span class="co">](../08_online_features/index.qmd)</span>, offering lower read latency.</span>
+<span id="cb18-132"><a href="#cb18-132"></a></span>
+<span id="cb18-133"><a href="#cb18-133"></a>::: {.panel-tabset group="lang"}</span>
+<span id="cb18-134"><a href="#cb18-134"></a></span>
+<span id="cb18-135"><a href="#cb18-135"></a><span class="fu">## SQL</span></span>
+<span id="cb18-136"><a href="#cb18-136"></a></span>
+<span id="cb18-137"><a href="#cb18-137"></a><span class="in">```python</span></span>
+<span id="cb18-138"><a href="#cb18-138"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb18-139"><a href="#cb18-139"></a></span>
+<span id="cb18-140"><a href="#cb18-140"></a>user_entity <span class="op">=</span> Entity(name<span class="op">=</span><span class="st">"USER"</span>, join_keys<span class="op">=</span>[<span class="st">"USER_ID"</span>])</span>
+<span id="cb18-141"><a href="#cb18-141"></a>fs.register_entity(user_entity)</span>
+<span id="cb18-142"><a href="#cb18-142"></a></span>
+<span id="cb18-143"><a href="#cb18-143"></a>feature_df <span class="op">=</span> session.sql(<span class="st">"""</span></span>
+<span id="cb18-144"><a href="#cb18-144"></a><span class="st">    SELECT</span></span>
+<span id="cb18-145"><a href="#cb18-145"></a><span class="st">        USER_ID,</span></span>
+<span id="cb18-146"><a href="#cb18-146"></a><span class="st">        SUM(TOTAL_AMT)   AS ORDER_TOTAL_AMT_SUM,</span></span>
+<span id="cb18-147"><a href="#cb18-147"></a><span class="st">        COUNT(ORDER_ID)   AS ORDER_CNT,</span></span>
+<span id="cb18-148"><a href="#cb18-148"></a><span class="st">        AVG(TOTAL_AMT)    AS ORDER_TOTAL_AMT_AVG,</span></span>
+<span id="cb18-149"><a href="#cb18-149"></a><span class="st">        MAX(ORDER_TS)     AS LAST_ORDER_TS</span></span>
+<span id="cb18-150"><a href="#cb18-150"></a><span class="st">    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS</span></span>
+<span id="cb18-151"><a href="#cb18-151"></a><span class="st">    GROUP BY USER_ID</span></span>
+<span id="cb18-152"><a href="#cb18-152"></a><span class="st">"""</span>)</span>
+<span id="cb18-153"><a href="#cb18-153"></a></span>
+<span id="cb18-154"><a href="#cb18-154"></a>batch_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb18-155"><a href="#cb18-155"></a>    name<span class="op">=</span><span class="st">"USER_ORDER_FEATURES_PG"</span>,</span>
+<span id="cb18-156"><a href="#cb18-156"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb18-157"><a href="#cb18-157"></a>    feature_df<span class="op">=</span>feature_df,</span>
+<span id="cb18-158"><a href="#cb18-158"></a>    timestamp_col<span class="op">=</span><span class="st">"LAST_ORDER_TS"</span>,</span>
+<span id="cb18-159"><a href="#cb18-159"></a>    refresh_freq<span class="op">=</span><span class="st">"1 hour"</span>,</span>
+<span id="cb18-160"><a href="#cb18-160"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb18-161"><a href="#cb18-161"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb18-162"><a href="#cb18-162"></a>        target_lag<span class="op">=</span><span class="st">"10s"</span>,</span>
+<span id="cb18-163"><a href="#cb18-163"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb18-164"><a href="#cb18-164"></a>    ),</span>
+<span id="cb18-165"><a href="#cb18-165"></a>    desc<span class="op">=</span><span class="st">"User order features with Postgres online serving"</span>,</span>
+<span id="cb18-166"><a href="#cb18-166"></a>)</span>
+<span id="cb18-167"><a href="#cb18-167"></a></span>
+<span id="cb18-168"><a href="#cb18-168"></a>registered_fv <span class="op">=</span> fs.register_feature_view(batch_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span>
+<span id="cb18-169"><a href="#cb18-169"></a><span class="in">```</span></span>
+<span id="cb18-170"><a href="#cb18-170"></a></span>
+<span id="cb18-171"><a href="#cb18-171"></a><span class="fu">## Snowpark DataFrame</span></span>
+<span id="cb18-172"><a href="#cb18-172"></a></span>
+<span id="cb18-173"><a href="#cb18-173"></a><span class="in">```python</span></span>
+<span id="cb18-174"><a href="#cb18-174"></a><span class="im">import</span> snowflake.snowpark.functions <span class="im">as</span> F</span>
+<span id="cb18-175"><a href="#cb18-175"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb18-176"><a href="#cb18-176"></a></span>
+<span id="cb18-177"><a href="#cb18-177"></a>user_entity <span class="op">=</span> Entity(name<span class="op">=</span><span class="st">"USER"</span>, join_keys<span class="op">=</span>[<span class="st">"USER_ID"</span>])</span>
+<span id="cb18-178"><a href="#cb18-178"></a>fs.register_entity(user_entity)</span>
+<span id="cb18-179"><a href="#cb18-179"></a></span>
+<span id="cb18-180"><a href="#cb18-180"></a>orders <span class="op">=</span> session.table(<span class="st">"FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS"</span>)</span>
+<span id="cb18-181"><a href="#cb18-181"></a>feature_df <span class="op">=</span> orders.group_by(<span class="st">"USER_ID"</span>).agg(</span>
+<span id="cb18-182"><a href="#cb18-182"></a>    F.<span class="bu">sum</span>(<span class="st">"TOTAL_AMT"</span>).alias(<span class="st">"ORDER_TOTAL_AMT_SUM"</span>),</span>
+<span id="cb18-183"><a href="#cb18-183"></a>    F.count(<span class="st">"ORDER_ID"</span>).alias(<span class="st">"ORDER_CNT"</span>),</span>
+<span id="cb18-184"><a href="#cb18-184"></a>    F.avg(<span class="st">"TOTAL_AMT"</span>).alias(<span class="st">"ORDER_TOTAL_AMT_AVG"</span>),</span>
+<span id="cb18-185"><a href="#cb18-185"></a>    F.<span class="bu">max</span>(<span class="st">"ORDER_TS"</span>).alias(<span class="st">"LAST_ORDER_TS"</span>),</span>
+<span id="cb18-186"><a href="#cb18-186"></a>)</span>
+<span id="cb18-187"><a href="#cb18-187"></a></span>
+<span id="cb18-188"><a href="#cb18-188"></a>batch_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb18-189"><a href="#cb18-189"></a>    name<span class="op">=</span><span class="st">"USER_ORDER_FEATURES_PG"</span>,</span>
+<span id="cb18-190"><a href="#cb18-190"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb18-191"><a href="#cb18-191"></a>    feature_df<span class="op">=</span>feature_df,</span>
+<span id="cb18-192"><a href="#cb18-192"></a>    timestamp_col<span class="op">=</span><span class="st">"LAST_ORDER_TS"</span>,</span>
+<span id="cb18-193"><a href="#cb18-193"></a>    refresh_freq<span class="op">=</span><span class="st">"1 hour"</span>,</span>
+<span id="cb18-194"><a href="#cb18-194"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb18-195"><a href="#cb18-195"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb18-196"><a href="#cb18-196"></a>        target_lag<span class="op">=</span><span class="st">"10s"</span>,</span>
+<span id="cb18-197"><a href="#cb18-197"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb18-198"><a href="#cb18-198"></a>    ),</span>
+<span id="cb18-199"><a href="#cb18-199"></a>    desc<span class="op">=</span><span class="st">"User order features with Postgres online serving"</span>,</span>
+<span id="cb18-200"><a href="#cb18-200"></a>)</span>
+<span id="cb18-201"><a href="#cb18-201"></a></span>
+<span id="cb18-202"><a href="#cb18-202"></a>registered_fv <span class="op">=</span> fs.register_feature_view(batch_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span>
+<span id="cb18-203"><a href="#cb18-203"></a><span class="in">```</span></span>
+<span id="cb18-204"><a href="#cb18-204"></a></span>
+<span id="cb18-205"><a href="#cb18-205"></a>:::</span>
+<span id="cb18-206"><a href="#cb18-206"></a></span>
+<span id="cb18-207"><a href="#cb18-207"></a>The only difference from <span class="co">[</span><span class="ot">Chapter 8</span><span class="co">](../08_online_features/index.qmd)</span> is <span class="in">`store_type=OnlineStoreType.POSTGRES`</span> in the <span class="in">`OnlineConfig`</span>. Everything else -- <span class="in">`refresh_freq`</span>, <span class="in">`target_lag`</span>, the Feature Store API -- works identically.</span>
+<span id="cb18-208"><a href="#cb18-208"></a></span>
+<span id="cb18-209"><a href="#cb18-209"></a>---</span>
+<span id="cb18-210"><a href="#cb18-210"></a></span>
+<span id="cb18-211"><a href="#cb18-211"></a><span class="fu">## Stream Feature Views</span></span>
+<span id="cb18-212"><a href="#cb18-212"></a></span>
+<span id="cb18-213"><a href="#cb18-213"></a>Stream Feature Views are the core new capability. They consist of three components:</span>
+<span id="cb18-214"><a href="#cb18-214"></a></span>
+<span id="cb18-215"><a href="#cb18-215"></a><span class="ss">1. </span>A **StreamSource** that defines the event schema</span>
+<span id="cb18-216"><a href="#cb18-216"></a><span class="ss">2. </span>A **StreamConfig** that links the source to a transformation function and optional backfill data</span>
+<span id="cb18-217"><a href="#cb18-217"></a><span class="ss">3. </span>A **FeatureView** registered with <span class="in">`stream_config`</span> instead of <span class="in">`feature_df`</span></span>
+<span id="cb18-218"><a href="#cb18-218"></a></span>
+<span id="cb18-219"><a href="#cb18-219"></a><span class="fu">### Register a Stream Source {#sec-stream-source}</span></span>
+<span id="cb18-220"><a href="#cb18-220"></a></span>
+<span id="cb18-221"><a href="#cb18-221"></a>A <span class="in">`StreamSource`</span> defines the schema for real-time events. Column names and types must exactly match what is sent through the SDK or REST API.</span>
+<span id="cb18-222"><a href="#cb18-222"></a></span>
+<span id="cb18-223"><a href="#cb18-223"></a><span class="in">```python</span></span>
+<span id="cb18-224"><a href="#cb18-224"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> StreamSource</span>
+<span id="cb18-225"><a href="#cb18-225"></a><span class="im">from</span> snowflake.snowpark.types <span class="im">import</span> (</span>
+<span id="cb18-226"><a href="#cb18-226"></a>    StructType, StructField, StringType, DoubleType,</span>
+<span id="cb18-227"><a href="#cb18-227"></a>    TimestampType, TimestampTimeZone,</span>
+<span id="cb18-228"><a href="#cb18-228"></a>)</span>
+<span id="cb18-229"><a href="#cb18-229"></a></span>
+<span id="cb18-230"><a href="#cb18-230"></a>clickstream_events <span class="op">=</span> StreamSource(</span>
+<span id="cb18-231"><a href="#cb18-231"></a>    name<span class="op">=</span><span class="st">"CLICKSTREAM_EVENTS"</span>,</span>
+<span id="cb18-232"><a href="#cb18-232"></a>    schema<span class="op">=</span>StructType([</span>
+<span id="cb18-233"><a href="#cb18-233"></a>        StructField(<span class="st">"USER_ID"</span>, StringType()),</span>
+<span id="cb18-234"><a href="#cb18-234"></a>        StructField(<span class="st">"EVENT_TS"</span>, TimestampType(TimestampTimeZone.NTZ)),</span>
+<span id="cb18-235"><a href="#cb18-235"></a>        StructField(<span class="st">"EVENT_TYPE"</span>, StringType()),</span>
+<span id="cb18-236"><a href="#cb18-236"></a>        StructField(<span class="st">"PRODUCT_ID"</span>, StringType()),</span>
+<span id="cb18-237"><a href="#cb18-237"></a>        StructField(<span class="st">"AMOUNT"</span>, DoubleType()),</span>
+<span id="cb18-238"><a href="#cb18-238"></a>    ]),</span>
+<span id="cb18-239"><a href="#cb18-239"></a>    desc<span class="op">=</span><span class="st">"Real-time clickstream events for feature computation"</span>,</span>
+<span id="cb18-240"><a href="#cb18-240"></a>)</span>
+<span id="cb18-241"><a href="#cb18-241"></a></span>
+<span id="cb18-242"><a href="#cb18-242"></a>fs.register_stream_source(clickstream_events)</span>
+<span id="cb18-243"><a href="#cb18-243"></a><span class="in">```</span></span>
+<span id="cb18-244"><a href="#cb18-244"></a></span>
+<span id="cb18-245"><a href="#cb18-245"></a>Manage stream sources with:</span>
+<span id="cb18-246"><a href="#cb18-246"></a></span>
+<span id="cb18-247"><a href="#cb18-247"></a><span class="ss">- </span><span class="in">`fs.list_stream_sources()`</span> -- list all registered sources</span>
+<span id="cb18-248"><a href="#cb18-248"></a><span class="ss">- </span><span class="in">`fs.delete_stream_source(name)`</span> -- remove a source</span>
+<span id="cb18-249"><a href="#cb18-249"></a></span>
+<span id="cb18-250"><a href="#cb18-250"></a><span class="fu">### Define the Transformation Function {#sec-transformation-fn}</span></span>
+<span id="cb18-251"><a href="#cb18-251"></a></span>
+<span id="cb18-252"><a href="#cb18-252"></a>The <span class="in">`transformation_fn`</span> is a plain pandas function that receives and returns a <span class="in">`pd.DataFrame`</span>. It runs server-side on each ingested micro-batch.</span>
+<span id="cb18-253"><a href="#cb18-253"></a></span>
+<span id="cb18-254"><a href="#cb18-254"></a><span class="in">```python</span></span>
+<span id="cb18-255"><a href="#cb18-255"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb18-256"><a href="#cb18-256"></a></span>
+<span id="cb18-257"><a href="#cb18-257"></a><span class="kw">def</span> process_clickstream(df: pd.DataFrame) <span class="op">-&gt;</span> pd.DataFrame:</span>
+<span id="cb18-258"><a href="#cb18-258"></a>    <span class="co">"""Per-event feature derivation on the hot path."""</span></span>
+<span id="cb18-259"><a href="#cb18-259"></a>    df[<span class="st">"IS_PURCHASE"</span>] <span class="op">=</span> (df[<span class="st">"EVENT_TYPE"</span>] <span class="op">==</span> <span class="st">"purchase"</span>).astype(<span class="bu">int</span>)</span>
+<span id="cb18-260"><a href="#cb18-260"></a>    df[<span class="st">"IS_HIGH_VALUE"</span>] <span class="op">=</span> (df[<span class="st">"AMOUNT"</span>] <span class="op">&gt;</span> <span class="fl">100.0</span>).astype(<span class="bu">int</span>)</span>
+<span id="cb18-261"><a href="#cb18-261"></a>    <span class="cf">return</span> df</span>
+<span id="cb18-262"><a href="#cb18-262"></a><span class="in">```</span></span>
+<span id="cb18-263"><a href="#cb18-263"></a></span>
+<span id="cb18-264"><a href="#cb18-264"></a>::: {.callout-warning title="Hot-Path Transformation Constraints"}</span>
+<span id="cb18-265"><a href="#cb18-265"></a>The <span class="in">`transformation_fn`</span> is intentionally constrained to **per-event (row-level) operations**:</span>
+<span id="cb18-266"><a href="#cb18-266"></a></span>
+<span id="cb18-267"><a href="#cb18-267"></a><span class="ss">- </span>Column derivation, filtering, type casting, simple conditional logic</span>
+<span id="cb18-268"><a href="#cb18-268"></a><span class="ss">- </span>**Not supported:** joins against external tables, multi-step ETL, UDTFs, or operations that require global state</span>
+<span id="cb18-269"><a href="#cb18-269"></a></span>
+<span id="cb18-270"><a href="#cb18-270"></a>Think of it as a "map" function, not a "reduce." For aggregation across events, use the time-windowed aggregation approach described <span class="co">[</span><span class="ot">below</span><span class="co">](#sec-streaming-aggregation)</span>.</span>
+<span id="cb18-271"><a href="#cb18-271"></a>:::</span>
+<span id="cb18-272"><a href="#cb18-272"></a></span>
+<span id="cb18-273"><a href="#cb18-273"></a><span class="fu">### Create a Stream Feature View {#sec-create-stream-fv}</span></span>
+<span id="cb18-274"><a href="#cb18-274"></a></span>
+<span id="cb18-275"><a href="#cb18-275"></a>Combine the stream source, transformation, and optional backfill data into a Feature View:</span>
+<span id="cb18-276"><a href="#cb18-276"></a></span>
+<span id="cb18-277"><a href="#cb18-277"></a><span class="in">```python</span></span>
+<span id="cb18-278"><a href="#cb18-278"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> StreamConfig, FeatureView, OnlineConfig, OnlineStoreType</span>
+<span id="cb18-279"><a href="#cb18-279"></a></span>
+<span id="cb18-280"><a href="#cb18-280"></a>backfill_df <span class="op">=</span> session.table(<span class="st">"FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS"</span>)</span>
+<span id="cb18-281"><a href="#cb18-281"></a></span>
+<span id="cb18-282"><a href="#cb18-282"></a>stream_cfg <span class="op">=</span> StreamConfig(</span>
+<span id="cb18-283"><a href="#cb18-283"></a>    stream_source<span class="op">=</span>clickstream_events,</span>
+<span id="cb18-284"><a href="#cb18-284"></a>    transformation_fn<span class="op">=</span>process_clickstream,</span>
+<span id="cb18-285"><a href="#cb18-285"></a>    backfill_df<span class="op">=</span>backfill_df,</span>
+<span id="cb18-286"><a href="#cb18-286"></a>)</span>
+<span id="cb18-287"><a href="#cb18-287"></a></span>
+<span id="cb18-288"><a href="#cb18-288"></a>stream_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb18-289"><a href="#cb18-289"></a>    name<span class="op">=</span><span class="st">"USER_REALTIME_EVENTS"</span>,</span>
+<span id="cb18-290"><a href="#cb18-290"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb18-291"><a href="#cb18-291"></a>    stream_config<span class="op">=</span>stream_cfg,</span>
+<span id="cb18-292"><a href="#cb18-292"></a>    timestamp_col<span class="op">=</span><span class="st">"EVENT_TS"</span>,</span>
+<span id="cb18-293"><a href="#cb18-293"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb18-294"><a href="#cb18-294"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb18-295"><a href="#cb18-295"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb18-296"><a href="#cb18-296"></a>    ),</span>
+<span id="cb18-297"><a href="#cb18-297"></a>    desc<span class="op">=</span><span class="st">"Real-time clickstream features with per-event transforms"</span>,</span>
+<span id="cb18-298"><a href="#cb18-298"></a>)</span>
+<span id="cb18-299"><a href="#cb18-299"></a></span>
+<span id="cb18-300"><a href="#cb18-300"></a>registered_stream_fv <span class="op">=</span> fs.register_feature_view(stream_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span>
+<span id="cb18-301"><a href="#cb18-301"></a><span class="in">```</span></span>
+<span id="cb18-302"><a href="#cb18-302"></a></span>
+<span id="cb18-303"><a href="#cb18-303"></a>Key differences from a batch Feature View:</span>
+<span id="cb18-304"><a href="#cb18-304"></a></span>
+<span id="cb18-305"><a href="#cb18-305"></a><span class="ss">- </span><span class="in">`stream_config`</span> replaces <span class="in">`feature_df`</span> -- you cannot pass both</span>
+<span id="cb18-306"><a href="#cb18-306"></a><span class="ss">- </span>No <span class="in">`refresh_freq`</span> -- the online store updates as events arrive (2-3s E2E freshness)</span>
+<span id="cb18-307"><a href="#cb18-307"></a><span class="ss">- </span>The <span class="in">`backfill_df`</span> pre-populates the online store with historical data so features are available immediately after registration</span>
+<span id="cb18-308"><a href="#cb18-308"></a></span>
+<span id="cb18-309"><a href="#cb18-309"></a>---</span>
+<span id="cb18-310"><a href="#cb18-310"></a></span>
+<span id="cb18-311"><a href="#cb18-311"></a><span class="fu">## Streaming with Time-Windowed Aggregation {#sec-streaming-aggregation}</span></span>
+<span id="cb18-312"><a href="#cb18-312"></a></span>
+<span id="cb18-313"><a href="#cb18-313"></a>The most powerful pattern combines stream ingestion with the <span class="in">`Feature`</span> class aggregations from <span class="co">[</span><span class="ot">Chapter 7</span><span class="co">](../07_aggregations_api/index.qmd)</span>. This produces rolling-window metrics (e.g., "total spend in last 48 hours") that update continuously as new events arrive.</span>
+<span id="cb18-314"><a href="#cb18-314"></a></span>
+<span id="cb18-315"><a href="#cb18-315"></a>The key enabler is <span class="in">`FeatureAggregationMethod.CONTINUOUS`</span>, which instructs the online service to maintain running aggregates at ingest time rather than waiting for periodic tile refreshes from the offline store.</span>
+<span id="cb18-316"><a href="#cb18-316"></a></span>
+<span id="cb18-317"><a href="#cb18-317"></a><span class="in">```python</span></span>
+<span id="cb18-318"><a href="#cb18-318"></a><span class="im">from</span> snowflake.ml.feature_store <span class="im">import</span> Feature, FeatureView, StreamConfig, OnlineConfig, OnlineStoreType</span>
+<span id="cb18-319"><a href="#cb18-319"></a><span class="im">from</span> snowflake.ml.feature_store.spec.enums <span class="im">import</span> FeatureAggregationMethod</span>
+<span id="cb18-320"><a href="#cb18-320"></a></span>
+<span id="cb18-321"><a href="#cb18-321"></a>features <span class="op">=</span> [</span>
+<span id="cb18-322"><a href="#cb18-322"></a>    Feature.<span class="bu">sum</span>(<span class="st">"AMOUNT"</span>, <span class="st">"48h"</span>).alias(<span class="st">"TOTAL_SPEND_48H"</span>),</span>
+<span id="cb18-323"><a href="#cb18-323"></a>    Feature.count(<span class="st">"AMOUNT"</span>, <span class="st">"48h"</span>).alias(<span class="st">"TXN_COUNT_48H"</span>),</span>
+<span id="cb18-324"><a href="#cb18-324"></a>    Feature.avg(<span class="st">"AMOUNT"</span>, <span class="st">"24h"</span>).alias(<span class="st">"AVG_SPEND_24H"</span>),</span>
+<span id="cb18-325"><a href="#cb18-325"></a>]</span>
+<span id="cb18-326"><a href="#cb18-326"></a></span>
+<span id="cb18-327"><a href="#cb18-327"></a>stream_agg_fv <span class="op">=</span> FeatureView(</span>
+<span id="cb18-328"><a href="#cb18-328"></a>    name<span class="op">=</span><span class="st">"USER_REALTIME_AGG_FEATURES"</span>,</span>
+<span id="cb18-329"><a href="#cb18-329"></a>    entities<span class="op">=</span>[user_entity],</span>
+<span id="cb18-330"><a href="#cb18-330"></a>    stream_config<span class="op">=</span>stream_cfg,</span>
+<span id="cb18-331"><a href="#cb18-331"></a>    timestamp_col<span class="op">=</span><span class="st">"EVENT_TS"</span>,</span>
+<span id="cb18-332"><a href="#cb18-332"></a>    refresh_freq<span class="op">=</span><span class="st">"1 minute"</span>,</span>
+<span id="cb18-333"><a href="#cb18-333"></a>    feature_granularity<span class="op">=</span><span class="st">"1 minute"</span>,</span>
+<span id="cb18-334"><a href="#cb18-334"></a>    features<span class="op">=</span>features,</span>
+<span id="cb18-335"><a href="#cb18-335"></a>    online_config<span class="op">=</span>OnlineConfig(</span>
+<span id="cb18-336"><a href="#cb18-336"></a>        enable<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb18-337"><a href="#cb18-337"></a>        store_type<span class="op">=</span>OnlineStoreType.POSTGRES,</span>
+<span id="cb18-338"><a href="#cb18-338"></a>    ),</span>
+<span id="cb18-339"><a href="#cb18-339"></a>    feature_aggregation_method<span class="op">=</span>FeatureAggregationMethod.CONTINUOUS,</span>
+<span id="cb18-340"><a href="#cb18-340"></a>    desc<span class="op">=</span><span class="st">"Real-time user transaction aggregations with continuous processing"</span>,</span>
+<span id="cb18-341"><a href="#cb18-341"></a>)</span>
+<span id="cb18-342"><a href="#cb18-342"></a></span>
+<span id="cb18-343"><a href="#cb18-343"></a>registered_agg_fv <span class="op">=</span> fs.register_feature_view(stream_agg_fv, version<span class="op">=</span><span class="st">"V01"</span>)</span>
+<span id="cb18-344"><a href="#cb18-344"></a><span class="in">```</span></span>
+<span id="cb18-345"><a href="#cb18-345"></a></span>
+<span id="cb18-346"><a href="#cb18-346"></a>::: {.callout-tip title="Batch vs Continuous Aggregation"}</span>
+<span id="cb18-347"><a href="#cb18-347"></a>Without <span class="in">`FeatureAggregationMethod.CONTINUOUS`</span>, aggregation tiles are refreshed on the <span class="in">`refresh_freq`</span> schedule from the offline store. With <span class="in">`CONTINUOUS`</span>, the online service maintains running aggregates as events arrive -- giving you feature freshness measured in seconds rather than minutes.</span>
+<span id="cb18-348"><a href="#cb18-348"></a></span>
+<span id="cb18-349"><a href="#cb18-349"></a>Use <span class="in">`CONTINUOUS`</span> for features where staleness directly impacts model quality (fraud detection, real-time recommendations). Use batch tiling for features where minute-level freshness is acceptable (daily spend trends, weekly engagement scores).</span>
+<span id="cb18-350"><a href="#cb18-350"></a>:::</span>
+<span id="cb18-351"><a href="#cb18-351"></a></span>
+<span id="cb18-352"><a href="#cb18-352"></a>---</span>
+<span id="cb18-353"><a href="#cb18-353"></a></span>
+<span id="cb18-354"><a href="#cb18-354"></a><span class="fu">## Ingesting Events {#sec-ingest}</span></span>
+<span id="cb18-355"><a href="#cb18-355"></a></span>
+<span id="cb18-356"><a href="#cb18-356"></a><span class="fu">### Python SDK</span></span>
+<span id="cb18-357"><a href="#cb18-357"></a></span>
+<span id="cb18-358"><a href="#cb18-358"></a>Push events through the Python SDK. Events are validated against the stream source schema and fanned out to all consuming Feature Views.</span>
+<span id="cb18-359"><a href="#cb18-359"></a></span>
+<span id="cb18-360"><a href="#cb18-360"></a><span class="in">```python</span></span>
+<span id="cb18-361"><a href="#cb18-361"></a>new_events <span class="op">=</span> [</span>
+<span id="cb18-362"><a href="#cb18-362"></a>    {</span>
+<span id="cb18-363"><a href="#cb18-363"></a>        <span class="st">"USER_ID"</span>: <span class="st">"user_001"</span>,</span>
+<span id="cb18-364"><a href="#cb18-364"></a>        <span class="st">"EVENT_TS"</span>: <span class="st">"2026-04-10 10:00:00"</span>,</span>
+<span id="cb18-365"><a href="#cb18-365"></a>        <span class="st">"EVENT_TYPE"</span>: <span class="st">"purchase"</span>,</span>
+<span id="cb18-366"><a href="#cb18-366"></a>        <span class="st">"PRODUCT_ID"</span>: <span class="st">"SKU_42"</span>,</span>
+<span id="cb18-367"><a href="#cb18-367"></a>        <span class="st">"AMOUNT"</span>: <span class="fl">149.99</span>,</span>
+<span id="cb18-368"><a href="#cb18-368"></a>    },</span>
+<span id="cb18-369"><a href="#cb18-369"></a>    {</span>
+<span id="cb18-370"><a href="#cb18-370"></a>        <span class="st">"USER_ID"</span>: <span class="st">"user_002"</span>,</span>
+<span id="cb18-371"><a href="#cb18-371"></a>        <span class="st">"EVENT_TS"</span>: <span class="st">"2026-04-10 10:01:00"</span>,</span>
+<span id="cb18-372"><a href="#cb18-372"></a>        <span class="st">"EVENT_TYPE"</span>: <span class="st">"page_view"</span>,</span>
+<span id="cb18-373"><a href="#cb18-373"></a>        <span class="st">"PRODUCT_ID"</span>: <span class="st">"SKU_17"</span>,</span>
+<span id="cb18-374"><a href="#cb18-374"></a>        <span class="st">"AMOUNT"</span>: <span class="fl">0.0</span>,</span>
+<span id="cb18-375"><a href="#cb18-375"></a>    },</span>
+<span id="cb18-376"><a href="#cb18-376"></a>]</span>
+<span id="cb18-377"><a href="#cb18-377"></a></span>
+<span id="cb18-378"><a href="#cb18-378"></a>accepted <span class="op">=</span> fs.stream_ingest(clickstream_events, new_events)</span>
+<span id="cb18-379"><a href="#cb18-379"></a><span class="bu">print</span>(<span class="ss">f"Ingested </span><span class="sc">{</span>accepted<span class="sc">}</span><span class="ss"> / </span><span class="sc">{</span><span class="bu">len</span>(new_events)<span class="sc">}</span><span class="ss"> records"</span>)</span>
+<span id="cb18-380"><a href="#cb18-380"></a><span class="in">```</span></span>
+<span id="cb18-381"><a href="#cb18-381"></a></span>
+<span id="cb18-382"><a href="#cb18-382"></a><span class="fu">### REST Ingest API</span></span>
+<span id="cb18-383"><a href="#cb18-383"></a></span>
+<span id="cb18-384"><a href="#cb18-384"></a>For non-Python services, use the REST endpoint directly. All requests require a PAT-based <span class="in">`Snowflake Token`</span> authorization header.</span>
+<span id="cb18-385"><a href="#cb18-385"></a></span>
+<span id="cb18-386"><a href="#cb18-386"></a>**Endpoint:** <span class="in">`POST &lt;ingest_url&gt;/ingest`</span></span>
+<span id="cb18-387"><a href="#cb18-387"></a></span>
+<span id="cb18-388"><a href="#cb18-388"></a><span class="in">```bash</span></span>
+<span id="cb18-389"><a href="#cb18-389"></a><span class="ex">curl</span> <span class="at">-X</span> POST <span class="st">"</span><span class="va">${INGEST_URL}</span><span class="st">/ingest"</span> <span class="dt">\</span></span>
+<span id="cb18-390"><a href="#cb18-390"></a>  <span class="at">-H</span> <span class="st">"Authorization: Snowflake Token=</span><span class="dt">\"</span><span class="va">${SNOWFLAKE_PAT}</span><span class="dt">\"</span><span class="st">"</span> <span class="dt">\</span></span>
+<span id="cb18-391"><a href="#cb18-391"></a>  <span class="at">-H</span> <span class="st">"Content-Type: application/json"</span> <span class="dt">\</span></span>
+<span id="cb18-392"><a href="#cb18-392"></a>  <span class="at">-d</span> <span class="st">'{</span></span>
+<span id="cb18-393"><a href="#cb18-393"></a><span class="st">    "dry_run": false,</span></span>
+<span id="cb18-394"><a href="#cb18-394"></a><span class="st">    "include_diagnostics": true,</span></span>
+<span id="cb18-395"><a href="#cb18-395"></a><span class="st">    "records": {</span></span>
+<span id="cb18-396"><a href="#cb18-396"></a><span class="st">      "CLICKSTREAM_EVENTS": [</span></span>
+<span id="cb18-397"><a href="#cb18-397"></a><span class="st">        {</span></span>
+<span id="cb18-398"><a href="#cb18-398"></a><span class="st">          "USER_ID": "user_001",</span></span>
+<span id="cb18-399"><a href="#cb18-399"></a><span class="st">          "EVENT_TS": "2026-04-10T10:00:00Z",</span></span>
+<span id="cb18-400"><a href="#cb18-400"></a><span class="st">          "EVENT_TYPE": "purchase",</span></span>
+<span id="cb18-401"><a href="#cb18-401"></a><span class="st">          "PRODUCT_ID": "SKU_42",</span></span>
+<span id="cb18-402"><a href="#cb18-402"></a><span class="st">          "AMOUNT": 149.99</span></span>
+<span id="cb18-403"><a href="#cb18-403"></a><span class="st">        }</span></span>
+<span id="cb18-404"><a href="#cb18-404"></a><span class="st">      ]</span></span>
+<span id="cb18-405"><a href="#cb18-405"></a><span class="st">    }</span></span>
+<span id="cb18-406"><a href="#cb18-406"></a><span class="st">  }'</span></span>
+<span id="cb18-407"><a href="#cb18-407"></a><span class="in">```</span></span>
+<span id="cb18-408"><a href="#cb18-408"></a></span>
+<span id="cb18-409"><a href="#cb18-409"></a><span class="pp">|</span> Field <span class="pp">|</span> Required <span class="pp">|</span> Description <span class="pp">|</span></span>
+<span id="cb18-410"><a href="#cb18-410"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb18-411"><a href="#cb18-411"></a><span class="pp">|</span> <span class="in">`records`</span> <span class="pp">|</span> Yes <span class="pp">|</span> Map of stream source name to array of event records. Schema must match the registered <span class="in">`StreamSource`</span>. <span class="pp">|</span></span>
+<span id="cb18-412"><a href="#cb18-412"></a><span class="pp">|</span> <span class="in">`dry_run`</span> <span class="pp">|</span> No <span class="pp">|</span> When <span class="in">`true`</span>, validates payload without persisting. Useful for testing. Default: <span class="in">`false`</span>. <span class="pp">|</span></span>
+<span id="cb18-413"><a href="#cb18-413"></a><span class="pp">|</span> <span class="in">`include_diagnostics`</span> <span class="pp">|</span> No <span class="pp">|</span> When <span class="in">`true`</span>, includes per-record diagnostics in the response. Default: <span class="in">`false`</span>. <span class="pp">|</span></span>
+<span id="cb18-414"><a href="#cb18-414"></a></span>
+<span id="cb18-415"><a href="#cb18-415"></a>::: {.callout-tip title="Schema Validation with dry_run"}</span>
+<span id="cb18-416"><a href="#cb18-416"></a>Use <span class="in">`dry_run: true`</span> during integration testing to validate that your event payloads match the registered schema without actually writing data. This catches type mismatches and missing columns before they cause runtime errors.</span>
+<span id="cb18-417"><a href="#cb18-417"></a>:::</span>
+<span id="cb18-418"><a href="#cb18-418"></a></span>
+<span id="cb18-419"><a href="#cb18-419"></a>---</span>
+<span id="cb18-420"><a href="#cb18-420"></a></span>
+<span id="cb18-421"><a href="#cb18-421"></a><span class="fu">## Querying Online Features {#sec-query}</span></span>
+<span id="cb18-422"><a href="#cb18-422"></a></span>
+<span id="cb18-423"><a href="#cb18-423"></a><span class="fu">### Python SDK</span></span>
+<span id="cb18-424"><a href="#cb18-424"></a></span>
+<span id="cb18-425"><a href="#cb18-425"></a><span class="in">```python</span></span>
+<span id="cb18-426"><a href="#cb18-426"></a>online_df <span class="op">=</span> fs.read_feature_view(</span>
+<span id="cb18-427"><a href="#cb18-427"></a>    registered_stream_fv,</span>
+<span id="cb18-428"><a href="#cb18-428"></a>    keys<span class="op">=</span>[[<span class="st">"user_001"</span>], [<span class="st">"user_002"</span>], [<span class="st">"user_003"</span>]],</span>
+<span id="cb18-429"><a href="#cb18-429"></a>    store_type<span class="op">=</span><span class="st">"online"</span>,</span>
+<span id="cb18-430"><a href="#cb18-430"></a>)</span>
+<span id="cb18-431"><a href="#cb18-431"></a>online_df.show()</span>
+<span id="cb18-432"><a href="#cb18-432"></a><span class="in">```</span></span>
+<span id="cb18-433"><a href="#cb18-433"></a></span>
+<span id="cb18-434"><a href="#cb18-434"></a><span class="fu">### REST Query API</span></span>
+<span id="cb18-435"><a href="#cb18-435"></a></span>
+<span id="cb18-436"><a href="#cb18-436"></a>**Endpoint:** <span class="in">`POST &lt;query_url&gt;/query`</span></span>
+<span id="cb18-437"><a href="#cb18-437"></a></span>
+<span id="cb18-438"><a href="#cb18-438"></a><span class="in">```json</span></span>
+<span id="cb18-439"><a href="#cb18-439"></a>{</span>
+<span id="cb18-440"><a href="#cb18-440"></a>  <span class="st">"name"</span><span class="op">:</span> <span class="st">"USER_REALTIME_AGG_FEATURES"</span><span class="op">,</span></span>
+<span id="cb18-441"><a href="#cb18-441"></a>  <span class="st">"version"</span><span class="op">:</span> <span class="st">"V01"</span><span class="op">,</span></span>
+<span id="cb18-442"><a href="#cb18-442"></a>  <span class="st">"object_type"</span><span class="op">:</span> <span class="st">"feature_view"</span><span class="op">,</span></span>
+<span id="cb18-443"><a href="#cb18-443"></a>  <span class="st">"request_rows"</span><span class="op">:</span> [</span>
+<span id="cb18-444"><a href="#cb18-444"></a>    { <span class="st">"entity"</span><span class="op">:</span> { <span class="st">"USER_ID"</span><span class="op">:</span> <span class="st">"user_001"</span> } }<span class="op">,</span></span>
+<span id="cb18-445"><a href="#cb18-445"></a>    { <span class="st">"entity"</span><span class="op">:</span> { <span class="st">"USER_ID"</span><span class="op">:</span> <span class="st">"user_002"</span> } }</span>
+<span id="cb18-446"><a href="#cb18-446"></a>  ]<span class="op">,</span></span>
+<span id="cb18-447"><a href="#cb18-447"></a>  <span class="st">"features"</span><span class="op">:</span> [<span class="st">"TOTAL_SPEND_48H"</span><span class="op">,</span> <span class="st">"TXN_COUNT_48H"</span>]</span>
+<span id="cb18-448"><a href="#cb18-448"></a>}</span>
+<span id="cb18-449"><a href="#cb18-449"></a><span class="in">```</span></span>
+<span id="cb18-450"><a href="#cb18-450"></a></span>
+<span id="cb18-451"><a href="#cb18-451"></a><span class="pp">|</span> Field <span class="pp">|</span> Required <span class="pp">|</span> Description <span class="pp">|</span></span>
+<span id="cb18-452"><a href="#cb18-452"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb18-453"><a href="#cb18-453"></a><span class="pp">|</span> <span class="in">`name`</span> <span class="pp">|</span> Yes <span class="pp">|</span> Name of the Feature View. <span class="pp">|</span></span>
+<span id="cb18-454"><a href="#cb18-454"></a><span class="pp">|</span> <span class="in">`version`</span> <span class="pp">|</span> Yes <span class="pp">|</span> Version string (e.g., <span class="in">`"V01"`</span>). <span class="pp">|</span></span>
+<span id="cb18-455"><a href="#cb18-455"></a><span class="pp">|</span> <span class="in">`object_type`</span> <span class="pp">|</span> Yes <span class="pp">|</span> Must be <span class="in">`"feature_view"`</span>. <span class="pp">|</span></span>
+<span id="cb18-456"><a href="#cb18-456"></a><span class="pp">|</span> <span class="in">`request_rows`</span> <span class="pp">|</span> Yes <span class="pp">|</span> Array of objects, each with an <span class="in">`entity`</span> map of join key names to values. <span class="pp">|</span></span>
+<span id="cb18-457"><a href="#cb18-457"></a><span class="pp">|</span> <span class="in">`features`</span> <span class="pp">|</span> No <span class="pp">|</span> List of feature columns to return. Omit for all features. <span class="pp">|</span></span>
+<span id="cb18-458"><a href="#cb18-458"></a><span class="pp">|</span> <span class="in">`include_diagnostics`</span> <span class="pp">|</span> No <span class="pp">|</span> When <span class="in">`true`</span>, includes diagnostics. Default: <span class="in">`false`</span>. <span class="pp">|</span></span>
+<span id="cb18-459"><a href="#cb18-459"></a></span>
+<span id="cb18-460"><a href="#cb18-460"></a>::: {.callout-note}</span>
+<span id="cb18-461"><a href="#cb18-461"></a>Online reads require a valid <span class="in">`SNOWFLAKE_PAT`</span> environment variable and your IP address must be allowed by the online service's network policy.</span>
+<span id="cb18-462"><a href="#cb18-462"></a>:::</span>
+<span id="cb18-463"><a href="#cb18-463"></a></span>
+<span id="cb18-464"><a href="#cb18-464"></a>---</span>
+<span id="cb18-465"><a href="#cb18-465"></a></span>
+<span id="cb18-466"><a href="#cb18-466"></a><span class="fu">## Architecture: Dual-Write Kappa Path {#sec-architecture}</span></span>
+<span id="cb18-467"><a href="#cb18-467"></a></span>
+<span id="cb18-468"><a href="#cb18-468"></a>The streaming architecture uses a **dual-write** pattern inspired by kappa architecture:</span>
+<span id="cb18-469"><a href="#cb18-469"></a></span>
+<span id="cb18-472"><a href="#cb18-472"></a><span class="in">```{mermaid}</span></span>
+<span id="cb18-473"><a href="#cb18-473"></a>%%| fig-cap: <span class="ot">"</span><span class="st">Streaming Feature View: dual-write kappa architecture</span><span class="ot">"</span></span>
+<span id="cb18-474"><a href="#cb18-474"></a>flowchart LR</span>
+<span id="cb18-475"><a href="#cb18-475"></a>    Client[<span class="ot">"</span><span class="st">Client / App</span><span class="ot">"</span>] --&gt;|<span class="ot">"</span><span class="st">stream_ingest() or REST</span><span class="ot">"</span>| Ingest[<span class="ot">"</span><span class="st">Ingest Service</span><span class="ot">"</span>]</span>
+<span id="cb18-476"><a href="#cb18-476"></a>    Ingest --&gt;|<span class="ot">"</span><span class="st">transformation_fn</span><span class="ot">"</span>| PG[<span class="ot">"</span><span class="st">Postgres Online Store</span><span class="ot">"</span>]</span>
+<span id="cb18-477"><a href="#cb18-477"></a>    Ingest --&gt;|<span class="ot">"</span><span class="st">async historization</span><span class="ot">"</span>| SF[<span class="ot">"</span><span class="st">Snowflake Offline Table</span><span class="ot">"</span>]</span>
+<span id="cb18-478"><a href="#cb18-478"></a>    PG --&gt;|<span class="ot">"</span><span class="st">read_feature_view(store_type='online')</span><span class="ot">"</span>| Serve[<span class="ot">"</span><span class="st">Inference Service</span><span class="ot">"</span>]</span>
+<span id="cb18-479"><a href="#cb18-479"></a>    SF --&gt;|<span class="ot">"</span><span class="st">generate_training_set()</span><span class="ot">"</span>| Train[<span class="ot">"</span><span class="st">Training Pipeline</span><span class="ot">"</span>]</span>
+<span id="cb18-480"><a href="#cb18-480"></a>    SF --&gt;|<span class="ot">"</span><span class="st">Drift / monitoring</span><span class="ot">"</span>| Monitor[<span class="ot">"</span><span class="st">Model Monitoring</span><span class="ot">"</span>]</span>
+<span id="cb18-481"><a href="#cb18-481"></a><span class="in">```</span></span>
+<span id="cb18-482"><a href="#cb18-482"></a></span>
+<span id="cb18-483"><a href="#cb18-483"></a>**Hot path (write):**</span>
+<span id="cb18-484"><a href="#cb18-484"></a></span>
+<span id="cb18-485"><a href="#cb18-485"></a><span class="ss">1. </span>Client sends events via <span class="in">`fs.stream_ingest()`</span> or <span class="in">`POST /ingest`</span></span>
+<span id="cb18-486"><a href="#cb18-486"></a><span class="ss">2. </span>The <span class="in">`transformation_fn`</span> applies per-event derivations</span>
+<span id="cb18-487"><a href="#cb18-487"></a><span class="ss">3. </span>Transformed features land in the Postgres online store</span>
+<span id="cb18-488"><a href="#cb18-488"></a><span class="ss">4. </span>For <span class="in">`CONTINUOUS`</span> aggregation FVs, running aggregates are updated in-place</span>
+<span id="cb18-489"><a href="#cb18-489"></a></span>
+<span id="cb18-490"><a href="#cb18-490"></a>**Cold path (historization):**</span>
+<span id="cb18-491"><a href="#cb18-491"></a></span>
+<span id="cb18-492"><a href="#cb18-492"></a><span class="ss">1. </span>Events are asynchronously persisted to a Snowflake table in the Feature Store schema</span>
+<span id="cb18-493"><a href="#cb18-493"></a><span class="ss">2. </span>For tiled aggregation FVs, tiles are materialized to the offline table on the <span class="in">`refresh_freq`</span> schedule</span>
+<span id="cb18-494"><a href="#cb18-494"></a><span class="ss">3. </span>The offline table supports <span class="in">`generate_training_set()`</span> for PIT-correct training data</span>
+<span id="cb18-495"><a href="#cb18-495"></a></span>
+<span id="cb18-496"><a href="#cb18-496"></a>**Read paths:**</span>
+<span id="cb18-497"><a href="#cb18-497"></a></span>
+<span id="cb18-498"><a href="#cb18-498"></a><span class="ss">- </span>**Online:** <span class="in">`read_feature_view(..., store_type="online")`</span> or REST Query API -- &lt;20ms p50</span>
+<span id="cb18-499"><a href="#cb18-499"></a><span class="ss">- </span>**Offline:** Standard Feature Store APIs over the offline table</span>
+<span id="cb18-500"><a href="#cb18-500"></a></span>
+<span id="cb18-501"><a href="#cb18-501"></a>::: {.callout-important title="Online-First vs Offline-First"}</span>
+<span id="cb18-502"><a href="#cb18-502"></a>This is a fundamental shift. In the batch model (<span class="co">[</span><span class="ot">Chapter 8</span><span class="co">](../08_online_features/index.qmd)</span>), the offline Dynamic Table is the source of truth and the Hybrid Table is a lagging mirror. In the streaming model, the **online Postgres store is the source of truth** and the offline table is the durable copy. This means:</span>
+<span id="cb18-503"><a href="#cb18-503"></a></span>
+<span id="cb18-504"><a href="#cb18-504"></a><span class="ss">- </span>Feature freshness is bounded by ingest latency (seconds), not DT refresh + sync lag (minutes)</span>
+<span id="cb18-505"><a href="#cb18-505"></a><span class="ss">- </span>If the offline historization path fails, online serving continues unaffected</span>
+<span id="cb18-506"><a href="#cb18-506"></a><span class="ss">- </span>Training data freshness may lag behind online serving by the async sync interval</span>
+<span id="cb18-507"><a href="#cb18-507"></a>:::</span>
+<span id="cb18-508"><a href="#cb18-508"></a></span>
+<span id="cb18-509"><a href="#cb18-509"></a>---</span>
+<span id="cb18-510"><a href="#cb18-510"></a></span>
+<span id="cb18-511"><a href="#cb18-511"></a><span class="fu">## Performance Characteristics</span></span>
+<span id="cb18-512"><a href="#cb18-512"></a></span>
+<span id="cb18-513"><a href="#cb18-513"></a>Based on early testing with the Private Preview:</span>
+<span id="cb18-514"><a href="#cb18-514"></a></span>
+<span id="cb18-515"><a href="#cb18-515"></a><span class="pp">|</span> Metric <span class="pp">|</span> Observed Value <span class="pp">|</span></span>
+<span id="cb18-516"><a href="#cb18-516"></a><span class="pp">|---|---|</span></span>
+<span id="cb18-517"><a href="#cb18-517"></a><span class="pp">|</span> End-to-end freshness (ingest to queryable) <span class="pp">|</span> ~1.2s <span class="pp">|</span></span>
+<span id="cb18-518"><a href="#cb18-518"></a><span class="pp">|</span> Online read latency (p50) <span class="pp">|</span> &lt;20ms <span class="pp">|</span></span>
+<span id="cb18-519"><a href="#cb18-519"></a><span class="pp">|</span> Stream FV status <span class="pp">|</span> <span class="in">`STATIC`</span> (no DT refresh cycle) <span class="pp">|</span></span>
+<span id="cb18-520"><a href="#cb18-520"></a><span class="pp">|</span> Backfill from <span class="in">`backfill_df`</span> <span class="pp">|</span> Applied at registration time <span class="pp">|</span></span>
+<span id="cb18-521"><a href="#cb18-521"></a></span>
+<span id="cb18-522"><a href="#cb18-522"></a>The 1.2s E2E freshness significantly exceeds the 2-3s target from the original design. Actual performance will vary with instance size, event throughput, and transformation complexity.</span>
+<span id="cb18-523"><a href="#cb18-523"></a></span>
+<span id="cb18-524"><a href="#cb18-524"></a>---</span>
+<span id="cb18-525"><a href="#cb18-525"></a></span>
+<span id="cb18-526"><a href="#cb18-526"></a><span class="fu">## Known Limitations</span></span>
+<span id="cb18-527"><a href="#cb18-527"></a></span>
+<span id="cb18-528"><a href="#cb18-528"></a><span class="ss">- </span>**Account enablement required:** Private Preview features require your account to be enabled by your Snowflake account team.</span>
+<span id="cb18-529"><a href="#cb18-529"></a><span class="ss">- </span>**Network policy:** Online reads from external IPs require a network policy on the online service.</span>
+<span id="cb18-530"><a href="#cb18-530"></a><span class="ss">- </span>**On-demand feature views:** <span class="in">`RequestSource`</span> and <span class="in">`OnDemandConfig`</span> are not yet available in Private Preview. On the roadmap.</span>
+<span id="cb18-531"><a href="#cb18-531"></a><span class="ss">- </span>**Transformation scope:** <span class="in">`transformation_fn`</span> is limited to per-event (row-level) pandas operations. No joins, no global aggregation, no UDTFs.</span>
+<span id="cb18-532"><a href="#cb18-532"></a><span class="ss">- </span>**Stream FV status is STATIC:** Stream Feature Views show <span class="in">`STATIC`</span> status rather than <span class="in">`ACTIVE`</span> since there is no Dynamic Table refresh cycle.</span>
+<span id="cb18-533"><a href="#cb18-533"></a></span>
+<span id="cb18-534"><a href="#cb18-534"></a>---</span>
+<span id="cb18-535"><a href="#cb18-535"></a></span>
+<span id="cb18-536"><a href="#cb18-536"></a><span class="fu">## When to Use Streaming vs Batch Feature Views</span></span>
+<span id="cb18-537"><a href="#cb18-537"></a></span>
+<span id="cb18-538"><a href="#cb18-538"></a><span class="pp">|</span> Scenario <span class="pp">|</span> Recommendation <span class="pp">|</span></span>
+<span id="cb18-539"><a href="#cb18-539"></a><span class="pp">|---|---|</span></span>
+<span id="cb18-540"><a href="#cb18-540"></a><span class="pp">|</span> Feature freshness measured in **minutes to hours** <span class="pp">|</span> Batch FV with DT + OFT sync (<span class="co">[</span><span class="ot">Chapter 8</span><span class="co">](../08_online_features/index.qmd)</span>) <span class="pp">|</span></span>
+<span id="cb18-541"><a href="#cb18-541"></a><span class="pp">|</span> Feature freshness measured in **seconds** <span class="pp">|</span> Stream FV with Postgres online store <span class="pp">|</span></span>
+<span id="cb18-542"><a href="#cb18-542"></a><span class="pp">|</span> Complex multi-table transformations <span class="pp">|</span> Batch FV (full SQL / Snowpark DataFrame expressiveness) <span class="pp">|</span></span>
+<span id="cb18-543"><a href="#cb18-543"></a><span class="pp">|</span> Per-event derivations + rolling aggregates <span class="pp">|</span> Stream FV with <span class="in">`transformation_fn`</span> + <span class="in">`CONTINUOUS`</span> aggregation <span class="pp">|</span></span>
+<span id="cb18-544"><a href="#cb18-544"></a><span class="pp">|</span> Read latency &lt;20ms required <span class="pp">|</span> Either, with Postgres online store (<span class="in">`OnlineStoreType.POSTGRES`</span>) <span class="pp">|</span></span>
+<span id="cb18-545"><a href="#cb18-545"></a><span class="pp">|</span> No Private Preview access <span class="pp">|</span> Batch FV with Hybrid Table OFT (GA) or external store (<span class="co">[</span><span class="ot">Chapter 8</span><span class="co">](../08_online_features/index.qmd#sec-external-serving)</span>) <span class="pp">|</span></span>
+<span id="cb18-546"><a href="#cb18-546"></a></span>
+<span id="cb18-547"><a href="#cb18-547"></a>::: {.callout-tip}</span>
+<span id="cb18-548"><a href="#cb18-548"></a>Many production systems use **both patterns together**: batch Feature Views for slow-changing features (demographics, 7d/30d aggregates) and streaming Feature Views for fast-changing features (recent transactions, real-time engagement). The inference service assembles both at prediction time.</span>
+<span id="cb18-549"><a href="#cb18-549"></a>:::</span>
+</code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
+</div></div></div></div></div>
+</div> <!-- /content -->
+<footer class="footer"><div class="nav-footer"><div class="nav-footer-center"><div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/08a_streaming_feature_views/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div></div></footer><script>
+/**
+ * Sidebar toggle controls for Quarto book layout.
+ * Buttons are appended to <body> (fixed position) so they remain
+ * accessible even when a sidebar is collapsed to zero width.
+ * State is persisted in localStorage across page navigations.
+ */
+(function () {
+  "use strict";
+
+  var STORAGE_LEFT  = "sf-sidebar-left-collapsed";
+  var STORAGE_RIGHT = "sf-sidebar-right-collapsed";
+
+  var CHEVRON_LEFT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M10.5 3.5L6 8l4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEVRON_RIGHT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M5.5 3.5L10 8l-4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function positionLeftBtn(btn, sidebar, collapsed) {
+    if (collapsed) {
+      btn.style.left = "0px";
+    } else {
+      btn.style.left = sidebar.offsetWidth + "px";
+    }
+  }
+
+  function init() {
+    var sidebar       = document.getElementById("quarto-sidebar");
+    var marginSidebar = document.getElementById("quarto-margin-sidebar");
+    var body          = document.body;
+
+    if (!sidebar && !marginSidebar) return;
+
+    var leftOff  = localStorage.getItem(STORAGE_LEFT) === "true";
+    var rightOff = localStorage.getItem(STORAGE_RIGHT) === "true";
+
+    // --- Left sidebar toggle ---
+    if (sidebar) {
+      var btnL = document.createElement("button");
+      btnL.id = "sf-toggle-left";
+      btnL.className = "sf-sidebar-toggle";
+      btnL.setAttribute("type", "button");
+      btnL.setAttribute("aria-label", "Toggle chapter navigation");
+      btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+      body.appendChild(btnL);
+
+      if (leftOff) body.classList.add("sf-left-collapsed");
+
+      // Position after layout settles
+      requestAnimationFrame(function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+
+      btnL.addEventListener("click", function () {
+        leftOff = !leftOff;
+        body.classList.toggle("sf-left-collapsed", leftOff);
+        localStorage.setItem(STORAGE_LEFT, String(leftOff));
+        btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+        btnL.setAttribute("aria-expanded", String(!leftOff));
+        // Reposition after CSS transition completes
+        setTimeout(function () {
+          positionLeftBtn(btnL, sidebar, leftOff);
+        }, 320);
+        // Immediate position for collapsed
+        if (leftOff) btnL.style.left = "0px";
+      });
+
+      // Reposition on window resize
+      window.addEventListener("resize", function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+    }
+
+    // --- Right sidebar toggle ---
+    if (marginSidebar) {
+      var btnR = document.createElement("button");
+      btnR.id = "sf-toggle-right";
+      btnR.className = "sf-sidebar-toggle";
+      btnR.setAttribute("type", "button");
+      btnR.setAttribute("aria-label", "Toggle table of contents");
+      btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+      body.appendChild(btnR);
+
+      if (rightOff) body.classList.add("sf-right-collapsed");
+
+      btnR.addEventListener("click", function () {
+        rightOff = !rightOff;
+        body.classList.toggle("sf-right-collapsed", rightOff);
+        localStorage.setItem(STORAGE_RIGHT, String(rightOff));
+        btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+        btnR.setAttribute("aria-expanded", String(!rightOff));
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+
+
+
+</body></html>

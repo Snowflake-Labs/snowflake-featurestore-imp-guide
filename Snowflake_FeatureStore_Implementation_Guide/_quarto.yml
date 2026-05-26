@@ -1,6 +1,8 @@
 project:
   type: book
   output-dir: _site
+  resources:
+    - "_diagrams/**"
 
 book:
   title: "Snowflake Feature Store Implementation Guide"
@@ -47,7 +49,8 @@ book:
     - appendices/A_sample_data/index.qmd
     - appendices/A_sample_data/data_manager/streamlit_app.qmd
     - appendices/B_setup/index.qmd
-    - appendices/C_snowpark_to_dynamic_table/index.md
+    - appendices/C_snowpark_to_dynamic_table/index.qmd
+    - appendices/D_tag_convention/index.qmd
 
 format:
   html:

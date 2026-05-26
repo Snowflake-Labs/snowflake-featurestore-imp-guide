@@ -46,7 +46,13 @@ OFTs store only the **latest feature values** — they do not retain historical 
 `refresh_freq` on the Feature View controls how often the **offline** Dynamic Table (or related materialization) refreshes. `OnlineConfig.target_lag` controls how often the **online** sync Task runs. They are **independent**; end-to-end staleness is roughly the sum of both paths. See the [Python online features](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/create-and-serve-online-features-python) documentation.
 :::
 
-![Online Feature Table: offline FV to Hybrid Table via stream and task](../_diagrams/png/dg_08_oft_hybrid.png){fig-alt="Offline feature view merges into hybrid table for low latency reads"}
+```{mermaid}
+%%| fig-cap: "Online Feature Table: offline FV to Hybrid Table via stream and task"
+%%| fig-alt: "Offline feature view merges into hybrid table for low latency reads"
+flowchart LR
+  OFF[Offline FV DT or View] --> MERGE[Stream + Task MERGE]
+  MERGE --> HT[Hybrid Table latest per key]
+```
 
 ---
 
@@ -72,7 +78,13 @@ fs = FeatureStore(
 )
 
 user_entity = Entity(name="USER", join_keys=["USER_ID"])
+```
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 feature_df = session.sql("""
     SELECT
         USER_ID,
@@ -83,7 +95,25 @@ feature_df = session.sql("""
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
     GROUP BY USER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+feature_df = orders.group_by("USER_ID").agg(
+    F.sum("TOTAL_AMT").alias("ORDER_TOTAL_AMT_SUM"),
+    F.count("ORDER_ID").alias("ORDER_CNT"),
+    F.avg("TOTAL_AMT").alias("ORDER_TOTAL_AMT_AVG"),
+    F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+)
+```
+
+:::
+
+```python
 online_config = feature_view.OnlineConfig(
     enable=True,
     target_lag="1 minute",
@@ -188,6 +218,10 @@ Offline APIs (`generate_dataset`, `generate_training_set`, `retrieve_feature_val
 
 If the entity keys allow it, create a **combined Dynamic Table** that pre-joins the required Feature Views into a single record, then derive the OFT from that combined Feature View. This pushes the join into the materialization layer so the online read is a single point lookup:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
 combined_df = session.sql("""
     SELECT
@@ -203,7 +237,31 @@ combined_df = session.sql("""
     JOIN FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"              u  ON u.USER_ID = ui.USER_ID
     JOIN FEATURE_STORE_DEMO.FEATURE_STORE."LISTING_FV$V01"                 l  ON l.LISTING_ID = ui.LISTING_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+ui = session.table('FEATURE_STORE_DEMO.FEATURE_STORE."USER_LISTING_INTERACTION_FV$V01"')
+u  = session.table('FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"')
+l  = session.table('FEATURE_STORE_DEMO.FEATURE_STORE."LISTING_FV$V01"')
+
+combined_df = (
+    ui.join(u, ui["USER_ID"] == u["USER_ID"])
+      .join(l, ui["LISTING_ID"] == l["LISTING_ID"])
+      .select(
+          ui["USER_ID"], ui["LISTING_ID"],
+          u["ORDER_TOTAL_AMT_SUM"], u["ORDER_CNT"],
+          l["LISTING_PRICE"], l["LISTING_AGE_DAYS"],
+          ui["VIEW_CNT"],
+          ui["LAST_INTERACTION_TS"].alias("FV_TS"),
+      )
+)
+```
+
+:::
+
+```python
 user_listing_entity = Entity(
     name="USER_LISTING", join_keys=["USER_ID", "LISTING_ID"],
 )
@@ -471,28 +529,94 @@ async def get_features(user_id: str):
     return features.to_pandas().to_dict(orient="records")[0]
 ```
 
-### External serving store fallback {#sec-external-serving}
+### Read Latency vs Feature Freshness {#sec-latency-vs-freshness}
 
-Some use cases have **sub-20 ms** latency requirements that exceed what Hybrid Table-backed OFTs can consistently deliver today. When native OFT latency does not meet the SLA, teams sometimes replicate features to an **external key-value store** (e.g., Redis, PostgreSQL, DynamoDB) for serving.
+When evaluating online serving options, it is important to distinguish two separate concerns:
+
+| Concern | Definition | Native OFT (Hybrid Table) |
+|---|---|---|
+| **Read latency** | Time from query to response | 10–100 ms (warm, standard WH) |
+| **Feature freshness** | Time from source event to feature value reflecting it | `DT refresh_freq` + `OFT target_lag` = tens of seconds to minutes |
+
+Many discussions conflate these. A system can have low read latency but stale features (fast reads of old data), or high read latency but fresh features (slow reads of up-to-date data). When a customer says "we need real-time features," clarify which dimension they mean.
+
+**End-to-end freshness in the batch model:**
+
+1. Source event lands in a Snowflake table
+2. Dynamic Table refreshes on `refresh_freq` schedule (minutes to hours)
+3. OFT sync Task runs on `target_lag` schedule (minimum 10 seconds)
+4. Feature value is queryable
+
+For features like "count of transactions in the last N seconds," this pipeline is fundamentally too slow regardless of read latency.
+
+### External serving store pattern {#sec-external-serving}
+
+Some use cases have **sub-20 ms read latency** or **sub-second feature freshness** requirements that exceed what Hybrid Table-backed OFTs deliver. When native OFT performance does not meet the SLA, teams sometimes replicate features to an **external key-value store** (e.g., Redis, SingleStore, DynamoDB, Aerospike) for serving.
 
 **Pattern**: Keep the Feature Store as the **system of record** for feature definitions, lineage, and offline retrieval. Use a CDC (change data capture) or scheduled sync tool to replicate the OFT or offline Feature View to the external store:
 
-![External serving: Feature Store to OFT or CDC to external store](../_diagrams/png/dg_08_external_serving.png){fig-alt="Offline feature store path to hybrid OFT or to external key value store"}
+```{mermaid}
+%%| fig-cap: "External serving: Feature Store to OFT or CDC to external store"
+%%| fig-alt: "Offline feature store path to hybrid OFT or to external key value store"
+flowchart TD
+  FS[Feature Store offline FV]
+  FS --> OFT[OFT Hybrid Table]
+  FS --> CDC[CDC or sync tool]
+  CDC --> EXT[External store Redis PG Dynamo]
+```
 
 **Trade-offs:**
 
 | Factor | OFT (native) | External store |
 |--------|-------------|---------------|
-| **Latency** | 10-100 ms (warm, standard WH) | 1-20 ms (depending on store) |
+| **Read latency** | 10–100 ms (warm, standard WH) | 1–20 ms (depending on store) |
+| **Feature freshness** | DT refresh + OFT sync (seconds to minutes) | As fast as the write pipeline (sub-second possible) |
 | **Operational overhead** | Fully managed by Snowflake | CDC pipeline to maintain: column/type mapping, schema evolution, monitoring |
 | **Data consistency** | Single source of truth | Eventual consistency with sync delay |
 | **Cost** | Warehouse credits (serving + refresh) | External store infrastructure + sync tool licensing |
 | **Schema changes** | Handled via FV versioning | Require manual pipeline updates; breaking changes risk sync failures |
 
-::: {.callout-tip}
-Treat an external serving store as a **temporary optimisation** rather than the long-term architecture. Snowflake's online serving capabilities are actively evolving; as latency improves (e.g., through future Postgres-backed OFTs or other enhancements), plan to consolidate back to native serving to eliminate the CDC maintenance burden.
-:::
+### Hybrid architecture for sub-second features {#sec-hybrid-architecture}
 
+When a subset of features genuinely needs sub-second freshness (fraud signals, real-time engagement scores) while others are slow-changing (demographics, 7d/30d aggregates), a **hybrid architecture** avoids over-engineering the entire pipeline:
+
+- **Snowflake Feature Store** for batch / slow-changing features (the majority of the feature vector)
+- **External real-time layer** (SingleStore, Redis, Kafka Streams, Flink state store, or the Streaming Feature Views described in the next chapter) for the sub-second features
+- **Inference service** assembles features from both sources at prediction time
+
+```{mermaid}
+%%| fig-cap: "Hybrid serving: batch features from Snowflake, real-time features from external store"
+flowchart LR
+    subgraph snowflake [Snowflake Feature Store]
+        DT["Dynamic Table"] --> OFT["Hybrid Table OFT"]
+    end
+    subgraph realtime [Real-Time Layer]
+        Stream["Event Stream"] --> ExtStore["External Store"]
+    end
+    OFT --> Inference["Inference Service"]
+    ExtStore --> Inference
+    Inference --> Prediction["Model Prediction"]
+```
+
+### Historization of external online features {#sec-historization}
+
+If a customer uses an external online store for sub-second features, they must consider how to **keep a history of those feature values in the offline store** for:
+
+- **Training data generation** — PIT-correct training requires knowing what the feature value was at each historical label timestamp. Without historization, you cannot reconstruct what the model "saw" at prediction time.
+- **Batch inference reproducibility** — reproducing a past inference requires the same feature vector.
+- **Drift detection and model monitoring** — comparing training-time and serving-time feature distributions requires logged serving values.
+
+**Options for historization:**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| **CDC / change log from external store** written back to a Snowflake table, registered as a View-based Feature View | Full history; Feature Store catalog/lineage; supports PIT joins | Requires CDC pipeline; adds latency to offline availability |
+| **Shadow logging at inference time** — log the assembled feature vector alongside the prediction | Captures exactly what the model saw; no CDC needed | Storage overhead; requires inference service changes; not available for ad-hoc historical queries |
+| **Accept approximate PIT** for sub-second features | No additional infrastructure | Training data may not perfectly match serving behavior; acceptable when sub-second features have limited historical sensitivity |
+
+::: {.callout-tip}
+Snowflake is actively developing **Streaming Feature Views** with a Postgres-backed online store that provides 2–3 second end-to-end freshness with built-in offline historization. This native capability addresses much of the motivation for external stores. Before committing to a complex hybrid architecture, evaluate whether Streaming Feature Views (Private Preview) meet your freshness requirements. See the [Streaming Feature Views chapter](../08a_streaming_feature_views/index.qmd) for details (internal / NDA-only).
+:::
 ---
 
 ## Best practices
@@ -546,6 +670,39 @@ Run Feature Store sessions used for **online** reads on a warehouse sized for **
 
 **Solution:** Use `online_config=feature_view.OnlineConfig(...)` on the Feature View (or `update_feature_view`).
 
+### ❌ Pitfall 5: Enabling online serving on a tiled Feature View {#sec-pitfall-tiled-oft}
+
+**Problem:** A Feature View created with the Aggregations API (`features=[Feature.sum(...), ...]` and `feature_granularity`) stores partial aggregates in the underlying Dynamic Table — columns like `_PARTIAL_SUM_TOTAL_AMT` and `TILE_START` instead of the original `timestamp_col`. When you add `online_config` to such a Feature View, `register_feature_view` fails:
+
+```
+SQL compilation error: column 'ORDER_TS' does not exist
+```
+
+The SDK does not validate this in advance.
+
+**Solution:** Use **one of three approaches** (ranked by preference):
+
+1. **`online_fv_from_tiled()` helper** (recommended): Auto-generates a non-tiled, OFT-ready Feature View from the tiled FV's `Feature` definitions. The helper produces a scoped `GROUP BY` query bounded to only `max(window + offset) + buffer` of source data, keeping the DT small and fast despite FULL refresh. Use the tiled FV for offline/training workloads.
+
+2. **Manual non-tiled FV**: Write your own `GROUP BY` query with `CASE WHEN` per-feature window filters if you need to customise beyond what the helper generates.
+
+3. **Postgres online store** (Private Preview): The upcoming `OnlineStoreType.POSTGRES` backend performs query-time tile reassembly natively, eliminating the need for workarounds.
+
+```{python}
+#| eval: false
+
+# Example: using the helper to create an online companion
+from online_from_tiled import online_fv_from_tiled
+
+online_fv = online_fv_from_tiled(
+    tiled_reg, session,
+    source_query="SELECT * FROM DB.SCHEMA.ORDERS",
+)
+fs.register_feature_view(online_fv, version="V01", block=True)
+```
+
+See [Chapter 7: Tiled Feature Views and Online Serving](../07_aggregations_api/index.qmd#sec-tiled-online) for the helper's full API, generated SQL examples, and performance trade-offs.
+
 ---
 
 ## Summary
@@ -563,6 +720,7 @@ Run Feature Store sessions used for **online** reads on a warehouse sized for **
 | **Warm-up** | OFTs require sustained queries to reach steady-state latency; always warm up before benchmarking |
 | **Benchmarking** | Concurrent connections, key batching, parameter binding, per-minute P50/P95/P99, multi-cluster WH for high QPS |
 | **External serving store** | Fallback for sub-20 ms requirements; CDC to Redis/Postgres/DynamoDB with Feature Store as system of record |
+| **Tiled FV limitation** | Tiled (Aggregations API) FVs cannot have Hybrid Table OFTs directly — use the `online_fv_from_tiled()` helper to auto-generate a non-tiled companion, or the Postgres backend |
 | **Current values only** | No historical timeline in the OFT |
 
 ---

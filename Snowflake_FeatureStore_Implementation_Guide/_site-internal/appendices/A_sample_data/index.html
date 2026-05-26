@@ -1,0 +1,2062 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="keywords" content="snowflake, feature store, ml, machine learning, mlops">
+<meta name="description" content="Comprehensive guide to implementing Snowflake Feature Store for production ML, covering design patterns, temporal features, aggregations, online serving, and CI/CD.">
+
+<title>Appendix A — Sample Data – Snowflake Feature Store Implementation Guide (Internal)</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<link href="../../appendices/A_sample_data/data_manager/streamlit_app.html" rel="next">
+<link href="../../08a_streaming_feature_views/index.html" rel="prev">
+<script src="../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-dark-23bbe8b5e4efc1e257f6d59dce478b08.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting-acf12a64177840b8d86f2d4f01b2e9fb.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../../site_libs/bootstrap/bootstrap-dark-88f976c52a096bfcf50c5d13e133667b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../../site_libs/bootstrap/bootstrap-266c511074f5aca7ff2653ef817cad7d.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "sidebar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "start",
+  "type": "textbox",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+<script src="../../site_libs/quarto-diagram/mermaid.min.js"></script>
+<script src="../../site_libs/quarto-diagram/mermaid-init.js"></script>
+<link href="../../site_libs/quarto-diagram/mermaid.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Snowflake Feature Store Implementation Guide">
+<meta property="og:description" content="Best practices for building production ML feature platforms with Snowflake Feature Store — entities, Feature Views, pipelines, online serving, and operations.">
+<meta property="og:site_name" content="Snowflake Feature Store Implementation Guide (Internal)">
+</head>
+
+<body class="nav-sidebar docked quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+      // Hack to workaround the fact that safari doesn't
+      // properly recolor the scrollbar when toggling (#1455)
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        window.scrollTo(0, 1);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const darkModeDefault = authorPrefersDark;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+  <nav class="quarto-secondary-nav">
+    <div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></a></li></ol></nav>
+        <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+        </a>
+      <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
+        <i class="bi bi-search"></i>
+      </button>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation docked overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="sidebar-title mb-0 py-0">
+      <a href="../../">Snowflake Feature Store Implementation Guide (Internal)</a> 
+        <div class="sidebar-tools-main">
+    <a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide" title="Source Code" class="quarto-navigation-tool px-1" aria-label="Source Code"><i class="bi bi-github"></i></a>
+  <a href="" class="quarto-color-scheme-toggle quarto-navigation-tool  px-1" onclick="window.quartoToggleColorScheme(); return false;" title="Toggle dark mode"><i class="bi"></i></a>
+</div>
+    </div>
+      </div>
+        <div class="mt-2 flex-shrink-0 align-items-center">
+        <div class="sidebar-search">
+        <div id="quarto-search" class="" title="Search"></div>
+        </div>
+        </div>
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Snowflake Feature Store Implementation Guide</span></a>
+  </div>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
+ <span class="menu-text">Getting Started</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../00_introduction/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Introduction</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../01_concepts/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">1</span>&nbsp; <span class="chapter-title">Core Concepts</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true">
+ <span class="menu-text">Design &amp; Architecture</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-2" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../02_design_organization/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Design &amp; Organization</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../03_entities_hierarchies/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">3</span>&nbsp; <span class="chapter-title">Entities &amp; Hierarchies</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../04_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true">
+ <span class="menu-text">Feature Engineering</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-3" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../05_feature_pipelines/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Feature Pipelines</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../06_temporal_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Temporal Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../07_aggregations_api/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Aggregations API</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true">
+ <span class="menu-text">Production</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-4" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../08_online_features/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Online Features</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../09_preprocessing/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Preprocessing</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../10_training_inference/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Training &amp; Inference</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true">
+ <span class="menu-text">Operations &amp; Advanced</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../11_operations/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">11</span>&nbsp; <span class="chapter-title">Operations</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../12_advanced_patterns/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">12</span>&nbsp; <span class="chapter-title">Advanced Patterns</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../13_migration_guide/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">13</span>&nbsp; <span class="chapter-title">Migration Guide</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true">
+ <span class="menu-text">Preview Features</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-6" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-6" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../08a_streaming_feature_views/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true">
+ <span class="menu-text">Appendices</span></a>
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-7" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-7" class="collapse list-unstyled sidebar-section depth1 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/A_sample_data/index.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/A_sample_data/data_manager/streamlit_app.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/B_setup/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">C</span>&nbsp; <span class="chapter-title">Environment Setup</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/C_snowpark_to_dynamic_table/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">D</span>&nbsp; <span class="chapter-title">Snowpark to Dynamic Table</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../../appendices/D_tag_convention/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">E</span>&nbsp; <span class="chapter-title">Feature Store Internal Tag Schema</span></span></a>
+  </div>
+</li>
+      </ul>
+  </li>
+    </ul>
+    </div>
+</nav>
+<div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview"><span class="header-section-number">A.1</span> Overview</a></li>
+  <li><a href="#clickstream-dataset" id="toc-clickstream-dataset" class="nav-link" data-scroll-target="#clickstream-dataset"><span class="header-section-number">A.2</span> Clickstream Dataset</a>
+  <ul class="collapse">
+  <li><a href="#quick-start" id="toc-quick-start" class="nav-link" data-scroll-target="#quick-start"><span class="header-section-number">A.2.1</span> Quick Start</a></li>
+  <li><a href="#required-privileges" id="toc-required-privileges" class="nav-link" data-scroll-target="#required-privileges"><span class="header-section-number">A.2.2</span> Required Privileges</a></li>
+  <li><a href="#schema-organization" id="toc-schema-organization" class="nav-link" data-scroll-target="#schema-organization"><span class="header-section-number">A.2.3</span> Schema Organization</a></li>
+  <li><a href="#data-tables" id="toc-data-tables" class="nav-link" data-scroll-target="#data-tables"><span class="header-section-number">A.2.4</span> Data Tables</a></li>
+  <li><a href="#scale-factors" id="toc-scale-factors" class="nav-link" data-scroll-target="#scale-factors"><span class="header-section-number">A.2.5</span> Scale Factors</a></li>
+  <li><a href="#incremental-generation" id="toc-incremental-generation" class="nav-link" data-scroll-target="#incremental-generation"><span class="header-section-number">A.2.6</span> Incremental Generation</a></li>
+  <li><a href="#files" id="toc-files" class="nav-link" data-scroll-target="#files"><span class="header-section-number">A.2.7</span> Files</a></li>
+  </ul></li>
+  <li><a href="#public-ml-datasets" id="toc-public-ml-datasets" class="nav-link" data-scroll-target="#public-ml-datasets"><span class="header-section-number">A.3</span> Public ML Datasets</a>
+  <ul class="collapse">
+  <li><a href="#loading-public-datasets" id="toc-loading-public-datasets" class="nav-link" data-scroll-target="#loading-public-datasets"><span class="header-section-number">A.3.1</span> Loading Public Datasets</a></li>
+  </ul></li>
+  <li><a href="#development-database-subset-tool" id="toc-development-database-subset-tool" class="nav-link" data-scroll-target="#development-database-subset-tool"><span class="header-section-number">A.4</span> Development Database Subset Tool</a>
+  <ul class="collapse">
+  <li><a href="#quick-start-1" id="toc-quick-start-1" class="nav-link" data-scroll-target="#quick-start-1"><span class="header-section-number">A.4.1</span> Quick Start</a></li>
+  <li><a href="#key-features" id="toc-key-features" class="nav-link" data-scroll-target="#key-features"><span class="header-section-number">A.4.2</span> Key Features</a></li>
+  <li><a href="#multi-environment-setup" id="toc-multi-environment-setup" class="nav-link" data-scroll-target="#multi-environment-setup"><span class="header-section-number">A.4.3</span> Multi-Environment Setup</a></li>
+  </ul></li>
+  </ul>
+<div class="toc-actions"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/A_sample_data/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html">Appendices</a></li><li class="breadcrumb-item"><a href="../../appendices/A_sample_data/index.html"><span class="chapter-number">A</span>&nbsp; <span class="chapter-title">Sample Data</span></a></li></ol></nav>
+<div class="quarto-title">
+<div class="quarto-title-block"><div><h1 class="title">Appendix A — Sample Data</h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<p class="subtitle lead">Clickstream dataset generator and public ML datasets</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Keywords</div>
+    <p>snowflake, feature store, ml, machine learning, mlops</p>
+  </div>
+</div>
+
+</header>
+
+
+<section id="overview" class="level2" data-number="A.1">
+<h2 data-number="A.1" class="anchored" data-anchor-id="overview"><span class="header-section-number">A.1</span> Overview</h2>
+<p>This appendix documents the sample data used throughout the Feature Store Implementation Guide:</p>
+<ol type="1">
+<li><strong>Clickstream Dataset</strong> - A synthetic e-commerce dataset generated specifically for this guide</li>
+<li><strong>Public ML Datasets</strong> - Standard datasets (Iris, Titanic, etc.) for simple examples</li>
+</ol>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Recommended: Streamlit Data Manager
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>For first-time setup and interactive data management, we recommend using the <strong>Streamlit Data Manager</strong> app. It provides a visual interface for all data operations with guided workflows.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1"></a><span class="bu">cd</span> data_manager/</span>
+<span id="cb1-2"><a href="#cb1-2"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb1-3"><a href="#cb1-3"></a><span class="ex">streamlit</span> run app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong><a href="../../appendices/A_sample_data/data_manager/streamlit_app.html">📖 Full Streamlit App Documentation →</a></strong></p>
+</div>
+</div>
+</section>
+<section id="clickstream-dataset" class="level2" data-number="A.2">
+<h2 data-number="A.2" class="anchored" data-anchor-id="clickstream-dataset"><span class="header-section-number">A.2</span> Clickstream Dataset</h2>
+<section id="quick-start" class="level3" data-number="A.2.1">
+<h3 data-number="A.2.1" class="anchored" data-anchor-id="quick-start"><span class="header-section-number">A.2.1</span> Quick Start</h3>
+<p>You can manage sample data using either the <strong>Streamlit UI</strong> (interactive) or <strong>CLI tools</strong> (scriptable).</p>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" href="" aria-current="page">Streamlit UI (Recommended)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false" href="">CLI Tools</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-3" role="tab" aria-controls="tabset-1-3" aria-selected="false" href="">Python API</a></li></ul>
+<div class="tab-content">
+<div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1"></a><span class="bu">cd</span> data_manager/</span>
+<span id="cb2-2"><a href="#cb2-2"></a></span>
+<span id="cb2-3"><a href="#cb2-3"></a><span class="co"># Set Snowflake connection</span></span>
+<span id="cb2-4"><a href="#cb2-4"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb2-5"><a href="#cb2-5"></a></span>
+<span id="cb2-6"><a href="#cb2-6"></a><span class="co"># Launch the UI</span></span>
+<span id="cb2-7"><a href="#cb2-7"></a><span class="ex">streamlit</span> run app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The UI provides:</p>
+<ul>
+<li>📊 <strong>Overview</strong> - View current data status</li>
+<li>📥 <strong>Initial Load</strong> - Generate and load synthetic data<br>
+</li>
+<li>🔄 <strong>Incremental Generator</strong> - Manage continuous data generation</li>
+<li>🌿 <strong>Development Branch</strong> - Create sampled dev environments</li>
+<li>📚 <strong>Public Datasets</strong> - Load standard ML datasets</li>
+<li>📈 <strong>Monitoring</strong> - Track task and DT executions</li>
+</ul>
+<p><strong><a href="../../appendices/A_sample_data/data_manager/streamlit_app.html">See detailed walkthrough with screenshots →</a></strong></p>
+</div>
+<div id="tabset-1-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-2-tab">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1"></a><span class="bu">cd</span> generator/</span>
+<span id="cb3-2"><a href="#cb3-2"></a></span>
+<span id="cb3-3"><a href="#cb3-3"></a><span class="co"># Set Snowflake connection</span></span>
+<span id="cb3-4"><a href="#cb3-4"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb3-5"><a href="#cb3-5"></a></span>
+<span id="cb3-6"><a href="#cb3-6"></a><span class="co"># Step 1: Initial load (scale 0.01 = ~1K users)</span></span>
+<span id="cb3-7"><a href="#cb3-7"></a><span class="ex">python</span> main.py <span class="at">--scale</span> 0.01 <span class="at">--output</span> snowflake</span>
+<span id="cb3-8"><a href="#cb3-8"></a></span>
+<span id="cb3-9"><a href="#cb3-9"></a><span class="co"># Step 2 (Optional): Deploy continuous generation</span></span>
+<span id="cb3-10"><a href="#cb3-10"></a><span class="bu">cd</span> snowflake_native</span>
+<span id="cb3-11"><a href="#cb3-11"></a><span class="ex">python</span> deploy.py <span class="at">--start</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div id="tabset-1-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-3-tab">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode numberSource python number-lines code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1"></a><span class="im">from</span> data_manager.core <span class="im">import</span> DataManager</span>
+<span id="cb4-2"><a href="#cb4-2"></a></span>
+<span id="cb4-3"><a href="#cb4-3"></a>dm <span class="op">=</span> DataManager()</span>
+<span id="cb4-4"><a href="#cb4-4"></a>dm.<span class="ex">connect</span>()</span>
+<span id="cb4-5"><a href="#cb4-5"></a></span>
+<span id="cb4-6"><a href="#cb4-6"></a><span class="co"># Initial load</span></span>
+<span id="cb4-7"><a href="#cb4-7"></a>result <span class="op">=</span> dm.run_initial_load(scale<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb4-8"><a href="#cb4-8"></a><span class="bu">print</span>(<span class="ss">f"Loaded: </span><span class="sc">{</span>result<span class="sc">.</span>row_counts<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb4-9"><a href="#cb4-9"></a></span>
+<span id="cb4-10"><a href="#cb4-10"></a><span class="co"># Create dev branch</span></span>
+<span id="cb4-11"><a href="#cb4-11"></a>result <span class="op">=</span> dm.create_dev_branch(<span class="st">"MY_DEV_DB"</span>, sample_pct<span class="op">=</span><span class="dv">10</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+</div>
+</section>
+<section id="required-privileges" class="level3" data-number="A.2.2">
+<h3 data-number="A.2.2" class="anchored" data-anchor-id="required-privileges"><span class="header-section-number">A.2.2</span> Required Privileges</h3>
+<p>The data loading scripts require specific Snowflake privileges depending on your use case.</p>
+<section id="minimum-privileges-using-existing-database" class="level4" data-number="A.2.2.1">
+<h4 data-number="A.2.2.1" class="anchored" data-anchor-id="minimum-privileges-using-existing-database"><span class="header-section-number">A.2.2.1</span> Minimum Privileges (Using Existing Database)</h4>
+<p>If you have an existing database and just need to create schemas and tables:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Privilege</th>
+<th>Object</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>USAGE</code></td>
+<td>Warehouse</td>
+<td>Execute queries</td>
+</tr>
+<tr class="even">
+<td><code>USAGE</code></td>
+<td>Database</td>
+<td>Access the database</td>
+</tr>
+<tr class="odd">
+<td><code>CREATE SCHEMA</code></td>
+<td>Database</td>
+<td>Create CLICKSTREAM_DATA schema</td>
+</tr>
+<tr class="even">
+<td><code>CREATE TABLE</code></td>
+<td>Schema</td>
+<td>Create data tables</td>
+</tr>
+<tr class="odd">
+<td><code>CREATE STAGE</code></td>
+<td>Schema</td>
+<td>Upload Parquet files (bulk load)</td>
+</tr>
+</tbody>
+</table>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb5-1"><a href="#cb5-1"></a><span class="co">-- Grant minimum privileges to a role (canonical guide names shown)</span></span>
+<span id="cb5-2"><a href="#cb5-2"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb5-3"><a href="#cb5-3"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb5-4"><a href="#cb5-4"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">SCHEMA</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb5-5"><a href="#cb5-5"></a></span>
+<span id="cb5-6"><a href="#cb5-6"></a><span class="co">-- After schema creation, grant table privileges</span></span>
+<span id="cb5-7"><a href="#cb5-7"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">ON</span> <span class="kw">SCHEMA</span> FEATURE_STORE_DEMO.CLICKSTREAM_DATA <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="full-setup-creating-new-database" class="level4" data-number="A.2.2.2">
+<h4 data-number="A.2.2.2" class="anchored" data-anchor-id="full-setup-creating-new-database"><span class="header-section-number">A.2.2.2</span> Full Setup (Creating New Database)</h4>
+<p>For the complete setup including database creation:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Privilege</th>
+<th>Object</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>CREATE DATABASE</code></td>
+<td>Account</td>
+<td>Create FEATURE_STORE_DEMO database</td>
+</tr>
+<tr class="even">
+<td><code>USAGE</code></td>
+<td>Warehouse</td>
+<td>Execute queries</td>
+</tr>
+</tbody>
+</table>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb6-1"><a href="#cb6-1"></a><span class="co">-- Grant full setup privileges</span></span>
+<span id="cb6-2"><a href="#cb6-2"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">DATABASE</span> <span class="kw">ON</span> <span class="kw">ACCOUNT</span> <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb6-3"><a href="#cb6-3"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="incremental-generator-additional" class="level4" data-number="A.2.2.3">
+<h4 data-number="A.2.2.3" class="anchored" data-anchor-id="incremental-generator-additional"><span class="header-section-number">A.2.2.3</span> Incremental Generator (Additional)</h4>
+<p>To deploy and run the Snowflake-native incremental generator:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Privilege</th>
+<th>Object</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>CREATE PROCEDURE</code></td>
+<td>Schema</td>
+<td>Create stored procedure</td>
+</tr>
+<tr class="even">
+<td><code>CREATE TASK</code></td>
+<td>Schema</td>
+<td>Create scheduled task</td>
+</tr>
+<tr class="odd">
+<td><code>EXECUTE TASK</code></td>
+<td>Account</td>
+<td>Allow task execution</td>
+</tr>
+</tbody>
+</table>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb7-1"><a href="#cb7-1"></a><span class="co">-- Grant incremental generator privileges (admin schema for generator objects)</span></span>
+<span id="cb7-2"><a href="#cb7-2"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">PROCEDURE</span> <span class="kw">ON</span> <span class="kw">SCHEMA</span> FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb7-3"><a href="#cb7-3"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> TASK <span class="kw">ON</span> <span class="kw">SCHEMA</span> FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb7-4"><a href="#cb7-4"></a><span class="kw">GRANT</span> <span class="kw">EXECUTE</span> TASK <span class="kw">ON</span> <span class="kw">ACCOUNT</span> <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span>
+<span id="cb7-5"><a href="#cb7-5"></a></span>
+<span id="cb7-6"><a href="#cb7-6"></a><span class="co">-- After task creation, grant operate privilege</span></span>
+<span id="cb7-7"><a href="#cb7-7"></a><span class="kw">GRANT</span> OPERATE <span class="kw">ON</span> TASK incremental_data_task <span class="kw">TO</span> <span class="kw">ROLE</span> my_role;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Using a Custom Database
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>If you don’t have <code>CREATE DATABASE</code> privilege, use the <code>--database</code> flag to specify an existing database:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1"></a><span class="ex">python</span> main.py <span class="at">--scale</span> 0.01 <span class="at">--database</span> MY_EXISTING_DB <span class="at">--schema</span> MY_SCHEMA <span class="at">--output</span> snowflake</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Recommended: Create a Dedicated Role
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>For production use, create a dedicated role with only the required privileges:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb9-1"><a href="#cb9-1"></a><span class="co">-- See Appendix B: Environment Setup for the full security model</span></span>
+<span id="cb9-2"><a href="#cb9-2"></a><span class="co">-- Quick start: run scripts/01_dba_setup.sql (Appendix B)</span></span>
+<span id="cb9-3"><a href="#cb9-3"></a></span>
+<span id="cb9-4"><a href="#cb9-4"></a><span class="co">-- Or manually create a role:</span></span>
+<span id="cb9-5"><a href="#cb9-5"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_ADMIN_ROLE;</span>
+<span id="cb9-6"><a href="#cb9-6"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> <span class="kw">ROLE</span> FS_ADMIN_ROLE;</span>
+<span id="cb9-7"><a href="#cb9-7"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">DATABASE</span> <span class="kw">ON</span> <span class="kw">ACCOUNT</span> <span class="kw">TO</span> <span class="kw">ROLE</span> FS_ADMIN_ROLE;</span>
+<span id="cb9-8"><a href="#cb9-8"></a><span class="kw">GRANT</span> <span class="kw">ROLE</span> FS_ADMIN_ROLE <span class="kw">TO</span> <span class="fu">USER</span> my_user;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</div>
+</section>
+</section>
+<section id="schema-organization" class="level3" data-number="A.2.3">
+<h3 data-number="A.2.3" class="anchored" data-anchor-id="schema-organization"><span class="header-section-number">A.2.3</span> Schema Organization</h3>
+<p>The generator creates two schemas:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Schema</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>CLICKSTREAM_DATA</code></td>
+<td>Data tables (11 tables)</td>
+</tr>
+<tr class="even">
+<td><code>CLICKSTREAM_ADMIN</code></td>
+<td>Generator config, state, task</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="data-tables" class="level3" data-number="A.2.4">
+<h3 data-number="A.2.4" class="anchored" data-anchor-id="data-tables"><span class="header-section-number">A.2.4</span> Data Tables</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 21%">
+<col style="width: 39%">
+<col style="width: 39%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Table</th>
+<th>Description</th>
+<th>Key Columns</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>CATEGORIES</td>
+<td>Product categories</td>
+<td>CATEGORY_ID, CATEGORY_NAME</td>
+</tr>
+<tr class="even">
+<td>SUPPLIERS</td>
+<td>Product suppliers</td>
+<td>SUPPLIER_ID, SUPPLIER_NAME</td>
+</tr>
+<tr class="odd">
+<td>PRODUCTS</td>
+<td>Product catalog</td>
+<td>PRODUCT_ID, PRODUCT_NAME, CATEGORY_ID</td>
+</tr>
+<tr class="even">
+<td>PRODUCT_SUPPLIER</td>
+<td>Product-supplier mapping</td>
+<td>PRODUCT_ID, SUPPLIER_ID (composite PK)</td>
+</tr>
+<tr class="odd">
+<td>HOUSEHOLDS</td>
+<td>Customer households</td>
+<td>HOUSEHOLD_ID, ADDRESS</td>
+</tr>
+<tr class="even">
+<td>VISITORS</td>
+<td>Anonymous visitors</td>
+<td>VISITOR_ID, FIRST_SEEN_TS</td>
+</tr>
+<tr class="odd">
+<td>USERS</td>
+<td>Registered users</td>
+<td>USER_ID, VISITOR_ID, HOUSEHOLD_ID</td>
+</tr>
+<tr class="even">
+<td>SESSIONS</td>
+<td>User sessions</td>
+<td>SESSION_ID, VISITOR_ID, USER_ID</td>
+</tr>
+<tr class="odd">
+<td>EVENTS</td>
+<td>Clickstream events</td>
+<td>EVENT_ID, SESSION_ID, EVENT_TYPE</td>
+</tr>
+<tr class="even">
+<td>ORDERS</td>
+<td>Purchase orders</td>
+<td>ORDER_ID, USER_ID, ORDER_TS</td>
+</tr>
+<tr class="odd">
+<td>ORDER_ITEMS</td>
+<td>Order line items</td>
+<td>ORDER_ITEM_ID, ORDER_ID, PRODUCT_ID</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="scale-factors" class="level3" data-number="A.2.5">
+<h3 data-number="A.2.5" class="anchored" data-anchor-id="scale-factors"><span class="header-section-number">A.2.5</span> Scale Factors</h3>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Scale</th>
+<th>Users</th>
+<th>Sessions</th>
+<th>Events</th>
+<th>Orders</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>0.01</td>
+<td>1K</td>
+<td>5K</td>
+<td>44K</td>
+<td>250</td>
+</tr>
+<tr class="even">
+<td>0.1</td>
+<td>10K</td>
+<td>50K</td>
+<td>440K</td>
+<td>2.5K</td>
+</tr>
+<tr class="odd">
+<td>1.0</td>
+<td>100K</td>
+<td>500K</td>
+<td>4.4M</td>
+<td>25K</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="incremental-generation" class="level3" data-number="A.2.6">
+<h3 data-number="A.2.6" class="anchored" data-anchor-id="incremental-generation"><span class="header-section-number">A.2.6</span> Incremental Generation</h3>
+<p>For Dynamic Table and Online Feature testing we need an incremental data generator to show the evolution of the feature store data through feature pipelines over time. This can be deployed using the following SQL commands:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb10-1"><a href="#cb10-1"></a><span class="co">-- Start continuous generation (every minute)</span></span>
+<span id="cb10-2"><a href="#cb10-2"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK <span class="kw">RESUME</span>;</span>
+<span id="cb10-3"><a href="#cb10-3"></a></span>
+<span id="cb10-4"><a href="#cb10-4"></a><span class="co">-- Monitor</span></span>
+<span id="cb10-5"><a href="#cb10-5"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.GENERATION_STATUS;</span>
+<span id="cb10-6"><a href="#cb10-6"></a></span>
+<span id="cb10-7"><a href="#cb10-7"></a><span class="co">-- Stop when done</span></span>
+<span id="cb10-8"><a href="#cb10-8"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK <span class="kw">SUSPEND</span>;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Note: Leaving these executing will continue to generate data and update the feature store data over time, but will incur costs for the compute resources used to generate the data. When you are done with the testing, you can suspend the task by running the following SQL command:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode numberSource sql number-lines code-with-copy"><code class="sourceCode sql"><span id="cb11-1"><a href="#cb11-1"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO.CLICKSTREAM_ADMIN.INCREMENTAL_DATA_TASK <span class="kw">SUSPEND</span>;</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>You can resume the task at any time when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated. The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time. This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.</p>
+</section>
+<section id="files" class="level3" data-number="A.2.7">
+<h3 data-number="A.2.7" class="anchored" data-anchor-id="files"><span class="header-section-number">A.2.7</span> Files</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 59%">
+<col style="width: 40%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>File/Folder</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>generator/main.py</code></td>
+<td>Initial data generation</td>
+</tr>
+<tr class="even">
+<td><code>generator/snowflake_native/</code></td>
+<td>Snowflake-native incremental generation</td>
+</tr>
+<tr class="odd">
+<td><code>generator/README.md</code></td>
+<td>Complete documentation</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="public-ml-datasets" class="level2" data-number="A.3">
+<h2 data-number="A.3" class="anchored" data-anchor-id="public-ml-datasets"><span class="header-section-number">A.3</span> Public ML Datasets</h2>
+<p>For simple inline examples and testing, we provide standard ML datasets:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 22%">
+<col style="width: 27%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Dataset</th>
+<th>Records</th>
+<th>Sample</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>penguins</code></td>
+<td>344</td>
+<td>All</td>
+<td>Multi-class classification</td>
+</tr>
+<tr class="even">
+<td><code>titanic</code></td>
+<td>891</td>
+<td>All</td>
+<td>Binary classification</td>
+</tr>
+<tr class="odd">
+<td><code>iris</code></td>
+<td>150</td>
+<td>All</td>
+<td>Classification basics</td>
+</tr>
+<tr class="even">
+<td><code>wine</code></td>
+<td>1,599</td>
+<td>All</td>
+<td>Regression / classification</td>
+</tr>
+<tr class="odd">
+<td><code>california_housing</code></td>
+<td>20,640</td>
+<td>All</td>
+<td>Regression</td>
+</tr>
+<tr class="even">
+<td><code>nyc_taxi</code></td>
+<td>~3M</td>
+<td>50K</td>
+<td>Temporal features, fare prediction</td>
+</tr>
+<tr class="odd">
+<td><code>credit_card_fraud</code></td>
+<td>284K</td>
+<td>50K</td>
+<td>Imbalanced classification, temporal</td>
+</tr>
+</tbody>
+</table>
+<section id="loading-public-datasets" class="level3" data-number="A.3.1">
+<h3 data-number="A.3.1" class="anchored" data-anchor-id="loading-public-datasets"><span class="header-section-number">A.3.1</span> Loading Public Datasets</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1"></a><span class="bu">cd</span> public_datasets/</span>
+<span id="cb12-2"><a href="#cb12-2"></a></span>
+<span id="cb12-3"><a href="#cb12-3"></a><span class="co"># List available datasets</span></span>
+<span id="cb12-4"><a href="#cb12-4"></a><span class="ex">python</span> load_datasets.py <span class="at">--list</span></span>
+<span id="cb12-5"><a href="#cb12-5"></a></span>
+<span id="cb12-6"><a href="#cb12-6"></a><span class="co"># Load specific dataset</span></span>
+<span id="cb12-7"><a href="#cb12-7"></a><span class="ex">python</span> load_datasets.py penguins</span>
+<span id="cb12-8"><a href="#cb12-8"></a></span>
+<span id="cb12-9"><a href="#cb12-9"></a><span class="co"># Load all datasets</span></span>
+<span id="cb12-10"><a href="#cb12-10"></a><span class="ex">python</span> load_datasets.py all</span>
+<span id="cb12-11"><a href="#cb12-11"></a></span>
+<span id="cb12-12"><a href="#cb12-12"></a><span class="co"># Full dataset (no sampling) for large datasets</span></span>
+<span id="cb12-13"><a href="#cb12-13"></a><span class="ex">python</span> load_datasets.py nyc_taxi <span class="at">--full</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Small datasets can also be loaded inline using <code>FROM VALUES</code> clauses for self-contained code snippets.</p>
+</section>
+</section>
+<section id="development-database-subset-tool" class="level2" data-number="A.4">
+<h2 data-number="A.4" class="anchored" data-anchor-id="development-database-subset-tool"><span class="header-section-number">A.4</span> Development Database Subset Tool</h2>
+<p>Create development database “branches” from production data with filtered subsets using Dynamic Tables.</p>
+<section id="quick-start-1" class="level3" data-number="A.4.1">
+<h3 data-number="A.4.1" class="anchored" data-anchor-id="quick-start-1"><span class="header-section-number">A.4.1</span> Quick Start</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode numberSource bash number-lines code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1"></a><span class="bu">cd</span> database_subset/</span>
+<span id="cb13-2"><a href="#cb13-2"></a></span>
+<span id="cb13-3"><a href="#cb13-3"></a><span class="co"># Create development database (10% sample)</span></span>
+<span id="cb13-4"><a href="#cb13-4"></a><span class="ex">python</span> deploy.py create <span class="dt">\</span></span>
+<span id="cb13-5"><a href="#cb13-5"></a>    <span class="at">--prod-db</span> FEATURE_STORE_DEMO <span class="dt">\</span></span>
+<span id="cb13-6"><a href="#cb13-6"></a>    <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV <span class="dt">\</span></span>
+<span id="cb13-7"><a href="#cb13-7"></a>    <span class="at">--sample-pct</span> 10 <span class="dt">\</span></span>
+<span id="cb13-8"><a href="#cb13-8"></a>    <span class="at">--warehouse</span> FS_DEV_WH</span>
+<span id="cb13-9"><a href="#cb13-9"></a></span>
+<span id="cb13-10"><a href="#cb13-10"></a><span class="co"># Check status</span></span>
+<span id="cb13-11"><a href="#cb13-11"></a><span class="ex">python</span> deploy.py status <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span>
+<span id="cb13-12"><a href="#cb13-12"></a></span>
+<span id="cb13-13"><a href="#cb13-13"></a><span class="co"># Suspend Dynamic Tables (cost savings)</span></span>
+<span id="cb13-14"><a href="#cb13-14"></a><span class="ex">python</span> deploy.py suspend <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span>
+<span id="cb13-15"><a href="#cb13-15"></a></span>
+<span id="cb13-16"><a href="#cb13-16"></a><span class="co"># Resume Dynamic Tables</span></span>
+<span id="cb13-17"><a href="#cb13-17"></a><span class="ex">python</span> deploy.py resume <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="key-features" class="level3" data-number="A.4.2">
+<h3 data-number="A.4.2" class="anchored" data-anchor-id="key-features"><span class="header-section-number">A.4.2</span> Key Features</h3>
+<ul>
+<li><strong>Same Object Names</strong>: All schemas/tables have identical names below database level</li>
+<li><strong>Environment Switching</strong>: Change <code>USE DATABASE</code> to switch between DEV and PROD</li>
+<li><strong>Real-time Sync</strong>: Dynamic Tables automatically refresh from production</li>
+<li><strong>Referential Integrity</strong>: Cascading filters maintain FK relationships</li>
+</ul>
+</section>
+<section id="multi-environment-setup" class="level3" data-number="A.4.3">
+<h3 data-number="A.4.3" class="anchored" data-anchor-id="multi-environment-setup"><span class="header-section-number">A.4.3</span> Multi-Environment Setup</h3>
+<div class="cell" data-layout-align="default">
+<div class="cell-output-display">
+<div>
+<p></p><figure class="figure"><p></p>
+<div>
+<pre class="mermaid mermaid-js">flowchart LR
+  subgraph PROD[FEATURE_STORE_DEMO]
+    P1[CLICKSTREAM_DATA]
+  end
+  subgraph DEV[FEATURE_STORE_DEMO_DEV]
+    D1[CLICKSTREAM_DATA sampled]
+  end
+  PROD --- DEV
+</pre>
+</div>
+<p></p><figcaption> Production vs development database subset sizes</figcaption> </figure><p></p>
+</div>
+</div>
+</div>
+<p>See <code>database_subset/README.md</code> for complete documentation.</p>
+
+
+<!-- -->
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const a = window.document.createElement('a');
+      a.classList.add('top-right');
+      a.classList.add('quarto-color-scheme-toggle');
+      a.href = "";
+      a.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      a.appendChild(i);
+      window.document.body.appendChild(a);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+    const viewSource = window.document.getElementById('quarto-view-source') ||
+                       window.document.getElementById('quarto-code-tools-source');
+    if (viewSource) {
+      const sourceUrl = viewSource.getAttribute("data-quarto-source-url");
+      viewSource.addEventListener("click", function(e) {
+        if (sourceUrl) {
+          // rstudio viewer pane
+          if (/\bcapabilities=\b/.test(window.location)) {
+            window.open(sourceUrl);
+          } else {
+            window.location.href = sourceUrl;
+          }
+        } else {
+          const modal = new bootstrap.Modal(document.getElementById('quarto-embedded-source-code-modal'));
+          modal.show();
+        }
+        return false;
+      });
+    }
+    function toggleCodeHandler(show) {
+      return function(e) {
+        const detailsSrc = window.document.querySelectorAll(".cell > details > .sourceCode");
+        for (let i=0; i<detailsSrc.length; i++) {
+          const details = detailsSrc[i].parentElement;
+          if (show) {
+            details.open = true;
+          } else {
+            details.removeAttribute("open");
+          }
+        }
+        const cellCodeDivs = window.document.querySelectorAll(".cell > .sourceCode");
+        const fromCls = show ? "hidden" : "unhidden";
+        const toCls = show ? "unhidden" : "hidden";
+        for (let i=0; i<cellCodeDivs.length; i++) {
+          const codeDiv = cellCodeDivs[i];
+          if (codeDiv.classList.contains(fromCls)) {
+            codeDiv.classList.remove(fromCls);
+            codeDiv.classList.add(toCls);
+          } 
+        }
+        return false;
+      }
+    }
+    const hideAllCode = window.document.getElementById("quarto-hide-all-code");
+    if (hideAllCode) {
+      hideAllCode.addEventListener("click", toggleCodeHandler(false));
+    }
+    const showAllCode = window.document.getElementById("quarto-show-all-code");
+    if (showAllCode) {
+      showAllCode.addEventListener("click", toggleCodeHandler(true));
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+      <a href="../../08a_streaming_feature_views/index.html" class="pagination-link" aria-label="Streaming Feature Views">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">14</span>&nbsp; <span class="chapter-title">Streaming Feature Views</span></span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="../../appendices/A_sample_data/data_manager/streamlit_app.html" class="pagination-link" aria-label="Streamlit Data Manager">
+        <span class="nav-page-text"><span class="chapter-number">B</span>&nbsp; <span class="chapter-title">Streamlit Data Manager</span></span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14" data-shortcodes="false"><pre class="sourceCode numberSource markdown number-lines code-with-copy"><code class="sourceCode markdown"><span id="cb14-1"><a href="#cb14-1"></a><span class="co">---</span></span>
+<span id="cb14-2"><a href="#cb14-2"></a><span class="an">title:</span><span class="co"> "Sample Data"</span></span>
+<span id="cb14-3"><a href="#cb14-3"></a><span class="an">subtitle:</span><span class="co"> "Clickstream dataset generator and public ML datasets"</span></span>
+<span id="cb14-4"><a href="#cb14-4"></a><span class="co">---</span></span>
+<span id="cb14-5"><a href="#cb14-5"></a></span>
+<span id="cb14-6"><a href="#cb14-6"></a><span class="fu">## Overview</span></span>
+<span id="cb14-7"><a href="#cb14-7"></a></span>
+<span id="cb14-8"><a href="#cb14-8"></a>This appendix documents the sample data used throughout the Feature Store Implementation Guide:</span>
+<span id="cb14-9"><a href="#cb14-9"></a></span>
+<span id="cb14-10"><a href="#cb14-10"></a><span class="ss">1. </span>**Clickstream Dataset** - A synthetic e-commerce dataset generated specifically for this guide</span>
+<span id="cb14-11"><a href="#cb14-11"></a><span class="ss">2. </span>**Public ML Datasets** - Standard datasets (Iris, Titanic, etc.) for simple examples</span>
+<span id="cb14-12"><a href="#cb14-12"></a></span>
+<span id="cb14-13"><a href="#cb14-13"></a>::: {.callout-tip}</span>
+<span id="cb14-14"><a href="#cb14-14"></a><span class="fu">## Recommended: Streamlit Data Manager</span></span>
+<span id="cb14-15"><a href="#cb14-15"></a></span>
+<span id="cb14-16"><a href="#cb14-16"></a>For first-time setup and interactive data management, we recommend using the **Streamlit Data Manager** app. It provides a visual interface for all data operations with guided workflows.</span>
+<span id="cb14-17"><a href="#cb14-17"></a></span>
+<span id="cb14-18"><a href="#cb14-18"></a><span class="in">```bash</span></span>
+<span id="cb14-19"><a href="#cb14-19"></a><span class="bu">cd</span> data_manager/</span>
+<span id="cb14-20"><a href="#cb14-20"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb14-21"><a href="#cb14-21"></a><span class="ex">streamlit</span> run app.py</span>
+<span id="cb14-22"><a href="#cb14-22"></a><span class="in">```</span></span>
+<span id="cb14-23"><a href="#cb14-23"></a></span>
+<span id="cb14-24"><a href="#cb14-24"></a>**[📖 Full Streamlit App Documentation →](data_manager/streamlit_app.qmd)**</span>
+<span id="cb14-25"><a href="#cb14-25"></a>:::</span>
+<span id="cb14-26"><a href="#cb14-26"></a></span>
+<span id="cb14-27"><a href="#cb14-27"></a><span class="fu">## Clickstream Dataset</span></span>
+<span id="cb14-28"><a href="#cb14-28"></a></span>
+<span id="cb14-29"><a href="#cb14-29"></a><span class="fu">### Quick Start</span></span>
+<span id="cb14-30"><a href="#cb14-30"></a></span>
+<span id="cb14-31"><a href="#cb14-31"></a>You can manage sample data using either the **Streamlit UI** (interactive) or **CLI tools** (scriptable).</span>
+<span id="cb14-32"><a href="#cb14-32"></a></span>
+<span id="cb14-33"><a href="#cb14-33"></a>::: {.panel-tabset}</span>
+<span id="cb14-34"><a href="#cb14-34"></a></span>
+<span id="cb14-35"><a href="#cb14-35"></a><span class="fu">## Streamlit UI (Recommended)</span></span>
+<span id="cb14-36"><a href="#cb14-36"></a></span>
+<span id="cb14-37"><a href="#cb14-37"></a><span class="in">```bash</span></span>
+<span id="cb14-38"><a href="#cb14-38"></a><span class="bu">cd</span> data_manager/</span>
+<span id="cb14-39"><a href="#cb14-39"></a></span>
+<span id="cb14-40"><a href="#cb14-40"></a><span class="co"># Set Snowflake connection</span></span>
+<span id="cb14-41"><a href="#cb14-41"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb14-42"><a href="#cb14-42"></a></span>
+<span id="cb14-43"><a href="#cb14-43"></a><span class="co"># Launch the UI</span></span>
+<span id="cb14-44"><a href="#cb14-44"></a><span class="ex">streamlit</span> run app.py</span>
+<span id="cb14-45"><a href="#cb14-45"></a><span class="in">```</span></span>
+<span id="cb14-46"><a href="#cb14-46"></a></span>
+<span id="cb14-47"><a href="#cb14-47"></a>The UI provides:</span>
+<span id="cb14-48"><a href="#cb14-48"></a></span>
+<span id="cb14-49"><a href="#cb14-49"></a><span class="ss">- </span>📊 **Overview** - View current data status</span>
+<span id="cb14-50"><a href="#cb14-50"></a><span class="ss">- </span>📥 **Initial Load** - Generate and load synthetic data  </span>
+<span id="cb14-51"><a href="#cb14-51"></a><span class="ss">- </span>🔄 **Incremental Generator** - Manage continuous data generation</span>
+<span id="cb14-52"><a href="#cb14-52"></a><span class="ss">- </span>🌿 **Development Branch** - Create sampled dev environments</span>
+<span id="cb14-53"><a href="#cb14-53"></a><span class="ss">- </span>📚 **Public Datasets** - Load standard ML datasets</span>
+<span id="cb14-54"><a href="#cb14-54"></a><span class="ss">- </span>📈 **Monitoring** - Track task and DT executions</span>
+<span id="cb14-55"><a href="#cb14-55"></a></span>
+<span id="cb14-56"><a href="#cb14-56"></a>**[See detailed walkthrough with screenshots →](data_manager/streamlit_app.qmd)**</span>
+<span id="cb14-57"><a href="#cb14-57"></a></span>
+<span id="cb14-58"><a href="#cb14-58"></a><span class="fu">## CLI Tools</span></span>
+<span id="cb14-59"><a href="#cb14-59"></a></span>
+<span id="cb14-60"><a href="#cb14-60"></a><span class="in">```bash</span></span>
+<span id="cb14-61"><a href="#cb14-61"></a><span class="bu">cd</span> generator/</span>
+<span id="cb14-62"><a href="#cb14-62"></a></span>
+<span id="cb14-63"><a href="#cb14-63"></a><span class="co"># Set Snowflake connection</span></span>
+<span id="cb14-64"><a href="#cb14-64"></a><span class="bu">export</span> <span class="va">SNOWFLAKE_CONNECTION_NAME</span><span class="op">=</span>your_connection</span>
+<span id="cb14-65"><a href="#cb14-65"></a></span>
+<span id="cb14-66"><a href="#cb14-66"></a><span class="co"># Step 1: Initial load (scale 0.01 = ~1K users)</span></span>
+<span id="cb14-67"><a href="#cb14-67"></a><span class="ex">python</span> main.py <span class="at">--scale</span> 0.01 <span class="at">--output</span> snowflake</span>
+<span id="cb14-68"><a href="#cb14-68"></a></span>
+<span id="cb14-69"><a href="#cb14-69"></a><span class="co"># Step 2 (Optional): Deploy continuous generation</span></span>
+<span id="cb14-70"><a href="#cb14-70"></a><span class="bu">cd</span> snowflake_native</span>
+<span id="cb14-71"><a href="#cb14-71"></a><span class="ex">python</span> deploy.py <span class="at">--start</span></span>
+<span id="cb14-72"><a href="#cb14-72"></a><span class="in">```</span></span>
+<span id="cb14-73"><a href="#cb14-73"></a></span>
+<span id="cb14-74"><a href="#cb14-74"></a><span class="fu">## Python API</span></span>
+<span id="cb14-75"><a href="#cb14-75"></a></span>
+<span id="cb14-76"><a href="#cb14-76"></a><span class="in">```python</span></span>
+<span id="cb14-77"><a href="#cb14-77"></a><span class="im">from</span> data_manager.core <span class="im">import</span> DataManager</span>
+<span id="cb14-78"><a href="#cb14-78"></a></span>
+<span id="cb14-79"><a href="#cb14-79"></a>dm <span class="op">=</span> DataManager()</span>
+<span id="cb14-80"><a href="#cb14-80"></a>dm.<span class="ex">connect</span>()</span>
+<span id="cb14-81"><a href="#cb14-81"></a></span>
+<span id="cb14-82"><a href="#cb14-82"></a><span class="co"># Initial load</span></span>
+<span id="cb14-83"><a href="#cb14-83"></a>result <span class="op">=</span> dm.run_initial_load(scale<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb14-84"><a href="#cb14-84"></a><span class="bu">print</span>(<span class="ss">f"Loaded: </span><span class="sc">{</span>result<span class="sc">.</span>row_counts<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb14-85"><a href="#cb14-85"></a></span>
+<span id="cb14-86"><a href="#cb14-86"></a><span class="co"># Create dev branch</span></span>
+<span id="cb14-87"><a href="#cb14-87"></a>result <span class="op">=</span> dm.create_dev_branch(<span class="st">"MY_DEV_DB"</span>, sample_pct<span class="op">=</span><span class="dv">10</span>)</span>
+<span id="cb14-88"><a href="#cb14-88"></a><span class="in">```</span></span>
+<span id="cb14-89"><a href="#cb14-89"></a></span>
+<span id="cb14-90"><a href="#cb14-90"></a>:::</span>
+<span id="cb14-91"><a href="#cb14-91"></a></span>
+<span id="cb14-92"><a href="#cb14-92"></a><span class="fu">### Required Privileges</span></span>
+<span id="cb14-93"><a href="#cb14-93"></a></span>
+<span id="cb14-94"><a href="#cb14-94"></a>The data loading scripts require specific Snowflake privileges depending on your use case.</span>
+<span id="cb14-95"><a href="#cb14-95"></a></span>
+<span id="cb14-96"><a href="#cb14-96"></a><span class="fu">#### Minimum Privileges (Using Existing Database)</span></span>
+<span id="cb14-97"><a href="#cb14-97"></a></span>
+<span id="cb14-98"><a href="#cb14-98"></a>If you have an existing database and just need to create schemas and tables:</span>
+<span id="cb14-99"><a href="#cb14-99"></a></span>
+<span id="cb14-100"><a href="#cb14-100"></a><span class="pp">|</span> Privilege <span class="pp">|</span> Object <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb14-101"><a href="#cb14-101"></a><span class="pp">|-----------|--------|---------|</span></span>
+<span id="cb14-102"><a href="#cb14-102"></a><span class="pp">|</span> <span class="in">`USAGE`</span> <span class="pp">|</span> Warehouse <span class="pp">|</span> Execute queries <span class="pp">|</span></span>
+<span id="cb14-103"><a href="#cb14-103"></a><span class="pp">|</span> <span class="in">`USAGE`</span> <span class="pp">|</span> Database <span class="pp">|</span> Access the database <span class="pp">|</span></span>
+<span id="cb14-104"><a href="#cb14-104"></a><span class="pp">|</span> <span class="in">`CREATE SCHEMA`</span> <span class="pp">|</span> Database <span class="pp">|</span> Create CLICKSTREAM_DATA schema <span class="pp">|</span></span>
+<span id="cb14-105"><a href="#cb14-105"></a><span class="pp">|</span> <span class="in">`CREATE TABLE`</span> <span class="pp">|</span> Schema <span class="pp">|</span> Create data tables <span class="pp">|</span></span>
+<span id="cb14-106"><a href="#cb14-106"></a><span class="pp">|</span> <span class="in">`CREATE STAGE`</span> <span class="pp">|</span> Schema <span class="pp">|</span> Upload Parquet files (bulk load) <span class="pp">|</span></span>
+<span id="cb14-107"><a href="#cb14-107"></a></span>
+<span id="cb14-108"><a href="#cb14-108"></a><span class="in">```sql</span></span>
+<span id="cb14-109"><a href="#cb14-109"></a><span class="co">-- Grant minimum privileges to a role (canonical guide names shown)</span></span>
+<span id="cb14-110"><a href="#cb14-110"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-111"><a href="#cb14-111"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-112"><a href="#cb14-112"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> SCHEMA <span class="kw">ON</span> <span class="kw">DATABASE</span> FEATURE_STORE_DEMO <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-113"><a href="#cb14-113"></a></span>
+<span id="cb14-114"><a href="#cb14-114"></a><span class="co">-- After schema creation, grant table privileges</span></span>
+<span id="cb14-115"><a href="#cb14-115"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">ON</span> SCHEMA FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_DATA <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-116"><a href="#cb14-116"></a><span class="in">```</span></span>
+<span id="cb14-117"><a href="#cb14-117"></a></span>
+<span id="cb14-118"><a href="#cb14-118"></a><span class="fu">#### Full Setup (Creating New Database)</span></span>
+<span id="cb14-119"><a href="#cb14-119"></a></span>
+<span id="cb14-120"><a href="#cb14-120"></a>For the complete setup including database creation:</span>
+<span id="cb14-121"><a href="#cb14-121"></a></span>
+<span id="cb14-122"><a href="#cb14-122"></a><span class="pp">|</span> Privilege <span class="pp">|</span> Object <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb14-123"><a href="#cb14-123"></a><span class="pp">|-----------|--------|---------|</span></span>
+<span id="cb14-124"><a href="#cb14-124"></a><span class="pp">|</span> <span class="in">`CREATE DATABASE`</span> <span class="pp">|</span> Account <span class="pp">|</span> Create FEATURE_STORE_DEMO database <span class="pp">|</span></span>
+<span id="cb14-125"><a href="#cb14-125"></a><span class="pp">|</span> <span class="in">`USAGE`</span> <span class="pp">|</span> Warehouse <span class="pp">|</span> Execute queries <span class="pp">|</span></span>
+<span id="cb14-126"><a href="#cb14-126"></a></span>
+<span id="cb14-127"><a href="#cb14-127"></a><span class="in">```sql</span></span>
+<span id="cb14-128"><a href="#cb14-128"></a><span class="co">-- Grant full setup privileges</span></span>
+<span id="cb14-129"><a href="#cb14-129"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">DATABASE</span> <span class="kw">ON</span> ACCOUNT <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-130"><a href="#cb14-130"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-131"><a href="#cb14-131"></a><span class="in">```</span></span>
+<span id="cb14-132"><a href="#cb14-132"></a></span>
+<span id="cb14-133"><a href="#cb14-133"></a><span class="fu">#### Incremental Generator (Additional)</span></span>
+<span id="cb14-134"><a href="#cb14-134"></a></span>
+<span id="cb14-135"><a href="#cb14-135"></a>To deploy and run the Snowflake-native incremental generator:</span>
+<span id="cb14-136"><a href="#cb14-136"></a></span>
+<span id="cb14-137"><a href="#cb14-137"></a><span class="pp">|</span> Privilege <span class="pp">|</span> Object <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb14-138"><a href="#cb14-138"></a><span class="pp">|-----------|--------|---------|</span></span>
+<span id="cb14-139"><a href="#cb14-139"></a><span class="pp">|</span> <span class="in">`CREATE PROCEDURE`</span> <span class="pp">|</span> Schema <span class="pp">|</span> Create stored procedure <span class="pp">|</span></span>
+<span id="cb14-140"><a href="#cb14-140"></a><span class="pp">|</span> <span class="in">`CREATE TASK`</span> <span class="pp">|</span> Schema <span class="pp">|</span> Create scheduled task <span class="pp">|</span></span>
+<span id="cb14-141"><a href="#cb14-141"></a><span class="pp">|</span> <span class="in">`EXECUTE TASK`</span> <span class="pp">|</span> Account <span class="pp">|</span> Allow task execution <span class="pp">|</span></span>
+<span id="cb14-142"><a href="#cb14-142"></a></span>
+<span id="cb14-143"><a href="#cb14-143"></a><span class="in">```sql</span></span>
+<span id="cb14-144"><a href="#cb14-144"></a><span class="co">-- Grant incremental generator privileges (admin schema for generator objects)</span></span>
+<span id="cb14-145"><a href="#cb14-145"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">PROCEDURE</span> <span class="kw">ON</span> SCHEMA FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-146"><a href="#cb14-146"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> TASK <span class="kw">ON</span> SCHEMA FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-147"><a href="#cb14-147"></a><span class="kw">GRANT</span> EXECUTE TASK <span class="kw">ON</span> ACCOUNT <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-148"><a href="#cb14-148"></a></span>
+<span id="cb14-149"><a href="#cb14-149"></a><span class="co">-- After task creation, grant operate privilege</span></span>
+<span id="cb14-150"><a href="#cb14-150"></a><span class="kw">GRANT</span> OPERATE <span class="kw">ON</span> TASK incremental_data_task <span class="kw">TO</span> ROLE my_role;</span>
+<span id="cb14-151"><a href="#cb14-151"></a><span class="in">```</span></span>
+<span id="cb14-152"><a href="#cb14-152"></a></span>
+<span id="cb14-153"><a href="#cb14-153"></a>::: {.callout-tip}</span>
+<span id="cb14-154"><a href="#cb14-154"></a><span class="fu">## Using a Custom Database</span></span>
+<span id="cb14-155"><a href="#cb14-155"></a></span>
+<span id="cb14-156"><a href="#cb14-156"></a>If you don't have <span class="in">`CREATE DATABASE`</span> privilege, use the <span class="in">`--database`</span> flag to specify an existing database:</span>
+<span id="cb14-157"><a href="#cb14-157"></a></span>
+<span id="cb14-158"><a href="#cb14-158"></a><span class="in">```bash</span></span>
+<span id="cb14-159"><a href="#cb14-159"></a><span class="ex">python</span> main.py <span class="at">--scale</span> 0.01 <span class="at">--database</span> MY_EXISTING_DB <span class="at">--schema</span> MY_SCHEMA <span class="at">--output</span> snowflake</span>
+<span id="cb14-160"><a href="#cb14-160"></a><span class="in">```</span></span>
+<span id="cb14-161"><a href="#cb14-161"></a>:::</span>
+<span id="cb14-162"><a href="#cb14-162"></a></span>
+<span id="cb14-163"><a href="#cb14-163"></a>::: {.callout-note}</span>
+<span id="cb14-164"><a href="#cb14-164"></a><span class="fu">## Recommended: Create a Dedicated Role</span></span>
+<span id="cb14-165"><a href="#cb14-165"></a></span>
+<span id="cb14-166"><a href="#cb14-166"></a>For production use, create a dedicated role with only the required privileges:</span>
+<span id="cb14-167"><a href="#cb14-167"></a></span>
+<span id="cb14-168"><a href="#cb14-168"></a><span class="in">```sql</span></span>
+<span id="cb14-169"><a href="#cb14-169"></a><span class="co">-- See Appendix B: Environment Setup for the full security model</span></span>
+<span id="cb14-170"><a href="#cb14-170"></a><span class="co">-- Quick start: run scripts/01_dba_setup.sql (Appendix B)</span></span>
+<span id="cb14-171"><a href="#cb14-171"></a></span>
+<span id="cb14-172"><a href="#cb14-172"></a><span class="co">-- Or manually create a role:</span></span>
+<span id="cb14-173"><a href="#cb14-173"></a><span class="kw">CREATE</span> ROLE <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> FS_ADMIN_ROLE;</span>
+<span id="cb14-174"><a href="#cb14-174"></a><span class="kw">GRANT</span> <span class="kw">USAGE</span> <span class="kw">ON</span> WAREHOUSE FS_DEV_WH <span class="kw">TO</span> ROLE FS_ADMIN_ROLE;</span>
+<span id="cb14-175"><a href="#cb14-175"></a><span class="kw">GRANT</span> <span class="kw">CREATE</span> <span class="kw">DATABASE</span> <span class="kw">ON</span> ACCOUNT <span class="kw">TO</span> ROLE FS_ADMIN_ROLE;</span>
+<span id="cb14-176"><a href="#cb14-176"></a><span class="kw">GRANT</span> ROLE FS_ADMIN_ROLE <span class="kw">TO</span> <span class="fu">USER</span> my_user;</span>
+<span id="cb14-177"><a href="#cb14-177"></a><span class="in">```</span></span>
+<span id="cb14-178"><a href="#cb14-178"></a>:::</span>
+<span id="cb14-179"><a href="#cb14-179"></a></span>
+<span id="cb14-180"><a href="#cb14-180"></a><span class="fu">### Schema Organization</span></span>
+<span id="cb14-181"><a href="#cb14-181"></a></span>
+<span id="cb14-182"><a href="#cb14-182"></a>The generator creates two schemas:</span>
+<span id="cb14-183"><a href="#cb14-183"></a></span>
+<span id="cb14-184"><a href="#cb14-184"></a><span class="pp">|</span> Schema <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb14-185"><a href="#cb14-185"></a><span class="pp">|--------|---------|</span></span>
+<span id="cb14-186"><a href="#cb14-186"></a><span class="pp">|</span> <span class="in">`CLICKSTREAM_DATA`</span> <span class="pp">|</span> Data tables (11 tables) <span class="pp">|</span></span>
+<span id="cb14-187"><a href="#cb14-187"></a><span class="pp">|</span> <span class="in">`CLICKSTREAM_ADMIN`</span> <span class="pp">|</span> Generator config, state, task <span class="pp">|</span></span>
+<span id="cb14-188"><a href="#cb14-188"></a></span>
+<span id="cb14-189"><a href="#cb14-189"></a><span class="fu">### Data Tables</span></span>
+<span id="cb14-190"><a href="#cb14-190"></a></span>
+<span id="cb14-191"><a href="#cb14-191"></a><span class="pp">|</span> Table <span class="pp">|</span> Description <span class="pp">|</span> Key Columns <span class="pp">|</span></span>
+<span id="cb14-192"><a href="#cb14-192"></a><span class="pp">|-------|-------------|-------------|</span></span>
+<span id="cb14-193"><a href="#cb14-193"></a><span class="pp">|</span> CATEGORIES <span class="pp">|</span> Product categories <span class="pp">|</span> CATEGORY_ID, CATEGORY_NAME <span class="pp">|</span></span>
+<span id="cb14-194"><a href="#cb14-194"></a><span class="pp">|</span> SUPPLIERS <span class="pp">|</span> Product suppliers <span class="pp">|</span> SUPPLIER_ID, SUPPLIER_NAME <span class="pp">|</span></span>
+<span id="cb14-195"><a href="#cb14-195"></a><span class="pp">|</span> PRODUCTS <span class="pp">|</span> Product catalog <span class="pp">|</span> PRODUCT_ID, PRODUCT_NAME, CATEGORY_ID <span class="pp">|</span></span>
+<span id="cb14-196"><a href="#cb14-196"></a><span class="pp">|</span> PRODUCT_SUPPLIER <span class="pp">|</span> Product-supplier mapping <span class="pp">|</span> PRODUCT_ID, SUPPLIER_ID (composite PK) <span class="pp">|</span></span>
+<span id="cb14-197"><a href="#cb14-197"></a><span class="pp">|</span> HOUSEHOLDS <span class="pp">|</span> Customer households <span class="pp">|</span> HOUSEHOLD_ID, ADDRESS <span class="pp">|</span></span>
+<span id="cb14-198"><a href="#cb14-198"></a><span class="pp">|</span> VISITORS <span class="pp">|</span> Anonymous visitors <span class="pp">|</span> VISITOR_ID, FIRST_SEEN_TS <span class="pp">|</span></span>
+<span id="cb14-199"><a href="#cb14-199"></a><span class="pp">|</span> USERS <span class="pp">|</span> Registered users <span class="pp">|</span> USER_ID, VISITOR_ID, HOUSEHOLD_ID <span class="pp">|</span></span>
+<span id="cb14-200"><a href="#cb14-200"></a><span class="pp">|</span> SESSIONS <span class="pp">|</span> User sessions <span class="pp">|</span> SESSION_ID, VISITOR_ID, USER_ID <span class="pp">|</span></span>
+<span id="cb14-201"><a href="#cb14-201"></a><span class="pp">|</span> EVENTS <span class="pp">|</span> Clickstream events <span class="pp">|</span> EVENT_ID, SESSION_ID, EVENT_TYPE <span class="pp">|</span></span>
+<span id="cb14-202"><a href="#cb14-202"></a><span class="pp">|</span> ORDERS <span class="pp">|</span> Purchase orders <span class="pp">|</span> ORDER_ID, USER_ID, ORDER_TS <span class="pp">|</span></span>
+<span id="cb14-203"><a href="#cb14-203"></a><span class="pp">|</span> ORDER_ITEMS <span class="pp">|</span> Order line items <span class="pp">|</span> ORDER_ITEM_ID, ORDER_ID, PRODUCT_ID <span class="pp">|</span></span>
+<span id="cb14-204"><a href="#cb14-204"></a></span>
+<span id="cb14-205"><a href="#cb14-205"></a><span class="fu">### Scale Factors</span></span>
+<span id="cb14-206"><a href="#cb14-206"></a></span>
+<span id="cb14-207"><a href="#cb14-207"></a><span class="pp">|</span> Scale <span class="pp">|</span> Users <span class="pp">|</span> Sessions <span class="pp">|</span> Events <span class="pp">|</span> Orders <span class="pp">|</span></span>
+<span id="cb14-208"><a href="#cb14-208"></a><span class="pp">|-------|-------|----------|--------|--------|</span></span>
+<span id="cb14-209"><a href="#cb14-209"></a><span class="pp">|</span> 0.01  <span class="pp">|</span> 1K    <span class="pp">|</span> 5K       <span class="pp">|</span> 44K    <span class="pp">|</span> 250    <span class="pp">|</span></span>
+<span id="cb14-210"><a href="#cb14-210"></a><span class="pp">|</span> 0.1   <span class="pp">|</span> 10K   <span class="pp">|</span> 50K      <span class="pp">|</span> 440K   <span class="pp">|</span> 2.5K   <span class="pp">|</span></span>
+<span id="cb14-211"><a href="#cb14-211"></a><span class="pp">|</span> 1.0   <span class="pp">|</span> 100K  <span class="pp">|</span> 500K     <span class="pp">|</span> 4.4M   <span class="pp">|</span> 25K    <span class="pp">|</span></span>
+<span id="cb14-212"><a href="#cb14-212"></a></span>
+<span id="cb14-213"><a href="#cb14-213"></a><span class="fu">### Incremental Generation</span></span>
+<span id="cb14-214"><a href="#cb14-214"></a></span>
+<span id="cb14-215"><a href="#cb14-215"></a>For Dynamic Table and Online Feature testing we need an incremental data generator to show the evolution of the feature store data through feature pipelines over time. This can be deployed using the following SQL commands:</span>
+<span id="cb14-216"><a href="#cb14-216"></a></span>
+<span id="cb14-217"><a href="#cb14-217"></a><span class="in">```sql</span></span>
+<span id="cb14-218"><a href="#cb14-218"></a><span class="co">-- Start continuous generation (every minute)</span></span>
+<span id="cb14-219"><a href="#cb14-219"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN<span class="ch">.</span>INCREMENTAL_DATA_TASK RESUME;</span>
+<span id="cb14-220"><a href="#cb14-220"></a></span>
+<span id="cb14-221"><a href="#cb14-221"></a><span class="co">-- Monitor</span></span>
+<span id="cb14-222"><a href="#cb14-222"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN<span class="ch">.</span>GENERATION_STATUS;</span>
+<span id="cb14-223"><a href="#cb14-223"></a></span>
+<span id="cb14-224"><a href="#cb14-224"></a><span class="co">-- Stop when done</span></span>
+<span id="cb14-225"><a href="#cb14-225"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN<span class="ch">.</span>INCREMENTAL_DATA_TASK SUSPEND;</span>
+<span id="cb14-226"><a href="#cb14-226"></a><span class="in">```</span></span>
+<span id="cb14-227"><a href="#cb14-227"></a></span>
+<span id="cb14-228"><a href="#cb14-228"></a>Note: Leaving these executing will continue to generate data and update the feature store data over time, but will incur costs for the compute resources used to generate the data.  When you are done with the testing, you can suspend the task by running the following SQL command:</span>
+<span id="cb14-229"><a href="#cb14-229"></a></span>
+<span id="cb14-230"><a href="#cb14-230"></a><span class="in">```sql</span></span>
+<span id="cb14-231"><a href="#cb14-231"></a><span class="kw">ALTER</span> TASK FEATURE_STORE_DEMO<span class="ch">.</span>CLICKSTREAM_ADMIN<span class="ch">.</span>INCREMENTAL_DATA_TASK SUSPEND;</span>
+<span id="cb14-232"><a href="#cb14-232"></a><span class="in">```</span></span>
+<span id="cb14-233"><a href="#cb14-233"></a></span>
+<span id="cb14-234"><a href="#cb14-234"></a>You can resume the task at any time when you want to continue testing and it will continue to generate data and update the feature store data over time, filling in the gaps where data was not generated.  The first task iteration after a suspension will start from the last batch timestamp, and continue to generate data and update the feature store data over time.  This initial execution will be slower than subsequent executions as it will need to catch up and apply more data.</span>
+<span id="cb14-235"><a href="#cb14-235"></a></span>
+<span id="cb14-236"><a href="#cb14-236"></a><span class="fu">### Files</span></span>
+<span id="cb14-237"><a href="#cb14-237"></a></span>
+<span id="cb14-238"><a href="#cb14-238"></a><span class="pp">|</span> File/Folder <span class="pp">|</span> Purpose <span class="pp">|</span></span>
+<span id="cb14-239"><a href="#cb14-239"></a><span class="pp">|-------------|---------|</span></span>
+<span id="cb14-240"><a href="#cb14-240"></a><span class="pp">|</span> <span class="in">`generator/main.py`</span> <span class="pp">|</span> Initial data generation <span class="pp">|</span></span>
+<span id="cb14-241"><a href="#cb14-241"></a><span class="pp">|</span> <span class="in">`generator/snowflake_native/`</span> <span class="pp">|</span> Snowflake-native incremental generation <span class="pp">|</span></span>
+<span id="cb14-242"><a href="#cb14-242"></a><span class="pp">|</span> <span class="in">`generator/README.md`</span> <span class="pp">|</span> Complete documentation <span class="pp">|</span></span>
+<span id="cb14-243"><a href="#cb14-243"></a></span>
+<span id="cb14-244"><a href="#cb14-244"></a><span class="fu">## Public ML Datasets</span></span>
+<span id="cb14-245"><a href="#cb14-245"></a></span>
+<span id="cb14-246"><a href="#cb14-246"></a>For simple inline examples and testing, we provide standard ML datasets:</span>
+<span id="cb14-247"><a href="#cb14-247"></a></span>
+<span id="cb14-248"><a href="#cb14-248"></a><span class="pp">|</span> Dataset <span class="pp">|</span> Records <span class="pp">|</span> Sample <span class="pp">|</span> Use Case <span class="pp">|</span></span>
+<span id="cb14-249"><a href="#cb14-249"></a><span class="pp">|---------|---------|--------|----------|</span></span>
+<span id="cb14-250"><a href="#cb14-250"></a><span class="pp">|</span> <span class="in">`penguins`</span> <span class="pp">|</span> 344 <span class="pp">|</span> All <span class="pp">|</span> Multi-class classification <span class="pp">|</span></span>
+<span id="cb14-251"><a href="#cb14-251"></a><span class="pp">|</span> <span class="in">`titanic`</span> <span class="pp">|</span> 891 <span class="pp">|</span> All <span class="pp">|</span> Binary classification <span class="pp">|</span></span>
+<span id="cb14-252"><a href="#cb14-252"></a><span class="pp">|</span> <span class="in">`iris`</span> <span class="pp">|</span> 150 <span class="pp">|</span> All <span class="pp">|</span> Classification basics <span class="pp">|</span></span>
+<span id="cb14-253"><a href="#cb14-253"></a><span class="pp">|</span> <span class="in">`wine`</span> <span class="pp">|</span> 1,599 <span class="pp">|</span> All <span class="pp">|</span> Regression / classification <span class="pp">|</span></span>
+<span id="cb14-254"><a href="#cb14-254"></a><span class="pp">|</span> <span class="in">`california_housing`</span> <span class="pp">|</span> 20,640 <span class="pp">|</span> All <span class="pp">|</span> Regression <span class="pp">|</span></span>
+<span id="cb14-255"><a href="#cb14-255"></a><span class="pp">|</span> <span class="in">`nyc_taxi`</span> <span class="pp">|</span> ~3M <span class="pp">|</span> 50K <span class="pp">|</span> Temporal features, fare prediction <span class="pp">|</span></span>
+<span id="cb14-256"><a href="#cb14-256"></a><span class="pp">|</span> <span class="in">`credit_card_fraud`</span> <span class="pp">|</span> 284K <span class="pp">|</span> 50K <span class="pp">|</span> Imbalanced classification, temporal <span class="pp">|</span></span>
+<span id="cb14-257"><a href="#cb14-257"></a></span>
+<span id="cb14-258"><a href="#cb14-258"></a><span class="fu">### Loading Public Datasets</span></span>
+<span id="cb14-259"><a href="#cb14-259"></a></span>
+<span id="cb14-260"><a href="#cb14-260"></a><span class="in">```bash</span></span>
+<span id="cb14-261"><a href="#cb14-261"></a><span class="bu">cd</span> public_datasets/</span>
+<span id="cb14-262"><a href="#cb14-262"></a></span>
+<span id="cb14-263"><a href="#cb14-263"></a><span class="co"># List available datasets</span></span>
+<span id="cb14-264"><a href="#cb14-264"></a><span class="ex">python</span> load_datasets.py <span class="at">--list</span></span>
+<span id="cb14-265"><a href="#cb14-265"></a></span>
+<span id="cb14-266"><a href="#cb14-266"></a><span class="co"># Load specific dataset</span></span>
+<span id="cb14-267"><a href="#cb14-267"></a><span class="ex">python</span> load_datasets.py penguins</span>
+<span id="cb14-268"><a href="#cb14-268"></a></span>
+<span id="cb14-269"><a href="#cb14-269"></a><span class="co"># Load all datasets</span></span>
+<span id="cb14-270"><a href="#cb14-270"></a><span class="ex">python</span> load_datasets.py all</span>
+<span id="cb14-271"><a href="#cb14-271"></a></span>
+<span id="cb14-272"><a href="#cb14-272"></a><span class="co"># Full dataset (no sampling) for large datasets</span></span>
+<span id="cb14-273"><a href="#cb14-273"></a><span class="ex">python</span> load_datasets.py nyc_taxi <span class="at">--full</span></span>
+<span id="cb14-274"><a href="#cb14-274"></a><span class="in">```</span></span>
+<span id="cb14-275"><a href="#cb14-275"></a></span>
+<span id="cb14-276"><a href="#cb14-276"></a>Small datasets can also be loaded inline using <span class="in">`FROM VALUES`</span> clauses for self-contained code snippets.</span>
+<span id="cb14-277"><a href="#cb14-277"></a></span>
+<span id="cb14-278"><a href="#cb14-278"></a><span class="fu">## Development Database Subset Tool</span></span>
+<span id="cb14-279"><a href="#cb14-279"></a></span>
+<span id="cb14-280"><a href="#cb14-280"></a>Create development database "branches" from production data with filtered subsets using Dynamic Tables.</span>
+<span id="cb14-281"><a href="#cb14-281"></a></span>
+<span id="cb14-282"><a href="#cb14-282"></a><span class="fu">### Quick Start</span></span>
+<span id="cb14-283"><a href="#cb14-283"></a></span>
+<span id="cb14-284"><a href="#cb14-284"></a><span class="in">```bash</span></span>
+<span id="cb14-285"><a href="#cb14-285"></a><span class="bu">cd</span> database_subset/</span>
+<span id="cb14-286"><a href="#cb14-286"></a></span>
+<span id="cb14-287"><a href="#cb14-287"></a><span class="co"># Create development database (10% sample)</span></span>
+<span id="cb14-288"><a href="#cb14-288"></a><span class="ex">python</span> deploy.py create <span class="dt">\</span></span>
+<span id="cb14-289"><a href="#cb14-289"></a>    <span class="at">--prod-db</span> FEATURE_STORE_DEMO <span class="dt">\</span></span>
+<span id="cb14-290"><a href="#cb14-290"></a>    <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV <span class="dt">\</span></span>
+<span id="cb14-291"><a href="#cb14-291"></a>    <span class="at">--sample-pct</span> 10 <span class="dt">\</span></span>
+<span id="cb14-292"><a href="#cb14-292"></a>    <span class="at">--warehouse</span> FS_DEV_WH</span>
+<span id="cb14-293"><a href="#cb14-293"></a></span>
+<span id="cb14-294"><a href="#cb14-294"></a><span class="co"># Check status</span></span>
+<span id="cb14-295"><a href="#cb14-295"></a><span class="ex">python</span> deploy.py status <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span>
+<span id="cb14-296"><a href="#cb14-296"></a></span>
+<span id="cb14-297"><a href="#cb14-297"></a><span class="co"># Suspend Dynamic Tables (cost savings)</span></span>
+<span id="cb14-298"><a href="#cb14-298"></a><span class="ex">python</span> deploy.py suspend <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span>
+<span id="cb14-299"><a href="#cb14-299"></a></span>
+<span id="cb14-300"><a href="#cb14-300"></a><span class="co"># Resume Dynamic Tables</span></span>
+<span id="cb14-301"><a href="#cb14-301"></a><span class="ex">python</span> deploy.py resume <span class="at">--dev-db</span> FEATURE_STORE_DEMO_DEV</span>
+<span id="cb14-302"><a href="#cb14-302"></a><span class="in">```</span></span>
+<span id="cb14-303"><a href="#cb14-303"></a></span>
+<span id="cb14-304"><a href="#cb14-304"></a><span class="fu">### Key Features</span></span>
+<span id="cb14-305"><a href="#cb14-305"></a></span>
+<span id="cb14-306"><a href="#cb14-306"></a><span class="ss">- </span>**Same Object Names**: All schemas/tables have identical names below database level</span>
+<span id="cb14-307"><a href="#cb14-307"></a><span class="ss">- </span>**Environment Switching**: Change <span class="in">`USE DATABASE`</span> to switch between DEV and PROD</span>
+<span id="cb14-308"><a href="#cb14-308"></a><span class="ss">- </span>**Real-time Sync**: Dynamic Tables automatically refresh from production</span>
+<span id="cb14-309"><a href="#cb14-309"></a><span class="ss">- </span>**Referential Integrity**: Cascading filters maintain FK relationships</span>
+<span id="cb14-310"><a href="#cb14-310"></a></span>
+<span id="cb14-311"><a href="#cb14-311"></a><span class="fu">### Multi-Environment Setup</span></span>
+<span id="cb14-312"><a href="#cb14-312"></a></span>
+<span id="cb14-315"><a href="#cb14-315"></a><span class="in">```{mermaid}</span></span>
+<span id="cb14-316"><a href="#cb14-316"></a>%%| fig-cap: <span class="ot">"</span><span class="st">Production vs development database subset sizes</span><span class="ot">"</span></span>
+<span id="cb14-317"><a href="#cb14-317"></a>%%| fig-alt: <span class="ot">"</span><span class="st">Production and dev databases with sampled table row counts</span><span class="ot">"</span></span>
+<span id="cb14-318"><a href="#cb14-318"></a>flowchart LR</span>
+<span id="cb14-319"><a href="#cb14-319"></a>  subgraph PROD[FEATURE_STORE_DEMO]</span>
+<span id="cb14-320"><a href="#cb14-320"></a>    P1[CLICKSTREAM_DATA]</span>
+<span id="cb14-321"><a href="#cb14-321"></a>  end</span>
+<span id="cb14-322"><a href="#cb14-322"></a>  subgraph DEV[FEATURE_STORE_DEMO_DEV]</span>
+<span id="cb14-323"><a href="#cb14-323"></a>    D1[CLICKSTREAM_DATA sampled]</span>
+<span id="cb14-324"><a href="#cb14-324"></a>  end</span>
+<span id="cb14-325"><a href="#cb14-325"></a>  PROD --- DEV</span>
+<span id="cb14-326"><a href="#cb14-326"></a><span class="in">```</span></span>
+<span id="cb14-327"><a href="#cb14-327"></a></span>
+<span id="cb14-328"><a href="#cb14-328"></a>See <span class="in">`database_subset/README.md`</span> for complete documentation.</span>
+</code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
+</div></div></div></div></div>
+</div> <!-- /content -->
+<footer class="footer"><div class="nav-footer"><div class="nav-footer-center"><div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/edit/main/appendices/A_sample_data/index.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div></div></footer><script>
+/**
+ * Sidebar toggle controls for Quarto book layout.
+ * Buttons are appended to <body> (fixed position) so they remain
+ * accessible even when a sidebar is collapsed to zero width.
+ * State is persisted in localStorage across page navigations.
+ */
+(function () {
+  "use strict";
+
+  var STORAGE_LEFT  = "sf-sidebar-left-collapsed";
+  var STORAGE_RIGHT = "sf-sidebar-right-collapsed";
+
+  var CHEVRON_LEFT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M10.5 3.5L6 8l4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEVRON_RIGHT =
+    '<svg width="16" height="16" viewBox="0 0 16 16">' +
+    '<path d="M5.5 3.5L10 8l-4.5 4.5" stroke="currentColor" stroke-width="2.5" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function positionLeftBtn(btn, sidebar, collapsed) {
+    if (collapsed) {
+      btn.style.left = "0px";
+    } else {
+      btn.style.left = sidebar.offsetWidth + "px";
+    }
+  }
+
+  function init() {
+    var sidebar       = document.getElementById("quarto-sidebar");
+    var marginSidebar = document.getElementById("quarto-margin-sidebar");
+    var body          = document.body;
+
+    if (!sidebar && !marginSidebar) return;
+
+    var leftOff  = localStorage.getItem(STORAGE_LEFT) === "true";
+    var rightOff = localStorage.getItem(STORAGE_RIGHT) === "true";
+
+    // --- Left sidebar toggle ---
+    if (sidebar) {
+      var btnL = document.createElement("button");
+      btnL.id = "sf-toggle-left";
+      btnL.className = "sf-sidebar-toggle";
+      btnL.setAttribute("type", "button");
+      btnL.setAttribute("aria-label", "Toggle chapter navigation");
+      btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+      body.appendChild(btnL);
+
+      if (leftOff) body.classList.add("sf-left-collapsed");
+
+      // Position after layout settles
+      requestAnimationFrame(function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+
+      btnL.addEventListener("click", function () {
+        leftOff = !leftOff;
+        body.classList.toggle("sf-left-collapsed", leftOff);
+        localStorage.setItem(STORAGE_LEFT, String(leftOff));
+        btnL.innerHTML = leftOff ? CHEVRON_RIGHT : CHEVRON_LEFT;
+        btnL.setAttribute("aria-expanded", String(!leftOff));
+        // Reposition after CSS transition completes
+        setTimeout(function () {
+          positionLeftBtn(btnL, sidebar, leftOff);
+        }, 320);
+        // Immediate position for collapsed
+        if (leftOff) btnL.style.left = "0px";
+      });
+
+      // Reposition on window resize
+      window.addEventListener("resize", function () {
+        positionLeftBtn(btnL, sidebar, leftOff);
+      });
+    }
+
+    // --- Right sidebar toggle ---
+    if (marginSidebar) {
+      var btnR = document.createElement("button");
+      btnR.id = "sf-toggle-right";
+      btnR.className = "sf-sidebar-toggle";
+      btnR.setAttribute("type", "button");
+      btnR.setAttribute("aria-label", "Toggle table of contents");
+      btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+      body.appendChild(btnR);
+
+      if (rightOff) body.classList.add("sf-right-collapsed");
+
+      btnR.addEventListener("click", function () {
+        rightOff = !rightOff;
+        body.classList.toggle("sf-right-collapsed", rightOff);
+        localStorage.setItem(STORAGE_RIGHT, String(rightOff));
+        btnR.innerHTML = rightOff ? CHEVRON_LEFT : CHEVRON_RIGHT;
+        btnR.setAttribute("aria-expanded", String(!rightOff));
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+
+
+
+</body></html>

@@ -76,7 +76,12 @@ After completing this chapter, you will be able to:
 
 ### Three-Phase Migration
 
-![Three-phase migration: assessment migration validation](../_diagrams/png/dg_13_migration_phases.png){fig-alt="Assessment then migration then validation phases"}
+```{mermaid}
+%%| fig-cap: "Three-phase migration: assessment migration validation"
+%%| fig-alt: "Assessment then migration then validation phases"
+flowchart LR
+  P1[Phase 1 Assessment] --> P2[Phase 2 Migration] --> P3[Phase 3 Validation]
+```
 
 ### Phase 1: Assessment
 
@@ -196,6 +201,156 @@ Tecton migration is prioritized given Databricks Online Tables EOL.
 # 1. Feature Store is a Snowflake schema + platform objects vs external registry + plugins
 # 2. Online store is Online Feature Table (Hybrid Table) vs Redis/DynamoDB
 # 3. No separate Feature Service — use generate_training_set() / generate_dataset() with spine + FVs
+```
+
+### Migrating from Pandas-based Feature Engineering {#sec-pandas-migration}
+
+Many ML teams start with local pandas for feature engineering and need a path to productionize those pipelines in the Feature Store. The difficulty varies widely depending on what pandas operations are used.
+
+#### Complexity ladder
+
+**Tier 1 -- Trivial (direct SQL rewrite).** Simple groupby/agg, filters, joins. These map 1:1 to SQL or Snowpark DataFrame operations.
+
+::: {.panel-tabset group="lang"}
+
+## pandas (before)
+
+```python
+import pandas as pd
+
+df = pd.read_sql("SELECT * FROM ORDERS", conn)
+features = df.groupby("USER_ID").agg(
+    ORDER_CNT=("ORDER_ID", "count"),
+    SPEND_SUM=("TOTAL_AMT", "sum"),
+    LAST_ORDER_TS=("ORDER_TS", "max"),
+).reset_index()
+```
+
+## SQL (after)
+
+```python
+user_purchase_df = session.sql("""
+    SELECT
+        USER_ID,
+        COUNT(ORDER_ID)  AS ORDER_CNT,
+        SUM(TOTAL_AMT)   AS SPEND_SUM,
+        MAX(ORDER_TS)     AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID
+""")
+```
+
+## Snowpark DataFrame (after)
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+user_purchase_df = orders.group_by("USER_ID").agg(
+    F.count("ORDER_ID").alias("ORDER_CNT"),
+    F.sum("TOTAL_AMT").alias("SPEND_SUM"),
+    F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+)
+```
+
+:::
+
+**Tier 2 -- Moderate (Snowpark DataFrame rewrite).** Multi-step transformations, conditional columns, window functions. Requires translating pandas idioms to Snowpark equivalents.
+
+::: {.panel-tabset group="lang"}
+
+## pandas (before)
+
+```python
+df["IS_HIGH_VALUE"] = (df["TOTAL_AMT"] > 100).astype(int)
+df["ORDER_RANK"] = df.groupby("USER_ID")["ORDER_TS"].rank(ascending=False)
+df = df[df["ORDER_RANK"] <= 5]
+```
+
+## SQL (after)
+
+```python
+recent_orders_df = session.sql("""
+    SELECT USER_ID, ORDER_ID, TOTAL_AMT, ORDER_TS,
+           CASE WHEN TOTAL_AMT > 100 THEN 1 ELSE 0 END AS IS_HIGH_VALUE,
+           ROW_NUMBER() OVER (PARTITION BY USER_ID ORDER BY ORDER_TS DESC) AS ORDER_RANK
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    QUALIFY ORDER_RANK <= 5
+""")
+```
+
+## Snowpark DataFrame (after)
+
+```python
+from snowflake.snowpark import Window
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+recent_orders_df = (
+    orders
+    .with_column("IS_HIGH_VALUE", F.when(F.col("TOTAL_AMT") > 100, 1).otherwise(0))
+    .with_column(
+        "ORDER_RANK",
+        F.row_number().over(Window.partition_by("USER_ID").order_by(F.col("ORDER_TS").desc()))
+    )
+    .filter(F.col("ORDER_RANK") <= 5)
+)
+```
+
+:::
+
+**Tier 3 -- Complex (LLM-assisted conversion + manual tuning).** Pandas operations relying on row order (`.shift()`, `.rolling()` with custom functions, `.apply()` with arbitrary Python). These require expressing the logic with SQL window functions (`LAG`, `LEAD`, cumulative sums) or vectorized UDFs.
+
+```python
+# pandas (before) — row-ordered operations
+df = df.sort_values(["USER_ID", "ORDER_TS"])
+df["PREV_ORDER_AMT"] = df.groupby("USER_ID")["TOTAL_AMT"].shift(1)
+df["AMT_CHANGE"] = df["TOTAL_AMT"] - df["PREV_ORDER_AMT"]
+```
+
+```python
+# SQL (after) — window functions replace row-ordered pandas
+order_change_df = session.sql("""
+    SELECT
+        USER_ID,
+        ORDER_TS,
+        TOTAL_AMT,
+        LAG(TOTAL_AMT) OVER (
+            PARTITION BY USER_ID ORDER BY ORDER_TS
+        ) AS PREV_ORDER_AMT,
+        TOTAL_AMT - LAG(TOTAL_AMT) OVER (
+            PARTITION BY USER_ID ORDER BY ORDER_TS
+        ) AS AMT_CHANGE
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+""")
+```
+
+::: {.callout-tip title="Use Coding LLMs for Tier 3 Conversions"}
+Use coding LLM tools (Cursor, Copilot, ChatGPT, etc.) to generate a first-pass SQL or Snowpark DataFrame translation of complex pandas code. The LLM output typically handles 80-90% of the logic correctly. Review and manually tune the remaining edge cases -- especially around window frame boundaries, NULL handling, and DT-compatibility (avoid non-deterministic functions like `CURRENT_TIMESTAMP()`).
+:::
+
+#### Snowpark pandas: not recommended for production Feature Views
+
+::: {.callout-warning title="Snowpark pandas and Feature Store"}
+Snowpark pandas (`import snowflake.snowpark.modin.pandas as pd`) runs pandas-syntax code on Snowflake warehouse compute. However, it is **not a supported transformation language for Feature Store `feature_df` in production**:
+
+- With default `enforce_ordering=True`, it generates multi-statement SQL with temporary tables that **cannot back a Dynamic Table**
+- With `enforce_ordering=False`, some pipelines collapse to a single SQL statement, but known correctness issues make this **experimental and not recommended for production**
+- Feature Store assumes relational, unordered sources keyed by entity + timestamp -- pandas row-ordered semantics are fundamentally at odds with this model
+
+**Recommendation:** Use Snowpark pandas for **exploration and prototyping** during migration, then rewrite the final pipeline in SQL or Snowpark DataFrames for the registered `feature_df`.
+:::
+
+#### Anti-pattern: passing a local pandas DataFrame as `feature_df`
+
+Passing a local `pd.DataFrame` as `feature_df` will **fail** -- the Feature Store API expects a Snowpark DataFrame, not a pandas object. If you have data in a local pandas DataFrame, upload it to a Snowflake table first and then reference it:
+
+```python
+# Upload local pandas DataFrame to Snowflake
+session.write_pandas(local_df, "MY_STAGING_TABLE", auto_create_table=True)
+
+# Now use it as feature_df
+feature_df = session.table("MY_STAGING_TABLE")
 ```
 
 ---

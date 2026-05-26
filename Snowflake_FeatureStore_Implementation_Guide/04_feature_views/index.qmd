@@ -53,6 +53,28 @@ session_entity = Entity(name="SESSION", join_keys=["SESSION_ID"])
 
 ---
 
+## SQL vs Snowpark DataFrame API {#sec-sql-vs-snowpark}
+
+Feature View definitions require a Snowpark DataFrame (`feature_df`). You can construct this using either `session.sql("SELECT ...")` (SQL) or the Snowpark DataFrame API (`session.table(...).group_by(...).agg(...)`). Both produce **identical** lazy Snowpark DataFrames and generate the same Dynamic Tables.
+
+Throughout this guide, code examples are presented in both forms using tabs. **SQL is shown first** because it is more widely known across data science and engineering teams, but the Snowpark DataFrame API is equally valid.
+
+| Factor | SQL (`session.sql`) | Snowpark DataFrame API |
+|---|---|---|
+| **Readability** | Universally understood across data roles | Requires Python + Snowpark API knowledge |
+| **Debuggability** | Maps 1:1 to what the Dynamic Table executes; easy to copy-paste into Snowsight | Emits machine-generated SQL that can be dense/nested (see [Appendix C](../appendices/C_snowpark_to_dynamic_table/index.qmd#sec-sql-formatting)) |
+| **Composability** | Harder to parameterize dynamically | Excels at programmatic feature generation (loops, conditional columns, config-driven specs) |
+| **Testability** | Requires `session.sql` assertions or a SQL runner | Integrates with Python test frameworks (pytest) |
+| **Verbosity** | Typically more concise for simple aggregations | More concise for complex multi-step pipelines with reusable intermediates |
+| **Team skills** | SQL is widely known (analysts, data scientists, data engineers) | Snowpark API is narrower (Python + Snowpark) |
+| **Maintenance** | Easier to review in PRs for SQL-fluent teams | Easier for Python-fluent teams with IDE support |
+
+::: {.callout-tip}
+There is no wrong choice. Pick the style that your team can read, review, and maintain. Many teams standardize on SQL for simple aggregations and reserve Snowpark DataFrames for programmatic generation (e.g., [data-driven feature factories](../07_aggregations_api/index.qmd#sec-data-driven) in Chapter 7).
+:::
+
+---
+
 ## How `refresh_freq` Controls Materialization {#sec-refresh-freq-modes}
 
 | `refresh_freq` | Backing object | Behavior |
@@ -112,8 +134,11 @@ product_catalog_fv = FeatureView(
 
 **2. Declarative transformations.** The View definition can encode complex feature-engineering logic -- joins, aggregations, window functions, CASE expressions -- evaluated at query time. This keeps the transformation logic self-contained within the Feature Store:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Complex transformation defined declaratively in the view
 user_session_df = session.sql("""
     SELECT
         s.USER_ID,
@@ -125,14 +150,38 @@ user_session_df = session.sql("""
     JOIN FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS e ON s.SESSION_ID = e.SESSION_ID
     GROUP BY s.USER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+sessions = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS")
+events = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.EVENTS")
+
+user_session_df = (
+    sessions.join(events, sessions["SESSION_ID"] == events["SESSION_ID"])
+    .group_by(sessions["USER_ID"])
+    .agg(
+        F.count_distinct(sessions["SESSION_ID"]).alias("SESSION_CNT"),
+        F.avg(sessions["DURATION_SEC"]).alias("AVG_SESSION_DURATION_SEC"),
+        F.sum(F.when(events["EVENT_TYPE"] == "PURCHASE", 1).otherwise(0)).alias("PURCHASE_EVENT_CNT"),
+        F.max(sessions["START_TS"]).alias("LAST_SESSION_TS"),
+    )
+)
+```
+
+:::
+
+```python
 user_session_fv = FeatureView(
     name="USER_SESSION_FV",
     entities=[user_entity],
     feature_df=user_session_df,
     timestamp_col="LAST_SESSION_TS",
     refresh_freq=None,
-    desc="USER session engagement features — computed at query time",
+    desc="USER session engagement features -- computed at query time",
 )
 ```
 
@@ -180,11 +229,13 @@ fv = FeatureView(
 
 The most PIT-friendly pattern for DT-backed Feature Views produces **multiple rows per entity over time**, so the ASOF join can select the correct snapshot for any point in the past:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
 from snowflake.ml.feature_store import FeatureView, Entity
 
-# Cumulative lifetime order features -- one row per USER per ORDER_TS
-# Each row carries running totals as of that order, enabling true PIT retrieval
 user_order_cumulative_df = session.sql("""
     SELECT
         USER_ID,
@@ -196,7 +247,32 @@ user_order_cumulative_df = session.sql("""
     WINDOW w AS (PARTITION BY USER_ID ORDER BY ORDER_TS
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+from snowflake.snowpark import Window
+import snowflake.snowpark.functions as F
+from snowflake.ml.feature_store import FeatureView, Entity
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+w = Window.partition_by("USER_ID").order_by("ORDER_TS").rows_between(
+    Window.UNBOUNDED_PRECEDING, Window.CURRENT_ROW
+)
+
+user_order_cumulative_df = orders.select(
+    F.col("USER_ID"),
+    F.col("ORDER_TS"),
+    F.sum("TOTAL_AMT").over(w).alias("ORDER_TOTAL_AMT_SUM"),
+    F.count("ORDER_ID").over(w).alias("ORDER_CNT"),
+    F.avg("TOTAL_AMT").over(w).alias("ORDER_TOTAL_AMT_AVG"),
+)
+```
+
+:::
+
+```python
 user_order_fv = FeatureView(
     name="USER_ORDER_FV",
     entities=[user_entity],
@@ -204,7 +280,7 @@ user_order_fv = FeatureView(
     timestamp_col="ORDER_TS",
     refresh_freq="1 hour",
     desc="USER cumulative order features: running total spend, order count, "
-         "and average order value — one row per order for PIT retrieval",
+         "and average order value -- one row per order for PIT retrieval",
 )
 ```
 
@@ -214,8 +290,11 @@ This Feature View produces **one row per user per order**. When the spine reques
 
 If you only need the **current** totals (e.g., for online serving or batch inference at "now"), a single-row aggregate is simpler and cheaper to maintain:
 
-```{python}
-# Latest-state lifetime order aggregates -- one row per USER
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 user_order_latest_df = session.sql("""
     SELECT
         USER_ID,
@@ -226,7 +305,40 @@ user_order_latest_df = session.sql("""
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
     GROUP BY USER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+orders = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS")
+user_order_latest_df = orders.group_by("USER_ID").agg(
+    F.sum("TOTAL_AMT").alias("ORDER_TOTAL_AMT_SUM"),
+    F.count("ORDER_ID").alias("ORDER_CNT"),
+    F.avg("TOTAL_AMT").alias("ORDER_TOTAL_AMT_AVG"),
+    F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+)
+```
+
+:::
+
+```{python}
+#| echo: false
+#| output: false
+user_order_latest_df = session.sql("""
+    SELECT
+        USER_ID,
+        SUM(TOTAL_AMT) AS ORDER_TOTAL_AMT_SUM,
+        COUNT(ORDER_ID) AS ORDER_CNT,
+        AVG(TOTAL_AMT) AS ORDER_TOTAL_AMT_AVG,
+        MAX(ORDER_TS) AS LAST_ORDER_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+    GROUP BY USER_ID
+""")
+```
+
+```{python}
 user_order_latest_fv = FeatureView(
     name="USER_ORDER_LATEST_FV",
     entities=[user_entity],
@@ -278,7 +390,7 @@ feature_df = (
 
 If the join is unavoidable, consider splitting the query into a base DT (aggregation only, no join) and a presentation View that joins the results -- see the [Base + Presentation Layer Model](#sec-base-presentation) later in this chapter.
 
-As of April 2026, the presentation layer does not have to be a View -- it can be a **downstream DT** that refreshes incrementally. When the base DT's query uses `GROUP BY`, Snowflake derives a unique key from the grouping columns. A downstream DT can then opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`) and process only the rows that actually changed in the upstream full refresh. This is a SQL-level capability not yet exposed in the Feature Store Python API. See [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+As of April 2026, the presentation layer does not have to be a View -- it can be a **downstream DT** that refreshes incrementally. When the base DT's query uses `GROUP BY`, Snowflake derives a unique key from the grouping columns. A downstream DT can then opt into `REFRESH_MODE = INCREMENTAL` via SQL (`ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL`) and process only the rows that actually changed in the upstream full refresh. This is a SQL-level capability not yet exposed in the Feature Store Python API. See [Chapter 5: Feature Pipelines](../05_feature_pipelines/index.qmd) and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 :::
 
 ### Dynamic Table + Task (CRON)
@@ -287,8 +399,11 @@ As of April 2026, the presentation layer does not have to be a View -- it can be
 
 Use CRON when features should refresh on a **calendar schedule** aligned to upstream batch loads rather than continuous lag. This is common when source data arrives in known batches (e.g., a nightly ETL) and you want refresh timing to match the upstream cadence. Note that even with a shorter `refresh_freq`, cost is minimal when there is no new source data -- the Dynamic Table scheduler checks for upstream changes and skips the refresh cycle without starting a warehouse:
 
+::: {.panel-tabset group="lang"}
+
+## SQL
+
 ```python
-# Daily session features -- source data lands in a nightly batch
 user_daily_session_df = session.sql("""
     SELECT
         USER_ID,
@@ -297,13 +412,29 @@ user_daily_session_df = session.sql("""
     FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS
     GROUP BY USER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+sessions = session.table("FEATURE_STORE_DEMO.CLICKSTREAM_DATA.SESSIONS")
+user_daily_session_df = sessions.group_by("USER_ID").agg(
+    F.count_distinct("SESSION_ID").alias("SESSION_CNT_LIFETIME"),
+    F.avg("DURATION_SEC").alias("AVG_SESSION_DURATION_SEC"),
+)
+```
+
+:::
+
+```python
 user_daily_session_fv = FeatureView(
     name="USER_SESSION_DAILY_FV",
     entities=[user_entity],
     feature_df=user_daily_session_df,
     refresh_freq="0 8 * * *",  # CRON: refresh daily at 08:00 UTC after nightly load
-    desc="USER session engagement features — refreshed daily after batch ingestion",
+    desc="USER session engagement features -- refreshed daily after batch ingestion",
 )
 ```
 
@@ -322,6 +453,10 @@ This example omits `timestamp_col` because it produces a single latest-state row
 
 When refreshes should be triggered by **external pipeline completion** (e.g., an Airflow DAG, Dagster asset, or CI/CD step) rather than a fixed schedule, you can **suspend** the Feature View's DT and call `refresh_feature_view()` on demand:
 
+::: {.panel-tabset group="lang"}
+
+## Python API
+
 ```python
 registered_fv = fs.register_feature_view(fv, "V01")
 
@@ -331,6 +466,24 @@ fs.suspend_feature_view(registered_fv)
 # In your external orchestrator (Airflow task, Dagster op, etc.):
 fs.refresh_feature_view(registered_fv)
 ```
+
+## SQL
+
+```sql
+-- Suspend automatic refreshes
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_SESSION_DAILY_FV$V01"
+  SUSPEND;
+
+-- Trigger a manual refresh from your external scheduler
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_SESSION_DAILY_FV$V01"
+  REFRESH;
+```
+
+:::
+
+::: {.callout-tip}
+The SQL approach is often simpler for external schedulers (Airflow, Dagster, dbt) that already have a Snowflake connection -- no Python environment or `snowflake-ml-python` install required. The Feature View's underlying Dynamic Table name follows the `<NAME>$<VERSION>` convention and lives in the Feature Store schema.
+:::
 
 **Characteristics**:
 
@@ -415,7 +568,7 @@ This naming convention means:
 
 | Change type | What to do |
 |-------------|------------|
-| **Adding new features** | Create and register a **new version** (e.g. **V02**) that includes the new columns; keep **V01** until consumers opt in. |
+| **Adding new features** | Create and register a **new version** (e.g. **V02**) that includes the new columns; keep **V01** until consumers opt in. **Exception:** if the DT uses `SELECT *` from a base table and the source team adds a column there, the DT picks it up automatically — see [Incremental Column Pickup with SELECT *](#sec-select-star-evolution). |
 | **Deprecating features** | Leave the old version **registered** and documented as deprecated; remove columns only in a **new** version so existing training and serving jobs keep working. |
 | **Breaking changes** (rename column, change type or meaning, change entity keys, change `timestamp_col` semantics) | Always ship a **new version** (or new Feature View name). Never overwrite **V01** with incompatible definitions. |
 | **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. Use [lineage](../11_operations/index.qmd#sec-lineage) to identify dependencies and usage. |
@@ -430,7 +583,7 @@ Workflow summary:
 
 Adding features is the most common schema evolution scenario. The default path -- registering a new Feature View version with the additional columns -- creates a new Dynamic Table that must perform a **full initial refresh** over the entire source dataset. For large DTs with months or years of history, this can be prohibitively expensive.
 
-Dynamic Tables now support [`BACKFILL FROM`](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) combined with [`IMMUTABLE WHERE`](https://docs.snowflake.com/en/user-guide/dynamic-tables-immutability-constraints), which lets you **carry forward historical data** from the prior version's DT and only compute the new columns for the mutable (recent) window. The general workflow:
+Dynamic Tables now support [`BACKFILL FROM`](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) combined with [`IMMUTABLE WHERE`](https://docs.snowflake.com/en/user-guide/dynamic-tables/frozen-regions), which lets you **carry forward historical data** from the prior version's DT and only compute the new columns for the mutable (recent) window. The general workflow:
 
 1. **Clone** the existing DT (V01) to a regular table.
 2. **Add the new column(s)** to the clone (`ALTER TABLE ... ADD COLUMN`). Historical rows will have `NULL` for the new features.
@@ -464,6 +617,10 @@ CREATE DYNAMIC TABLE FEATURE_STORE.USER_ORDER_FV$V02
 
 After creation, the DT's immutable region contains the backfilled data (with `NULL` for `ORDER_TOTAL_AMT_AVG` in historical rows), while the mutable region is computed fresh and includes all columns. You can verify with `SELECT *, METADATA$IS_IMMUTABLE FROM FEATURE_STORE.USER_ORDER_FV$V02`.
 
+::: {.callout-important title="TAG registration required for API visibility"}
+Objects created via SQL in the Feature Store schema are **not visible** to `fs.list_feature_views()`, `fs.get_feature_view()`, or the Snowsight Feature Store UI unless the correct internal TAGs are applied. After creating the DT via SQL, add the Feature Store tags so the API and UI can discover it. See [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd) for the required TAG schema and a worked example. If the object is only consumed via direct SQL (not through the Feature Store API), tags are optional.
+:::
+
 ::: {.callout-warning}
 ## Not yet available via Feature Store API
 
@@ -489,6 +646,210 @@ This gives you the inner query only. For the full DDL of an already-registered D
 Downstream Dynamic Tables that read from the evolved DT will still need to refresh to pick up the schema change. If the downstream DTs also use `IMMUTABLE WHERE`, only their mutable window is reprocessed.
 :::
 
+### Retroactive IMMUTABLE WHERE (no clone needed) {#sec-retroactive-immutable}
+
+The clone-and-backfill workflow above creates a new DT version. A simpler alternative -- when you can accept `NULL` for the new feature in historical rows -- is to add an `IMMUTABLE WHERE` constraint **retroactively** to the existing DT, replace the upstream source (or Feature View query), and refresh. Only the mutable window is recomputed; the immutable region is preserved as-is.
+
+```sql
+-- 1. Protect history on the existing DT
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" SET
+    IMMUTABLE WHERE (LAST_ORDER_TS < CURRENT_TIMESTAMP() - INTERVAL '1 day');
+
+-- 2. Update the Feature View definition (e.g., add AVG feature)
+--    If the FV reads from a VIEW, replace the VIEW:
+CREATE OR REPLACE VIEW FEATURE_STORE.USER_ORDER_SOURCE_V AS
+SELECT USER_ID,
+       SUM(TOTAL_AMT)   AS ORDER_TOTAL_AMT_SUM,
+       COUNT(ORDER_ID)   AS ORDER_CNT,
+       AVG(TOTAL_AMT)    AS ORDER_TOTAL_AMT_AVG,   -- new feature
+       MAX(ORDER_TS)      AS LAST_ORDER_TS
+FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+GROUP BY USER_ID;
+
+-- 3. Refresh — only mutable rows recomputed
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" REFRESH;
+
+-- 4. (Optional) Remove constraint if not needed permanently
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" UNSET IMMUTABLE WHERE;
+```
+
+After the refresh, immutable rows have `NULL` for `ORDER_TOTAL_AMT_AVG` while mutable rows have the computed value. Verify with `SELECT *, METADATA$IS_IMMUTABLE FROM FEATURE_STORE."USER_ORDER_FV$V01"`.
+
+::: {.callout-tip}
+## OBJECT columns make this seamless
+
+With OBJECT-based Feature Views (see [Chapter 12: Wide & Sparse Data](../12_advanced_patterns/index.qmd#sec-wide-sparse)), heterogeneous key sets across the immutable/mutable boundary are handled naturally. Immutable rows simply lack the new key in the OBJECT; `COALESCE(features:"NEW_KEY"::NUMBER, 0)` fills the default at read time. In scalar DTs, the same pattern produces a visible `NULL` column in historical rows.
+:::
+
+::: {.callout-note}
+## Lazy backfill
+
+If you later need the new feature backfilled across all history, you have two options:
+
+**Full refresh** -- remove the constraint and recompute everything in a single off-peak window:
+
+```sql
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" UNSET IMMUTABLE WHERE;
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" REFRESH;
+```
+
+**Phased backfill** -- progressively move the immutability boundary backward (e.g., one month at a time), so each refresh recomputes only a slice of history. This spreads the cost across multiple windows and avoids a single large recompute:
+
+```sql
+-- Phase 1: backfill the most recent immutable month
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" SET
+    IMMUTABLE WHERE (LAST_ORDER_TS < CURRENT_TIMESTAMP() - INTERVAL '60 days');
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" REFRESH;
+
+-- Phase 2: backfill the next month
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" SET
+    IMMUTABLE WHERE (LAST_ORDER_TS < CURRENT_TIMESTAMP() - INTERVAL '90 days');
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" REFRESH;
+
+-- Continue until all history is backfilled, then lock down again
+ALTER DYNAMIC TABLE FEATURE_STORE."USER_ORDER_FV$V01" SET
+    IMMUTABLE WHERE (LAST_ORDER_TS < CURRENT_TIMESTAMP() - INTERVAL '1 day');
+```
+
+Phased backfill is useful when the full history is too large for a single off-hours window, or when warehouse budget constraints require distributing the compute across days.
+:::
+
+### Incremental Column Pickup with SELECT * {#sec-select-star-evolution}
+
+Snowflake has updated the behaviour of Dynamic Tables defined with
+`SELECT * FROM base_table`: when a **new column is added** to the base table,
+the DT now picks it up on its next refresh rather than failing with an error.
+
+::: {.callout-note title="Previous behaviour"}
+The Snowflake documentation previously stated:
+> "Changes to underlying base table for dynamic tables created with `SELECT *`
+> from base table: The dynamic table **fails to refresh** and must be
+> recreated to respond to the change."
+
+This constraint has been relaxed for **additive** changes (new columns).
+Non-additive changes — column drops, renames, and type modifications — still
+require recreation.
+:::
+
+**When this applies.** If a Feature View's DT is a straightforward
+pass-through of a base table using `SELECT *`, new columns added to the source
+automatically appear in the DT:
+
+```sql
+-- Feature View DT as a simple pass-through
+CREATE DYNAMIC TABLE FEATURE_STORE."USER_FEATURES$V01"
+    TARGET_LAG   = '1 hour'
+    WAREHOUSE    = FS_WH
+    REFRESH_MODE = INCREMENTAL
+AS
+SELECT * FROM SOURCE_DB.DATA.USER_FEATURES_BASE;
+```
+
+When `USER_FEATURES_BASE` gains a new column (e.g., `RISK_SCORE FLOAT`),
+`ALTER TABLE ... ADD COLUMN RISK_SCORE FLOAT`, the column will appear in the
+DT on its next scheduled refresh or a manual `ALTER DYNAMIC TABLE ... REFRESH`.
+
+**Backfill semantics for pre-existing rows.** All rows — including those that
+existed before the column was added — are **recomputed from source** and receive
+the correct value for the new column. The `REFRESH_ACTION` shows `INCREMENTAL`
+with `ins=N` / `del=N` equal to the total row count: the DT deletes all existing
+rows and re-inserts them with the new column evaluated. There is **no NULL fill**
+for pre-existing rows.
+
+::: {.callout-important title="Full row-level recompute despite INCREMENTAL label"}
+The `INCREMENTAL` refresh action after a column add is a full scan of all rows
+in the source — every row is deleted and re-inserted. The cost is equivalent to
+a full refresh. The `INCREMENTAL` label refers to the DT engine's change-tracking
+mechanism, not to processing only the rows that changed in the source.
+
+For large DTs with many rows, a column add to the base table will therefore be
+an expensive operation. If the DT also has downstream dependents, each downstream
+DT also does a full row-level recompute in turn. Use `IMMUTABLE WHERE` (see below)
+if you need to protect the historical region from this recompute cost.
+:::
+
+**IMMUTABLE WHERE interaction.** When `IMMUTABLE WHERE` is set on the DT, the
+column-add refresh respects the boundary: immutable rows are **not recomputed**
+(ins=0 / del=0 for protected rows) and their value for the new column is `NULL`.
+Mutable rows are recomputed from source and receive the correct value.
+This is consistent with the retroactive `IMMUTABLE WHERE` behaviour
+[described above](#sec-retroactive-immutable).
+
+::: {.callout-warning title="Uncontrolled upstream ADD COLUMN triggers automatic recompute"}
+The `SELECT *` pickup is **always on**.  Any `ADD COLUMN` to the base table — even one
+added by another team for an unrelated purpose — will trigger a full row-level recompute
+(ins=N/del=N) on this DT and on every downstream `SELECT *` DT in the cascade.
+
+In a **shared or multi-team environment** where you do not own the base table, prefer the
+OBJECT-bundled approach with a VIEW intermediary.  The VIEW acts as a gate: upstream
+schema changes are inert until you deliberately replace the VIEW, giving you control over
+timing, scope, and cost.  See
+[Chapter 12: Choosing between approaches](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)
+for the full trade-off analysis.
+:::
+
+**DT cascade behaviour.** Downstream DTs that also use `SELECT *` from the DT
+that gained a column will pick it up on their own next refresh. Downstream DTs
+with explicit column lists are unaffected until their query is updated.
+
+**When this is the right choice.**
+
+- The DT is a thin pass-through over a single managed base table where the
+  source team adds columns intentionally.
+- Consumers can tolerate `NULL` for the new column in historical rows, or the
+  DT history is short enough that a full refresh is acceptable.
+- Feature count stays below ~100 columns (scalar column-per-feature stays
+  within compilation and join-performance thresholds).
+- No explicit version gate is needed — new columns become visible immediately
+  to all consumers.
+
+For more complex cases — computed feature expressions, wide feature sets (100+
+columns), sparse data, or when historical rows must not be NULLed — the
+BACKFILL + IMMUTABLE WHERE workflow and the [OBJECT-bundled pattern](../12_advanced_patterns/index.qmd#sec-object-immutable)
+remain the recommended approaches.
+
+::: {.callout-tip title="OBJECT_CONSTRUCT(*) inline in DT body — confirmed for pass-through bundles"}
+Writing `OBJECT_CONSTRUCT(* EXCLUDE (entity_id, ts)) AS features` directly in
+the DT's `AS` clause (no VIEW intermediary) has been prototyped and confirmed
+to work for **pass-through bundles** — where features are already derived and
+materialised upstream of this Feature View:
+
+- New upstream physical columns auto-appear as OBJECT keys on the next refresh
+  (`REFRESH_ACTION = INCREMENTAL`)
+- The DT's physical schema stays stable (3 columns: entity key, timestamp, OBJECT)
+- All rows in the mutable region are recomputed and receive the new key value
+- No VIEW to create, replace, or maintain when the source already holds the
+  finished features
+
+**When the VIEW intermediary is the right choice.** If feature derivation
+happens at the Feature View layer — ratios, flags, windowed functions that are
+not physical columns in the source — use an intermediary VIEW to hold the
+derivation logic and read from that VIEW with `OBJECT_CONSTRUCT(*)` in the DT.
+The key benefit: ALTER-ing the VIEW to add a new derived column is also picked
+up by the `OBJECT(*)` DT **incrementally** (`REFRESH_ACTION = INCREMENTAL`,
+not `REINITIALIZE`), giving you the same additive column pickup behaviour with
+the additional benefit of a controlled gate — the DT is completely unaffected
+by upstream schema changes until you deliberately replace the VIEW.  See
+[Chapter 12: Choosing between approaches](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)
+for the full comparison.
+:::
+
+::: {.callout-warning title="Non-additive changes still require recreation"}
+Column drops, renames, and type changes on the base table still cause the DT to
+fail on refresh and require recreation.  For these changes, create a new
+Feature View version using the standard workflow [described above](#sec-schema-evolution).
+:::
+
+::: {.callout-warning}
+## Not available via Feature Store Python API
+
+`SELECT *` DTs and their schema evolution are a SQL-layer capability. The
+Feature Store Python API (`FeatureView`, `register_feature_view`) does not
+expose this directly. Create the DT via SQL, then apply the Feature Store TAGs
+so the API and Snowsight UI can discover it (see
+[Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd)).
+:::
+
 ### Alternative: Base + Presentation Layer Model {#sec-base-presentation}
 
 The standard approach creates a new version (a new Dynamic Table) for each schema change. An alternative for organizations with complex, frequently evolving feature sets is a **two-layer model** that separates physical storage from the consumer-facing view-based Feature Views.  This could be implemented within a single Feature Store Schema through naming convention, or two separate Feature Store Schemas to provide separation of concerns:
@@ -502,7 +863,15 @@ CREATE SCHEMA FEATURE_STORE_BASE;
 CREATE SCHEMA FEATURE_STORE_PRESENTATION;
 ```
 
-![Base layer Dynamic Table feature views feeding a presentation View](../_diagrams/png/dg_04_presentation_layer.png){fig-alt="Three base feature views combine into one combined view"}
+```{mermaid}
+%%| fig-cap: "Base layer Dynamic Table feature views feeding a presentation View"
+%%| fig-alt: "Three base feature views combine into one combined view"
+flowchart TB
+  B1[USER_ORDER_BASE DT]
+  B2[USER_ENGAGE_BASE DT]
+  B3[USER_PROMO_BASE DT]
+  B1 & B2 & B3 --> COMB[USER_COMBINED_FV View joins bases]
+```
 
 **How it works:**
 
@@ -525,11 +894,35 @@ user_engage_base = FeatureView(
 )
 
 # Presentation layer (View-based, combines bases)
+```
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 combined_df = session.sql("""
     SELECT o.*, e.SESSION_CNT, e.AVG_SESSION_DURATION_SEC
     FROM FEATURE_STORE.USER_ORDER_BASE_FV$V01 o
     JOIN FEATURE_STORE.USER_ENGAGE_BASE_FV$V01 e USING (USER_ID)
 """)
+```
+
+## Snowpark DataFrame
+
+```python
+order_base = session.table('FEATURE_STORE."USER_ORDER_BASE_FV$V01"')
+engage_base = session.table('FEATURE_STORE."USER_ENGAGE_BASE_FV$V01"')
+combined_df = order_base.join(engage_base, "USER_ID").select(
+    order_base["*"],
+    engage_base["SESSION_CNT"],
+    engage_base["AVG_SESSION_DURATION_SEC"],
+)
+```
+
+:::
+
+```python
 user_combined_fv = FeatureView(
     name="USER_COMBINED_FV", entities=[user_entity],
     feature_df=combined_df, timestamp_col="LAST_ORDER_TS",
@@ -555,27 +948,80 @@ This pattern adds operational complexity and is best suited to organizations wit
 
 ### Version Lifecycle
 
-![Feature View version lifecycle V01 through V03](../_diagrams/png/dg_04_version_lifecycle.png){fig-alt="Three versions of a feature view from initial to current"}
+```{mermaid}
+%%| fig-cap: "Feature View version lifecycle V01 through V03"
+%%| fig-alt: "Three versions of a feature view from initial to current"
+flowchart LR
+  V01[V01 Initial] --> V02[V02 Update] --> V03[V03 Current]
+```
 
 ### Managing Versions
 
+**List registered Feature Views:**
+
+::: {.panel-tabset}
+
+## Python API
+
+```python
+fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
+```
+
+## SQL
+
+```sql
+-- Dynamic Table-backed Feature Views
+SHOW DYNAMIC TABLES IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE;
+
+-- View-based Feature Views
+SHOW VIEWS IN SCHEMA FEATURE_STORE_DEMO.FEATURE_STORE;
+
+-- Combined column-level inventory
+SELECT TABLE_NAME AS FEATURE_VIEW, COLUMN_NAME, DATA_TYPE
+FROM FEATURE_STORE_DEMO.INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'FEATURE_STORE'
+ORDER BY TABLE_NAME, ORDINAL_POSITION;
+```
+
+:::
+
 ```{python}
-# List all registered Feature Views
+#| echo: false
 all_fvs = fs.list_feature_views().select("NAME", "VERSION", "DESC").show()
 ```
 
+**Delete an old version** (only after all consumers have migrated):
+
+::: {.panel-tabset}
+
+## Python API
+
 ```python
-# Delete an old version only after all consumers have migrated
 fs.delete_feature_view(name="USER_ORDER_FV", version="V01")
 ```
 
-**Before deleting a version**, verify that no models, datasets, or pipelines still depend on it. The Feature Store API provides a `.lineage()` method on `FeatureView` objects (requires `snowflake-ml-python >= 1.6.0` and the `VIEW LINEAGE` privilege) that traces ML-specific dependencies -- downstream datasets, models, and other Feature Views:
+## SQL
+
+```sql
+-- For DT-backed Feature Views
+DROP DYNAMIC TABLE IF EXISTS FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01";
+
+-- For View-based Feature Views
+DROP VIEW IF EXISTS FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01";
+```
+
+:::
+
+**Before deleting a version**, verify that no models, datasets, or pipelines still depend on it:
+
+::: {.panel-tabset}
+
+## Python API
 
 ```python
-# Feature Store API lineage — traces ML artifact dependencies
 v01_fv = fs.get_feature_view(name="USER_ORDER_FV", version="V01")
 
-# What downstream objects depend on V01? (datasets, models, other FVs)
+# ML-specific dependencies (datasets, models, other FVs)
 downstream = v01_fv.lineage(direction="downstream")
 for node in downstream:
     print(f"{type(node).__name__}: {node.name}")
@@ -584,22 +1030,26 @@ for node in downstream:
 model_deps = v01_fv.lineage(direction="downstream", domain_filter=["model"])
 ```
 
-For broader Snowflake-level dependencies (DT chains, views, tasks) and recent query access, complement the API with SQL:
+Requires `snowflake-ml-python >= 1.6.0` and the `VIEW LINEAGE` privilege.
+
+## SQL
 
 ```sql
--- Check whether any Snowflake objects still reference V01
+-- Snowflake-level object dependencies (DT chains, views, tasks)
 SELECT *
 FROM SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES
 WHERE REFERENCED_OBJECT_NAME = 'USER_ORDER_FV$V01'
   AND REFERENCED_OBJECT_DOMAIN IN ('TABLE', 'DYNAMIC TABLE', 'VIEW');
 
--- Check recent query access to V01
+-- Recent query access to V01
 SELECT QUERY_START_TIME, USER_NAME, QUERY_TEXT
 FROM SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY
 WHERE BASE_OBJECTS_ACCESSED LIKE '%USER_ORDER_FV$V01%'
 ORDER BY QUERY_START_TIME DESC
 LIMIT 20;
 ```
+
+:::
 
 Only delete a version when both the API lineage check and the SQL dependency/access-history checks confirm zero remaining usage. See [Chapter 11: Operations](../11_operations/index.qmd) for more on lineage tracking.
 
@@ -828,7 +1278,13 @@ lineitem_fv = FeatureView(
     desc="Raw lineitem features at (ORDER_ID, LINE_NUMBER) grain",
 )
 
-# Aggregated rollup to the order level
+```
+
+::: {.panel-tabset group="lang"}
+
+## SQL
+
+```python
 order_lineitem_agg_df = session.sql("""
     SELECT
         ORDER_ID,
@@ -839,7 +1295,25 @@ order_lineitem_agg_df = session.sql("""
     FROM ORDER_ITEMS
     GROUP BY ORDER_ID
 """)
+```
 
+## Snowpark DataFrame
+
+```python
+import snowflake.snowpark.functions as F
+
+order_items = session.table("ORDER_ITEMS")
+order_lineitem_agg_df = order_items.group_by("ORDER_ID").agg(
+    F.sum("EXTENDED_PRICE").alias("ORDER_TOTAL_AMT"),
+    F.count("*").alias("LINE_COUNT"),
+    F.avg("EXTENDED_PRICE").alias("AVG_LINE_PRICE"),
+    F.max("SHIP_DATE").alias("LAST_SHIP_DATE"),
+)
+```
+
+:::
+
+```python
 order_agg_fv = FeatureView(
     name="ORDER_LINEITEM_AGG_FV", entities=[order_entity],
     feature_df=order_lineitem_agg_df, timestamp_col="LAST_SHIP_DATE",
@@ -853,7 +1327,7 @@ When `generate_training_set` or `generate_dataset` joins Feature Views at **diff
 If denormalization is undesirable (e.g., the model expects one row per order), either:
 
 - Use a **spine at the parent grain** and only include parent-level Feature Views, or
-- Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children.
+- Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children. For unbounded child sets, use `OBJECT_AGG`, `ARRAY_AGG`, or `LISTAGG` to pack child data into a single column, then process it at retrieval time in Python (e.g., extract the last-N values or compute further aggregations over the array). See [Chapter 12: Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for the OBJECT packing pattern.
 
 See [Chapter 3: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design.
 

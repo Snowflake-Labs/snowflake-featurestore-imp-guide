@@ -13,7 +13,15 @@ Examples that need a database and schema use the same **canonical names** as the
 
 When you define feature transformations in Python using Snowpark DataFrames, **no Python code ships to the Dynamic Table**. The pipeline works as follows:
 
-![Snowpark DataFrame to Dynamic Table translation path](../../_diagrams/png/dg_appendix_snowpark_dt.png){fig-alt="Python lazy plan registers as Feature View then Dynamic Table executes as SQL at refresh"}
+```{mermaid}
+%%| fig-cap: "Snowpark DataFrame to Dynamic Table translation path"
+%%| fig-alt: "Python lazy plan registers as Feature View then Dynamic Table executes as SQL at refresh"
+flowchart TB
+  PY[Snowpark Python DataFrame lazy ops] --> PLAN[SQL query plan]
+  PLAN --> REG[Feature View registration]
+  REG --> CDT[CREATE DYNAMIC TABLE from generated SQL]
+  CDT --> RUN[Refresh cycles execute SQL only]
+```
 
 ### Step 1 -- Snowpark DataFrame (Lazy Evaluation)
 
@@ -152,10 +160,10 @@ Several SQL constructs **fall back to full refresh** or are unsupported entirely
 | `VOLATILE` UDFs | Not supported | Supported | |
 
 ::: {.callout-tip title="Primary key-based incremental refresh (April 2026)"}
-The matrix above describes what happens **within a single DT**. As of April 2026, **downstream** DTs can refresh incrementally even when reading from an upstream DT that uses full refresh, provided the upstream DT has a **system-derived unique key**. Snowflake automatically derives unique keys from `GROUP BY` columns and `QUALIFY ROW_NUMBER() = 1` filters. Additionally, base tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a primary key with `RELY` (`ALTER TABLE ... ADD PRIMARY KEY (...) RELY`). The downstream DT must explicitly set `REFRESH_MODE = INCREMENTAL` (AUTO does not resolve to incremental in this case). Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. These are SQL-level capabilities not yet exposed through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+The matrix above describes what happens **within a single DT**. As of April 2026, **downstream** DTs can refresh incrementally even when reading from an upstream DT that uses full refresh, provided the upstream DT has a **system-derived unique key**. Snowflake automatically derives unique keys from `GROUP BY` columns and `QUALIFY ROW_NUMBER() = 1` filters. Additionally, base tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a primary key with `RELY` (`ALTER TABLE ... ADD PRIMARY KEY (...) RELY`). The downstream DT must explicitly set `REFRESH_MODE = INCREMENTAL` (AUTO does not resolve to incremental in this case). Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. These are SQL-level capabilities not yet exposed through the Feature Store Python API. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 :::
 
-> **Reference:** [Supported queries for dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries)
+> **Reference:** [Supported queries for dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/supported-queries)
 
 ### Python UDFs and UDTFs in Dynamic Tables
 
@@ -258,6 +266,10 @@ churn_score_fv = FeatureView(
 
 This pattern is well-suited to use cases like propensity scoring, risk rating, or recommendation ranking where predictions need to stay fresh as features update, but a full re-score of the entire population each cycle would be wasteful.
 
+::: {.callout-tip title="Scoring Feature Views — multi-FV and PIT-correct variants"}
+The example above covers single-FV scoring. For models that consume features from **multiple Feature Views**, or that require **point-in-time correct** inference, see [Chapter 10: Scoring Feature Views](../../10_training_inference/index.qmd#sec-scoring-fv) which covers the multi-FV pre-join pattern and orchestrated Task/Sproc alternative.
+:::
+
 ### Constructs That Prevent Incremental Refresh Entirely
 
 The following patterns force every refresh to be a full recomputation:
@@ -265,7 +277,7 @@ The following patterns force every refresh to be a full recomputation:
 - **Non-deterministic functions in SELECT** (e.g., `RANDOM()`, `CURRENT_TIMESTAMP()` outside WHERE/HAVING/QUALIFY)
 - **Self-referential queries** (a DT reading its own previous state)
 - **`VOLATILE` UDFs** -- even if the logic is deterministic, the `VOLATILE` marker tells the optimizer it cannot be trusted
-- **Downstream incremental DTs below upstream full-refresh DTs** -- historically, an incremental DT could not sit below a full-refresh DT. As of April 2026, this limitation is relaxed when the upstream full-refresh DT has a **system-derived unique key** (e.g., from `GROUP BY` columns or `QUALIFY ROW_NUMBER() = 1`). In that case, the downstream DT can use `REFRESH_MODE = INCREMENTAL` explicitly and Snowflake will compute only the actual row-level changes between upstream full refreshes. `AUTO` mode does **not** resolve to incremental in this scenario -- you must opt in. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys) for details. **Note:** This is a SQL-level capability; the Feature Store Python API does not yet expose it. Use the same `ALTER DYNAMIC TABLE` / plain-DT pattern described in [View-Based Feature Views](#view-based-feature-views-the-on-demand-alternative) when the API lags behind SQL features.
+- **Downstream incremental DTs below upstream full-refresh DTs** -- historically, an incremental DT could not sit below a full-refresh DT. As of April 2026, this limitation is relaxed when the upstream full-refresh DT has a **system-derived unique key** (e.g., from `GROUP BY` columns or `QUALIFY ROW_NUMBER() = 1`). In that case, the downstream DT can use `REFRESH_MODE = INCREMENTAL` explicitly and Snowflake will compute only the actual row-level changes between upstream full refreshes. `AUTO` mode does **not** resolve to incremental in this scenario -- you must opt in. Verify with `SHOW UNIQUE KEYS IN <upstream_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization) for details. **Note:** This is a SQL-level capability; the Feature Store Python API does not yet expose it. Use the same `ALTER DYNAMIC TABLE` / plain-DT pattern described in [View-Based Feature Views](#view-based-feature-views-the-on-demand-alternative) when the API lags behind SQL features.
 
 ---
 
@@ -591,7 +603,7 @@ In **R**, a typical pattern is `dbplyr::sql_render(lazy_query)` to obtain the te
 |----------|--------|
 | How does Python become a Dynamic Table? | Snowpark translates DataFrame operations to SQL at registration time. The DT is a pure SQL object -- no Python runs during refresh. |
 | Can we use existing Python code? | Yes, via `IMMUTABLE` UDFs called within the DT definition. For model inference, prefer Model Registry (`MODEL(name)!PREDICT()`) -- it handles version rotation gracefully. Standard UDFs work for static logic but replacing one breaks the DT. |
-| What are the limitations? | Certain SQL constructs don't support incremental refresh (`PIVOT`, external functions, `VOLATILE` UDFs, set operators other than `UNION`/`UNION ALL`). See the [supported queries documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries) for the full matrix. |
+| What are the limitations? | Certain SQL constructs don't support incremental refresh (`PIVOT`, external functions, `VOLATILE` UDFs, set operators other than `UNION`/`UNION ALL`). See the [supported queries documentation](https://docs.snowflake.com/en/user-guide/dynamic-tables/supported-queries) for the full matrix. |
 | What about view-based Feature Views? | Omit `refresh_freq` to create a view instead of a DT. The query runs on-the-fly at retrieval time with spine filter push-down. Ideal for prototyping, rarely accessed features, or wrapping externally managed tables (dbt, Airflow, etc.). |
 | How do we optimize? | Break long pipelines into chained DTs, cluster source data by grouping/join keys, use `QUALIFY` over `DISTINCT`, choose target lag based on consumer freshness needs, and use `IMMUTABLE WHERE` to skip recomputation of historical rows. |
 | How do I read ugly generated SQL? | Use a dialect-aware formatter (often SQLGlot for Snowpark strings); optionally hoist derived tables to CTEs for review only. See [Formatting machine-generated SQL](#sec-sql-formatting). |
@@ -599,9 +611,9 @@ In **R**, a typical pattern is `dbplyr::sql_render(lazy_query)` to obtain the te
 ## References
 
 - [Snowpark DataFrames](https://docs.snowflake.com/en/developer-guide/snowpark/python/working-with-dataframes) -- how lazy evaluation and query pushdown work
-- [Dynamic Tables overview](https://docs.snowflake.com/en/user-guide/dynamic-tables-about) -- architecture and refresh mechanics
-- [Supported queries for Dynamic Tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries) -- full incremental/full support matrix
-- [Optimize queries for incremental refresh](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-query) -- operator-level tuning guidance
+- [Dynamic Tables overview](https://docs.snowflake.com/en/user-guide/dynamic-tables/overview) -- architecture and refresh mechanics
+- [Supported queries for Dynamic Tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/supported-queries) -- full incremental/full support matrix
+- [Optimize queries for incremental refresh](https://docs.snowflake.com/en/user-guide/dynamic-tables/refresh-optimization) -- operator-level tuning guidance
 - [Use immutability constraints](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) -- IMMUTABLE WHERE and BACKFILL FROM
 - [Chapter 04: Feature Views](../../04_feature_views/index.qmd) -- DT vs View Feature View types
 - [Chapter 05: Feature Pipelines](../../05_feature_pipelines/index.qmd) -- pipeline architecture patterns

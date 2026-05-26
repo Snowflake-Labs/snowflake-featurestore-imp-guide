@@ -310,6 +310,17 @@ python deploy.py resume --dev-db FEATURE_STORE_DEMO_DEV
 
 ### Multi-Environment Setup
 
-![Production vs development database subset sizes](../../_diagrams/png/dg_appendix_env_trees.png){fig-alt="Production and dev databases with sampled table row counts"}
+```{mermaid}
+%%| fig-cap: "Production vs development database subset sizes"
+%%| fig-alt: "Production and dev databases with sampled table row counts"
+flowchart LR
+  subgraph PROD[FEATURE_STORE_DEMO]
+    P1[CLICKSTREAM_DATA]
+  end
+  subgraph DEV[FEATURE_STORE_DEMO_DEV]
+    D1[CLICKSTREAM_DATA sampled]
+  end
+  PROD --- DEV
+```
 
 See `database_subset/README.md` for complete documentation.

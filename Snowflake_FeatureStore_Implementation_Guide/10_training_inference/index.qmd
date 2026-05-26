@@ -246,7 +246,12 @@ reg.log_model(
 
 ### Lineage flow
 
-![End-to-end lineage from sources through feature views to model](../_diagrams/png/dg_10_lineage.png){fig-alt="Source tables feature views training dataset model predictions"}
+```{mermaid}
+%%| fig-cap: "End-to-end lineage from sources through feature views to model"
+%%| fig-alt: "Source tables feature views training dataset model predictions"
+flowchart LR
+  SRC[Source tables] --> FV[Feature Views] --> DS[Training Dataset] --> M[Model] --> P[Predictions]
+```
 
 ---
 
@@ -298,7 +303,7 @@ SELECT
 FROM FEATURE_STORE.USER_PURCHASE_STATS$V01;
 ```
 
-This pattern works well when the model reads directly from a single Feature View's columns. Each DT refresh re-scores all entities with the latest feature values.
+This pattern works well when the model reads directly from a single Feature View's columns. Each DT refresh re-scores all entities with the latest feature values. To make these predictions discoverable via the Feature Store API and Snowsight, register the scoring DT as a Feature View — see [Scoring Feature Views](#sec-scoring-fv) below for worked examples including multi-FV variants.
 
 The Model Registry's `!PREDICT` SQL function is automatically registered as **IMMUTABLE**, which makes it eligible for DT incremental refresh. If you create your own scoring UDF/UDTF outside of Model Registry, you must declare it immutable for the same reason -- see [UDF immutability for incremental refresh](#sec-udf-immutability) below.
 
@@ -315,7 +320,7 @@ DTs pinned to a specific version (`WITH mv AS MODEL my_model VERSION V1 SELECT m
 :::
 
 ::: {.callout-tip title="Incremental scoring downstream of full-refresh Feature Views (April 2026)"}
-If the upstream Feature View (`USER_PURCHASE_STATS$V01` above) uses **full refresh** -- for example, because its query contains a FLOAT+JOIN pattern or other unsupported incremental construct -- the scoring DT can still refresh incrementally. When the upstream DT has a **system-derived unique key** (from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`), the scoring DT only re-scores entities whose feature values actually changed, rather than re-scoring the entire population on every cycle. Opt in with `ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL` (this is a SQL-level capability; the Feature Store Python API does not yet support it). Verify with `SHOW UNIQUE KEYS IN <upstream_fv_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables-primary-keys).
+If the upstream Feature View (`USER_PURCHASE_STATS$V01` above) uses **full refresh** -- for example, because its query contains a FLOAT+JOIN pattern or other unsupported incremental construct -- the scoring DT can still refresh incrementally. When the upstream DT has a **system-derived unique key** (from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`), the scoring DT only re-scores entities whose feature values actually changed, rather than re-scoring the entire population on every cycle. Opt in with `ALTER DYNAMIC TABLE ... SET REFRESH_MODE = INCREMENTAL` (this is a SQL-level capability; the Feature Store Python API does not yet support it). Verify with `SHOW UNIQUE KEYS IN <upstream_fv_dt>`. See [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 :::
 
 ::: {.callout-warning}
@@ -384,7 +389,7 @@ session.udf.register(
 )
 ```
 
-Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volatility in SQL. The DT can then treat it as eligible for incremental refresh. See the [Dynamic Table supported queries](https://docs.snowflake.com/en/user-guide/dynamic-tables-supported-queries) documentation for the full list of incremental refresh requirements.
+Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volatility in SQL. The DT can then treat it as eligible for incremental refresh. See the [Dynamic Table supported queries](https://docs.snowflake.com/en/user-guide/dynamic-tables/supported-queries) documentation for the full list of incremental refresh requirements.
 
 ::: {.callout-warning title="Standard UDF replacement breaks incremental DTs"}
 **Unlike Model Registry** (which handles version rotation gracefully via REINITIALIZE -- see above), replacing a standard `IMMUTABLE` UDF with `CREATE OR REPLACE FUNCTION` while it is referenced by an incremental DT **breaks the DT**. The DT must be fully recreated (`CREATE OR REPLACE DYNAMIC TABLE`).
@@ -392,6 +397,146 @@ Setting `immutable=True` causes Snowpark to emit the UDF with `IMMUTABLE` volati
 This is an important design consideration: if your UDF logic is expected to change over time (updated model weights, bug fixes, new feature engineering rules), prefer **Model Registry** for inference UDFs. MR's `MODEL(name)!PREDICT()` handles version rotation seamlessly -- the DT detects the default-version change, triggers a one-time full re-score, then resumes incremental mode.
 
 For UDFs that must remain outside Model Registry, plan for the DT recreation cost when the function changes. In CI/CD pipelines, this typically means including `CREATE OR REPLACE DYNAMIC TABLE` in the deployment script alongside `CREATE OR REPLACE FUNCTION`.
+:::
+
+---
+
+## Scoring Feature Views {#sec-scoring-fv}
+
+A **Scoring Feature View** is a Dynamic Table that calls a Model Registry function (`MODEL()!PREDICT()`) to produce predictions, then is registered as a Feature View through the Feature Store API. This makes model outputs discoverable alongside the features that feed them — teams can browse predictions in Snowsight, track lineage from source tables through features to scores, and consume predictions downstream via `read_feature_view()` just like any other feature.
+
+Three variants cover progressively complex scenarios:
+
+```{mermaid}
+%%| fig-cap: "Scoring Feature View variants — from single-source to PIT-correct multi-FV"
+%%| fig-alt: "Three scoring patterns: single FV DT, multi-FV pre-join DT, and orchestrated Task/Sproc"
+flowchart LR
+  subgraph v1[Single_FV]
+    FV1[Feature View] --> S1["Scoring DT\nMODEL()!PREDICT()"]
+  end
+  subgraph v2[Multi_FV_PreJoin]
+    FVa[FV A] --> C[Combined FV]
+    FVb[FV B] --> C
+    C --> S2["Scoring DT"]
+  end
+  subgraph v3[Orchestrated]
+    FVx[FV A] --> GTS["generate_training_set()\n+ ASOF join"]
+    FVy[FV B] --> GTS
+    GTS --> P["model.predict()"]
+  end
+```
+
+### Variant 1: Single-FV Scoring DT
+
+The [Continuous Batch Inference](#sec-continuous-batch) section above shows how to build a scoring DT with `MODEL()!PREDICT()`. To make those predictions discoverable in Snowsight and consumable via the Feature Store API, wrap the same `feature_df` in a `FeatureView` and register it:
+
+```python
+scoring_fv = FeatureView(
+    name="USER_CHURN_SCORES",
+    entities=[Entity(name="USER", join_keys=["USER_ID"])],
+    feature_df=scoring_df,   # same DataFrame used in the DT example above
+    refresh_freq="1 hour",
+    desc="Churn probability from USER_PURCHASE_STATS via churn_model",
+)
+fs.register_feature_view(scoring_fv, version="V01")
+```
+
+All the existing behaviour applies: model version rotation triggers a REINITIALIZE then resumes incremental mode, and UDF immutability rules carry over unchanged.
+
+### Variant 2: Multi-FV Pre-Join Pattern {#sec-multi-fv-prejoin}
+
+When the model requires features from **multiple Feature Views**, ASOF join is not available inside a Dynamic Table (see the [ASOF limitation callout](#sec-continuous-batch) above). The workaround is to **pre-join** the upstream FVs into a combined intermediate FV, then score from that single source:
+
+```python
+# Step 1: Read upstream Feature Views
+orders_df  = fs.read_feature_view(user_order_fv)    # USER_ID, ORDER_CNT, SPEND_SUM, ...
+sessions_df = fs.read_feature_view(user_session_fv)  # USER_ID, SESSION_CNT, AVG_DURATION, ...
+
+# Step 2: Join into a combined source (latest-value join on entity key)
+combined_df = orders_df.join(sessions_df, "USER_ID")
+
+# Step 3: Register the combined FV
+combined_fv = FeatureView(
+    name="USER_COMBINED_FEATURES",
+    entities=[user_entity],
+    feature_df=combined_df,
+    refresh_freq="1 hour",
+    desc="Pre-joined order + session features for scoring",
+)
+fs.register_feature_view(combined_fv, version="V01")
+
+# Step 4: Score from the combined FV
+scoring_df = session.sql("""
+    SELECT
+        USER_ID,
+        FEATURE_STORE_DEMO.MODEL_REGISTRY.CHURN_MODEL!PREDICT(
+            ORDER_CNT, SPEND_SUM, SESSION_CNT, AVG_DURATION
+        ):output_feature_0::FLOAT AS CHURN_PROBABILITY,
+        CURRENT_TIMESTAMP()          AS SCORED_AT
+    FROM FEATURE_STORE.USER_COMBINED_FEATURES$V01
+""")
+
+scoring_fv = FeatureView(
+    name="USER_CHURN_SCORES",
+    entities=[user_entity],
+    feature_df=scoring_df,
+    refresh_freq="1 hour",
+    desc="Churn probability from combined order + session features",
+)
+fs.register_feature_view(scoring_fv, version="V01")
+```
+
+The DT chain is: upstream FVs → Combined FV → Scoring FV. Each layer refreshes incrementally (subject to the usual constraints), and model version rotation propagates automatically.
+
+::: {.callout-warning title="Latest-value join, not PIT-correct"}
+The pre-join in Step 2 is an equi-join on entity key — it picks the **current latest values** from each upstream FV, not the values as-of a specific timestamp. This is appropriate for **real-time scoring** (score with the freshest features available) but does **not** provide point-in-time correctness. If PIT-correct multi-FV scoring is required, use Variant 3 below.
+:::
+
+### Variant 3: Orchestrated Batch Scoring (PIT-Correct) {#sec-orchestrated-scoring}
+
+When the model requires features from **multiple Feature Views** and predictions must be **point-in-time correct** (e.g. for regulatory audit, back-testing, or time-series evaluation), use `generate_training_set()` with an inference spine inside a **Snowflake Task** or **Stored Procedure**:
+
+```python
+# Inside a Task or Stored Procedure — scheduled or event-triggered
+inference_spine = session.sql("""
+    SELECT
+        USER_ID,
+        CURRENT_TIMESTAMP() AS PREDICTION_TS
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.USERS
+    WHERE IS_ACTIVE = TRUE
+""")
+
+# ASOF join retrieves PIT-correct feature values
+inference_df = fs.generate_training_set(
+    spine_df=inference_spine,
+    features=[user_order_fv, user_session_fv],
+    spine_timestamp_col="PREDICTION_TS",
+)
+
+# Score
+model_ref = Registry(session=session, database_name="FEATURE_STORE_DEMO",
+                     schema_name="MODEL_REGISTRY").get_model("churn_model")
+predictions = model_ref.default.run(inference_df, function_name="predict")
+
+# Persist
+predictions.write.save_as_table(
+    "FEATURE_STORE_DEMO.FEATURE_STORE.USER_CHURN_PREDICTIONS",
+    mode="overwrite",
+)
+```
+
+This variant trades continuous refresh for correctness: the Task runs on a schedule (e.g. hourly via `SCHEDULE = 'USING CRON 0 * * * * UTC'`), and each run produces a full PIT-correct scoring snapshot.
+
+::: {.callout-tip title="Choosing a scoring variant"}
+| | **Single-FV DT** | **Multi-FV Pre-Join** | **Orchestrated (Task/Sproc)** |
+|---|---|---|---|
+| **Feature sources** | One FV | Multiple FVs | Multiple FVs |
+| **Join type** | Direct read | Equi-join (latest) | ASOF (PIT-correct) |
+| **Refresh** | Continuous (DT) | Continuous (DT chain) | Scheduled (Task) |
+| **Incremental** | Yes | Yes | No (full each run) |
+| **PIT-correct** | N/A (single source) | No | Yes |
+| **Discoverable as FV** | Yes | Yes | Manual (register output table) |
+| **Best for** | Simple models, low latency | Multi-feature models, real-time | Audit, back-testing, compliance |
 :::
 
 ---
@@ -698,6 +843,7 @@ assert training_df.count() > 1000
 | `.with_name()` | Custom column prefixing |
 | `.slice([...])` | Restrict features from a registered Feature View |
 | **DT-based inference** | Single-FV models can use a Dynamic Table with Model Registry SQL functions for continuous batch scoring |
+| **Scoring Feature Views** | Register scoring DTs as Feature Views; single-FV (direct), multi-FV pre-join (latest-value), or orchestrated Task/Sproc (PIT-correct) |
 | **Iceberg-backed FVs** | `StorageConfig(format=StorageFormat.ICEBERG)` materializes feature data as Parquet/Iceberg for native ML framework access (SDK 1.26+) |
 
 ---

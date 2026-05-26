@@ -78,7 +78,21 @@ orders_df.write.save_as_table(ORDERS_TABLE, mode="overwrite")
 
 A **Feature Store** is a centralized repository for storing, managing, and serving features for machine learning. It acts as the data management layer between raw data sources and ML models.
 
-![ML data infrastructure: sources, Feature Store, and ML consumers](../_diagrams/png/dg_01_ml_infrastructure.png){fig-alt="Flow from data sources through Feature Store to ML consumers"}
+```{mermaid}
+%%| fig-cap: "ML data infrastructure: sources, Feature Store, and ML consumers"
+%%| fig-alt: "Flow from data sources through Feature Store to ML consumers"
+flowchart LR
+  subgraph DS[Data Sources]
+    d1[Tables / Streams / External / APIs]
+  end
+  subgraph FS[Feature Store]
+    f1[Pipelines / Storage / Serving / Metadata]
+  end
+  subgraph ML[ML Consumers]
+    m1[Training / Batch / Real-time / Analytics]
+  end
+  DS --> FS --> ML
+```
 
 ### Features: The Building Blocks of ML
 
@@ -259,14 +273,31 @@ See [Chapter 4: Feature Views](../04_feature_views/index.qmd) for detailed cover
 
 A **Feature** is an individual column within a Feature View. Features are defined through the `feature_df` parameter—a Snowpark DataFrame that specifies the transformation logic.
 
-#### Method 1: DataFrame API (Most Common)
+Both `session.sql()` (SQL) and the Snowpark DataFrame API produce identical lazy Snowpark DataFrames. See [Chapter 4: SQL vs Snowpark DataFrame API](../04_feature_views/index.qmd#sec-sql-vs-snowpark) for a detailed comparison.
 
-Use Snowpark DataFrame operations to define features declaratively:
+> 📁 **Full code:** [`_code/feature_dataframe_api.py`](_code/feature_dataframe_api.py) | [`_code/feature_sql_api.py`](_code/feature_sql_api.py)
 
-> 📁 **Full code:** [`_code/feature_dataframe_api.py`](_code/feature_dataframe_api.py)
+::: {.panel-tabset group="lang"}
 
-```{python}
-# Define features using Snowpark DataFrame transformations
+## SQL
+
+```python
+user_purchase_df = session.sql("""
+    SELECT
+        USER_ID,
+        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
+        SUM(TOTAL_AMT) AS SPEND_SUM,
+        AVG(TOTAL_AMT) AS ORDER_VALUE_AVG,
+        MAX(ORDER_TS) AS LAST_ORDER_TS,
+        DATEDIFF('day', MIN(ORDER_TS), MAX(ORDER_TS)) AS CUSTOMER_TENURE_DAYS
+    FROM ORDERS
+    GROUP BY USER_ID
+""")
+```
+
+## Snowpark DataFrame
+
+```python
 user_purchase_df = (
     session.table(ORDERS_TABLE)
     .group_by("USER_ID")
@@ -277,14 +308,28 @@ user_purchase_df = (
         F.max("ORDER_TS").alias("LAST_ORDER_TS"),
     )
 )
+```
 
-user_purchase_df.show()
+:::
+
+```{python}
+#| echo: false
+#| output: false
+user_purchase_df = (
+    session.table(ORDERS_TABLE)
+    .group_by("USER_ID")
+    .agg(
+        F.sum("TOTAL_AMT").alias("SPEND_SUM"),
+        F.count("ORDER_ID").alias("ORDER_CNT"),
+        F.avg("TOTAL_AMT").alias("ORDER_VALUE_AVG"),
+        F.max("ORDER_TS").alias("LAST_ORDER_TS"),
+    )
+)
 ```
 
 Create and register a Feature View using the DataFrame above:
 
 ```{python}
-# Create a Feature View backed by a Dynamic Table
 user_purchase_fv = FeatureView(
     name="USER_PURCHASE_FEATURES",
     entities=[user_entity],
@@ -294,7 +339,6 @@ user_purchase_fv = FeatureView(
     desc="User purchase behavior features",
 )
 
-# Register in Feature Store (creates the Dynamic Table)
 user_purchase_fv = fs.register_feature_view(
     feature_view=user_purchase_fv,
     version="V01",
@@ -305,41 +349,6 @@ user_purchase_fv = fs.register_feature_view(
 print(f"Registered: {user_purchase_fv.name}/V01")
 print(f"Status: {user_purchase_fv.status}")
 ```
-
-#### Method 2: Pure SQL via session.sql()
-
-For complex queries or when you prefer SQL, use `session.sql()` to define features:
-
-> 📁 **Full code:** [`_code/feature_sql_api.py`](_code/feature_sql_api.py)
-
-```python
-# Define features using pure SQL
-user_features_df = session.sql("""
-    SELECT 
-        USER_ID,
-        COUNT(DISTINCT ORDER_ID) AS ORDER_CNT,
-        SUM(TOTAL_AMT) AS SPEND_SUM,
-        AVG(TOTAL_AMT) AS ORDER_VALUE_AVG,
-        MAX(ORDER_TS) AS LAST_ORDER_TS,
-        DATEDIFF('day', MIN(ORDER_TS), MAX(ORDER_TS)) AS CUSTOMER_TENURE_DAYS
-    FROM ORDERS
-    GROUP BY USER_ID
-""")
-
-# Create Feature View from SQL-defined DataFrame
-user_purchase_fv = FeatureView(
-    name="USER_PURCHASE_FEATURES",
-    entities=[user_entity],
-    feature_df=user_features_df,  # SQL query defines the features
-    timestamp_col="LAST_ORDER_TS",
-    refresh_freq="1 hour",
-)
-```
-
-::: {.callout-tip}
-## When to Use SQL
-The `session.sql()` approach is useful when migrating existing SQL-based feature pipelines or when transformations are easier to express directly in SQL.
-:::
 
 ::: {.callout-warning}
 ## Time-windowed features over sparse data produce incorrect results at retrieval time
@@ -504,7 +513,19 @@ features = fs.retrieve_feature_values(
 
 ### How Spine Works
 
-![Spine-based feature retrieval: spine joined to multiple Feature Views](../_diagrams/png/dg_01_spine_retrieval.png){fig-alt="Spine dataframe joined to purchase and session feature views"}
+```{mermaid}
+%%| fig-cap: "Spine-based feature retrieval: spine joined to multiple Feature Views"
+%%| fig-alt: "Spine dataframe joined to purchase and session feature views"
+flowchart TB
+  SP[Spine DataFrame USER_ID + EVENT_TS]
+  FV1[USER_PURCHASE_FV features]
+  FV2[USER_SESSION_FV features]
+  SP --> FV1
+  SP --> FV2
+  RES[Result: features as-of EVENT_TS per USER_ID]
+  FV1 --> RES
+  FV2 --> RES
+```
 
 The Feature Store joins each spine row to the appropriate Feature Views, ensuring features are computed using only data available at the `EVENT_TS` timestamp. This spine-based ASOF retrieval applies to **training and batch inference** only. For **online (real-time) inference**, features are served via direct key-based lookup against [Online Feature Tables](../08_online_features/index.qmd) -- there is no spine and no ASOF join.
 
@@ -519,7 +540,20 @@ See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for s
 
 Snowflake Feature Store leverages native Snowflake capabilities:
 
-![Snowflake Feature Store architecture overview](../_diagrams/png/dg_01_fs_architecture.png){fig-alt="Source data flows into feature views and metadata, then to training, batch, and online serving"}
+```{mermaid}
+%%| fig-cap: "Snowflake Feature Store architecture overview"
+%%| fig-alt: "Source data flows into feature views and metadata, then to training, batch, and online serving"
+flowchart TB
+  SD[Source Data] --> SFS[Feature Store Schema]
+  subgraph SFS
+    FV[Feature Views DT + View]
+    MD[Metadata Tags]
+  end
+  FV --> T[Training Datasets]
+  FV --> B[Batch Inference]
+  FV --> O[Online Serving OFT]
+  MD -.-> FV
+```
 
 ### Physical Implementation
 
@@ -551,7 +585,18 @@ Understanding where transformations should occur is critical for maintainable ML
 
 ### Quick Decision Guide
 
-![MIT vs MDT vs ODT decision flowchart](../_diagrams/png/dg_01_mit_decision.png){fig-alt="Decision tree for where to store transformations"}
+```{mermaid}
+%%| fig-cap: "MIT vs MDT vs ODT decision flowchart"
+%%| fig-alt: "Decision tree for where to store transformations"
+flowchart TD
+  Q1{Reusable across models?}
+  Q1 -->|YES| MIT[MIT in Feature View]
+  Q1 -->|NO| Q2{Depends on training stats?}
+  Q2 -->|YES| MDT[MDT with model]
+  Q2 -->|NO| Q3{Depends on request context?}
+  Q3 -->|YES| ODT[ODT at inference]
+  Q3 -->|NO| MIT2[Probably MIT]
+```
 
 ::: {.callout-note}
 ## 📖 Deep Dive

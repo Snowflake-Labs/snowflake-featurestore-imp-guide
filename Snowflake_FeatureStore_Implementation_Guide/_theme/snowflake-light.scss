@@ -49,6 +49,21 @@ $border-radius:  0.375rem;
 $toc-color:      $sf-body-gray;
 $toc-active-border: $sf-blue;
 
+// ---------------------------------------------------------------------------
+// Mermaid diagram theming — Snowflake brand palette
+// $mermaid-fg-color--lightest controls subgraph/cluster backgrounds
+// ---------------------------------------------------------------------------
+$mermaid-bg-color:          $body-bg;
+$mermaid-edge-color:        $sf-windy-city;
+$mermaid-node-bg-color:     rgba($sf-blue, 0.10);
+$mermaid-node-fg-color:     $sf-mid-blue;
+$mermaid-fg-color:          $body-color;
+$mermaid-fg-color--lighter: #c8dce5;
+$mermaid-fg-color--lightest:#e8f4f8;
+$mermaid-label-bg-color:    $body-bg;
+$mermaid-label-fg-color:    $sf-mid-blue;
+$mermaid-font-family:       $font-family-sans-serif;
+
 /*-- scss:rules --*/
 
 // ---------------------------------------------------------------------------
@@ -87,6 +102,11 @@ $toc-active-border: $sf-blue;
   text-transform: uppercase;
   font-size: 0.78rem;
   letter-spacing: 0.06em;
+}
+
+.sidebar-navigation .chapter-number {
+  color: $sf-blue !important;
+  font-weight: 700;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +298,44 @@ div.callout-warning {
 @media (max-width: 991.98px) {
   .sf-sidebar-toggle {
     display: none !important;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mermaid — subgraph and decision-node overrides
+// ---------------------------------------------------------------------------
+.mermaid svg {
+  .cluster rect {
+    fill: rgba($sf-blue, 0.05) !important;
+    stroke: $sf-mid-blue !important;
+    stroke-width: 1.5px !important;
+    rx: 6px;
+    ry: 6px;
+  }
+
+  .cluster span, .cluster text {
+    fill: $sf-mid-blue !important;
+    color: $sf-mid-blue !important;
+    font-weight: 700;
+  }
+
+  .node .label {
+    font-family: $font-family-sans-serif;
+  }
+
+  .edgePath .path {
+    stroke: $sf-windy-city !important;
+    stroke-width: 1.5px !important;
+  }
+
+  marker#arrowhead path,
+  marker path {
+    fill: $sf-windy-city !important;
+  }
+
+  .node rect, .node polygon, .node circle {
+    stroke: $sf-mid-blue !important;
+    stroke-width: 1.5px !important;
   }
 }
 

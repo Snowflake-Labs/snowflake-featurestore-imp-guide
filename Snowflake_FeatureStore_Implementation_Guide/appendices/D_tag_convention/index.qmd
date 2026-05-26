@@ -1,0 +1,271 @@
+---
+title: "Feature Store Internal Tag Schema"
+subtitle: "SQL-only registration of Feature Views and Entities"
+---
+
+## Overview
+
+The Feature Store Python SDK (`fs.register_feature_view()`, `fs.register_entity()`) creates standard Snowflake objects -- Dynamic Tables, Views, and Tags -- and applies a specific **TAG convention** that makes them discoverable via the SDK and the Snowsight Feature Store UI. Understanding this convention enables:
+
+- **SQL-only workflows**: create Feature Views from dbt, Airflow SQL operators, or Terraform without installing `snowflake-ml-python`
+- **Advanced DT features**: use SQL-only capabilities like `BACKFILL FROM`, `IMMUTABLE WHERE`, or `INITIALIZATION_WAREHOUSE` that the Python API does not yet expose, while keeping the object visible to the Feature Store
+- **Debugging**: inspect and understand what the SDK created under the hood
+
+::: {.callout-warning title="Internal schema -- stable but subject to evolution"}
+The TAG names and JSON schemas documented here are **internal implementation details** of `snowflake-ml-python`. Snowflake maintains **backward compatibility** -- objects created with older tag versions continue to work with newer SDK releases. However:
+
+- New JSON fields may be added in future SDK versions.
+- Field names or tag structure could change (old values remain readable).
+- If you use SQL-only registration, **pin the `pkg_version` value** to the SDK version you are testing against and re-verify after SDK upgrades.
+
+The Python SDK remains the recommended and officially supported approach. SQL-only registration is for advanced users who accept the maintenance burden.
+:::
+
+## TAG Schema Reference
+
+The SDK uses three tags, all created in the Feature Store schema (e.g., `FEATURE_STORE_DEMO.FEATURE_STORE`):
+
+### `SNOWML_FEATURE_STORE_OBJECT`
+
+Applied to the Dynamic Table or View. Identifies the object type and the SDK version that created it.
+
+```
+{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}
+```
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| `type` | `MANAGED_FEATURE_VIEW` (DT-backed), `EXTERNAL_FEATURE_VIEW` (View-based) | Determines how the SDK interprets the object |
+| `pkg_version` | Semver string, e.g. `"1.27.0"` | Match to your installed `snowflake-ml-python` version |
+
+### `SNOWML_FEATURE_STORE_ENTITY_<ENTITY_NAME>`
+
+One tag per entity referenced by the Feature View. The tag **name** encodes the entity name (uppercased); the tag **value** is the join key column name.
+
+```
+SNOWML_FEATURE_STORE_ENTITY_USER = 'USER_ID'
+```
+
+For composite-key entities, the value is a comma-separated list of column names:
+
+```
+SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM = 'ORDER_ID,LINE_NUMBER'
+```
+
+### `SNOWML_FEATURE_VIEW_METADATA`
+
+Applied to the Dynamic Table or View. JSON containing the entity list and timestamp column.
+
+```
+{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}
+```
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| `entities` | Array of entity names (must match the `_ENTITY_<NAME>` tag suffixes) | Case-sensitive, uppercase |
+| `timestamp_col` | Column name string, or `"NULL"` if no timestamp | `"NULL"` means equality join (latest-state); a column name enables ASOF join |
+
+## Full Worked Example: SQL-Only Feature View Registration
+
+### Step 1: Create the tags (once per Feature Store schema)
+
+```sql
+CREATE TAG IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT;
+CREATE TAG IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER;
+CREATE TAG IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA;
+```
+
+### Step 2: Create the Dynamic Table with TAGs
+
+```sql
+CREATE OR REPLACE DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = FS_DEV_WH
+  WITH TAG (
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT =
+      '{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER =
+      'USER_ID',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA =
+      '{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}'
+  )
+AS
+  SELECT
+      USER_ID,
+      SUM(TOTAL_AMT)   AS ORDER_TOTAL_AMT_SUM,
+      COUNT(ORDER_ID)   AS ORDER_CNT,
+      AVG(TOTAL_AMT)    AS ORDER_TOTAL_AMT_AVG,
+      MAX(ORDER_TS)     AS LAST_ORDER_TS
+  FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDERS
+  GROUP BY USER_ID;
+```
+
+### Step 3: Verify via the Python API
+
+```python
+from snowflake.ml.feature_store import FeatureStore
+
+fs = FeatureStore(session, database="FEATURE_STORE_DEMO", name="FEATURE_STORE")
+fv = fs.get_feature_view("USER_ORDER_FV", "V01")
+print(fv.name, fv.version, fv.status)
+fv.feature_df.limit(5).show()
+```
+
+If the tags are correct, the Feature View appears in `fs.list_feature_views()` and the Snowsight Feature Store UI.
+
+## View-Based Feature View via SQL
+
+For View-based (external) Feature Views, the pattern is identical except the object is a `VIEW` and the type is `EXTERNAL_FEATURE_VIEW`:
+
+```sql
+CREATE OR REPLACE VIEW FEATURE_STORE_DEMO.FEATURE_STORE."USER_SNAPSHOT_FV$V01"
+  WITH TAG (
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT =
+      '{"type": "EXTERNAL_FEATURE_VIEW", "pkg_version": "1.27.0"}',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER =
+      'USER_ID',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA =
+      '{"entities": ["USER"], "timestamp_col": "SNAPSHOT_TS"}'
+  )
+AS
+  SELECT USER_ID, SNAPSHOT_TS, FEATURE_A, FEATURE_B
+  FROM FEATURE_STORE_DEMO.FEATURE_STORE.USER_DAILY_SNAPSHOT;
+```
+
+## Entity Registration via SQL
+
+The Python SDK's `fs.register_entity()` creates a TAG in the Feature Store schema. Each entity is represented by a tag named `SNOWML_FEATURE_STORE_ENTITY_<ENTITY_NAME>`. Creating the tag manually is sufficient:
+
+```sql
+CREATE TAG IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER;
+CREATE TAG IF NOT EXISTS FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_PRODUCT;
+```
+
+The entity's join key mapping is stored as the tag **value** when applied to a Feature View (not on the tag definition itself). The SDK discovers entities by scanning tags with the `SNOWML_FEATURE_STORE_ENTITY_` prefix.
+
+## Adding Tags to an Existing Object
+
+If you created a Dynamic Table via SQL without tags (e.g., to use `BACKFILL FROM` or `IMMUTABLE WHERE`), you can add the tags after creation:
+
+```sql
+ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V02"
+  SET TAG
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT =
+      '{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_USER =
+      'USER_ID',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA =
+      '{"entities": ["USER"], "timestamp_col": "LAST_ORDER_TS"}';
+```
+
+## Inspecting Tags on Existing Feature Views
+
+To see what tags the SDK applied to a Feature View:
+
+```sql
+SELECT TAG_NAME, TAG_VALUE
+FROM TABLE(INFORMATION_SCHEMA.TAG_REFERENCES(
+    'FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"', 'TABLE'
+))
+WHERE TAG_NAME LIKE 'SNOWML_%';
+```
+
+## Composite Entity Example
+
+For a Feature View with a multi-column entity key:
+
+```sql
+CREATE TAG IF NOT EXISTS
+  FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM;
+
+CREATE OR REPLACE DYNAMIC TABLE
+  FEATURE_STORE_DEMO.FEATURE_STORE."ORDER_LINEITEM_FV$V01"
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = FS_DEV_WH
+  WITH TAG (
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_OBJECT =
+      '{"type": "MANAGED_FEATURE_VIEW", "pkg_version": "1.27.0"}',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_STORE_ENTITY_ORDER_ITEM =
+      'ORDER_ID,LINE_NUMBER',
+    FEATURE_STORE_DEMO.FEATURE_STORE.SNOWML_FEATURE_VIEW_METADATA =
+      '{"entities": ["ORDER_ITEM"], "timestamp_col": "SHIP_DATE"}'
+  )
+AS
+  SELECT ORDER_ID, LINE_NUMBER, EXTENDED_PRICE, SHIP_DATE
+  FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.ORDER_ITEMS;
+```
+
+## Validation and Troubleshooting {#sec-tag-validation}
+
+Externally tagged objects (created via SQL, dbt, or Terraform) must pass the SDK's internal parsing to be usable with `get_feature_view()`, `read_feature_view()`, and `generate_training_set()`. A systematic **round-trip test** catches problems before they surface in production.
+
+### Round-Trip Validation Checklist
+
+Run these steps after applying TAGs to any externally created object:
+
+```python
+# 1. List -- does the SDK discover the object?
+all_fvs = fs.list_feature_views()
+assert any(fv.name == "MY_SQL_FV" for fv in all_fvs), "FV not discovered"
+
+# 2. Get -- can the SDK parse the metadata?
+fv = fs.get_feature_view(name="MY_SQL_FV", version="V01")
+print(fv.feature_names)      # verify column list
+print(fv.entity_names)       # verify entity associations
+
+# 3. Read -- does the data resolve?
+df = fs.read_feature_view(fv)
+df.show(5)
+
+# 4. Generate training set -- does ASOF join work?
+spine = session.create_dataframe(
+    [("test_entity", "2026-01-01 00:00:00")],
+    schema=["USER_ID", "TS"],
+)
+result = fs.generate_training_set(
+    spine_df=spine,
+    features=[fv],
+    spine_timestamp_col="TS",
+)
+result.show()
+```
+
+If any step fails, consult the failure modes table below.
+
+### Known Failure Modes
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| FV not returned by `list_feature_views()` | Missing `SNOWML_FEATURE_STORE_OBJECT` TAG, or TAG applied to wrong object | Verify TAG presence with `SELECT SYSTEM$GET_TAG(...)` on the DT/View |
+| `get_feature_view()` raises `KeyError` or JSON parse error | Malformed `SNOWML_FEATURE_VIEW_METADATA` JSON — missing `entities` or `timestamp_col` key | Validate JSON structure: `{"entities": ["ENTITY_NAME"], "timestamp_col": "COL"}` |
+| Entity mismatch error during `generate_training_set()` | Entity name in `SNOWML_FEATURE_STORE_ENTITY_<NAME>` TAG does not match any registered Entity | Ensure the Entity is registered via `fs.register_entity()` or SQL TAG with matching name |
+| Column not found during `read_feature_view()` | TAG metadata references columns not present in the DT/View | Check `DESCRIBE TABLE` output against the `entities` join keys and `timestamp_col` in the TAG JSON |
+| `pkg_version` warning or silent incompatibility | TAG `pkg_version` does not match the installed `snowflake-ml-python` version | Pin `pkg_version` in `SNOWML_FEATURE_VIEW_METADATA` to the version you tested with; re-verify after SDK upgrades |
+| View FV returns empty from `generate_training_set()` | View has no row history — ASOF join finds no matching timestamp | Expected for View FVs; use a DT-backed FV for PIT-correct retrieval |
+
+::: {.callout-tip title="CI gate for SQL-only and dbt workflows"}
+Include the round-trip validation as a **post-deploy CI step** in your GitHub Actions or dbt post-hook. A simple pytest that runs steps 1-3 above catches TAG misconfigurations before they affect downstream training pipelines. See [Chapter 12: Testing strategies](../../12_advanced_patterns/index.qmd) for additional test patterns.
+:::
+
+## When to Use SQL-Only Registration
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Standard Feature View development | Use the Python SDK -- simpler, validated, forward-compatible |
+| CI/CD with dbt or Terraform (no Python) | SQL-only with pinned `pkg_version` |
+| Advanced DT features (`BACKFILL`, `IMMUTABLE WHERE`, `INITIALIZATION_WAREHOUSE`) | Create via SQL, then add TAGs per this appendix |
+| Quick ad-hoc exploration | Python SDK |
+| Production pipelines on Airflow SQL operators | SQL-only with pinned `pkg_version` |
+
+::: {.callout-important}
+## TAGs are required for Snowsight visibility
+
+Objects created via SQL without the Feature Store TAGs described in this appendix will **not appear** in the Snowsight Feature Store UI (**AI & ML → Features**) or in `fs.list_feature_views()` results. Applying the correct TAGs is what makes a Dynamic Table or View discoverable as a Feature View. See [Chapter 11: Snowsight Feature Store UI](../../11_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough showing how tagged objects appear in the UI, including the TAG values displayed on the underlying Dynamic Table.
+:::
+
+## Cross-References
+
+- [Chapter 4: Feature Views](../../04_feature_views/index.qmd) -- versioning, naming convention (`<NAME>$<VERSION>`), schema evolution
+- [Chapter 4: External Scheduling](../../04_feature_views/index.qmd#sec-external-scheduling) -- suspend/resume/refresh via SQL
+- [Chapter 11: Operations](../../11_operations/index.qmd) -- TAG_REFERENCES queries, metadata discovery
+- [Chapter 12: CI/CD](../../12_advanced_patterns/index.qmd) -- config-driven deployment where SQL-only may be preferred

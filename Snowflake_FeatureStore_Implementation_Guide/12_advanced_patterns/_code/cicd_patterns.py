@@ -79,6 +79,45 @@ def get_deployment_workflow() -> dict:
     }
 
 
+def reconcile_feature_state(
+    fs,
+    desired: list[dict],
+) -> dict:
+    """
+    Compare desired feature config against live Feature Store state.
+
+    Parameters:
+        fs: FeatureStore instance
+        desired: List of dicts, each with at least "name" and "version" keys
+
+    Returns:
+        Dict with keys: missing_in_live, unexpected_in_live,
+        version_mismatch, in_sync (bool)
+    """
+    live_fvs = {
+        fv.name: [v.version for v in fv.versions]
+        for fv in fs.list_feature_views()
+    }
+    desired_map = {d["name"]: d["version"] for d in desired}
+
+    missing = [n for n in desired_map if n not in live_fvs]
+    extra = [n for n in live_fvs if n not in desired_map]
+    mismatch = [
+        n
+        for n in desired_map
+        if n in live_fvs and desired_map[n] not in live_fvs[n]
+    ]
+
+    return {
+        "missing_in_live": missing,
+        "unexpected_in_live": extra,
+        "version_mismatch": mismatch,
+        "in_sync": len(missing) == 0
+        and len(extra) == 0
+        and len(mismatch) == 0,
+    }
+
+
 if __name__ == "__main__":
     template = get_feature_config_template()
     print("Feature Configuration Template:")

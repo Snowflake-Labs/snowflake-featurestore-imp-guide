@@ -5,8 +5,8 @@ A comprehensive best practices guide for implementing and operating Snowflake Fe
 **[Read the Guide Online](https://snowflake-labs.github.io/snowflake-featurestore-imp-guide/)**
 
 **Author**: Simon Field, Technical Director, SnowCAT  
-**Version**: 2.3  
-**Snowflake ML Version**: 1.21.0+ (latest: 1.34.0)
+**Version**: 2.5  
+**Snowflake ML Version**: 1.24.0+ (latest: 1.36.0)
 
 ---
 
@@ -61,6 +61,7 @@ This guide provides practical guidance for implementing Snowflake Feature Store 
 | [A](./appendices/A_sample_data/) | Sample Data & Generator | Synthetic clickstream dataset, data generator, public datasets, Streamlit data manager |
 | [B](./appendices/B_setup/) | Environment Setup | Bootstrap scripts for databases, roles, warehouses, and security model |
 | [C](./appendices/C_snowpark_to_dynamic_table/) | Snowpark to Dynamic Table | Converting Python DataFrame pipelines to SQL Dynamic Tables |
+| [D](./appendices/D_tag_convention/) | Tag Convention | Internal TAG schema for SQL-only Feature View and Entity registration |
 
 ---
 
@@ -189,7 +190,7 @@ quarto render --to pdf
 
 > **Note:** PDF rendering requires a LaTeX distribution. Install [TinyTeX](https://quarto.org/docs/output-formats/pdf-engine.html) via `quarto install tinytex`, or use an existing TeX Live / MiKTeX installation.
 
-Architecture figures are committed as **PNG** under `_diagrams/png/` (generated from Mermaid sources via `python3 ../scripts/build_guide_diagrams.py` from the repo root). After editing diagram logic in `scripts/build_guide_diagrams.py`, regenerate and commit the PNGs so PDF and HTML stay aligned. See `_diagrams/README.md`.
+Architecture figures are **inline Mermaid diagrams** embedded directly in `.qmd` files. They render natively in HTML via JavaScript and are styled by the Snowflake brand theme in `_theme/snowflake-light.scss`. For PDF output, Quarto renders Mermaid via Chrome headless. The legacy `_diagrams/png/` folder and `_diagrams/sources/*.mmd` files are retained as a reference but are no longer used by the guide.
 
 ---
 
@@ -226,6 +227,7 @@ This guide uses a **synthetic clickstream dataset** designed for demonstrating F
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.5 | 2026-04-27 | SQL/Snowpark tabbed code examples across all chapters, inline Mermaid diagrams with Snowflake brand theming (replacing 32 PNGs), Aggregations API status update, Pandas migration guide, Streaming Feature Views internal chapter, TAG convention appendix, hybrid online serving architecture, cross-reference fixes |
 | 2.3 | 2026-04-09 | American English standardization, dbt branding, `_code/` references for all chapters, TOC heading fixes, Ch05 dbt Projects on Snowflake, appendix polish |
 | 2.2 | 2026-04-09 | Collapsible sidebar toggles, Snowflake-branded theme (light/dark), executable code cells with live outputs in 8 chapters, CI freeze-cache rendering, content improvements |
 | 2.0 | 2026-04-09 | Complete rewrite: 14 chapters, 7 executable notebooks, Aggregations API, benchmark framework, Streamlit dashboard, local build instructions |
