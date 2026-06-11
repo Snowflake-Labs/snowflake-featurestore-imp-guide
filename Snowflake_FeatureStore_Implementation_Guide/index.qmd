@@ -65,9 +65,10 @@ In the example above, the feature store schema will be created in the `ML_DB` da
 | Creating Feature Views | [Chapter 4: Feature Views](04_feature_views/index.qmd) |
 | Building Feature Pipelines | [Chapter 5: Feature Pipelines](05_feature_pipelines/index.qmd) |
 | Build temporal features | [Chapter 6: Temporal Features](06_temporal_features/index.qmd) |
-| Enable online serving | [Chapter 8: Online Features](08_online_features/index.qmd) |
-| Building ML Models | [Chapter 9: Preprocessing](09_preprocessing/index.qmd) |
-| Migrating from another Feature Store platform | [Chapter 13: Migration Guidance](13_migration_guide/index.qmd) |
+| Enable online serving (GA Hybrid OFT) | [Chapter 8: Online Features](08_online_features/index.qmd) |
+| Real-time / Postgres online serving | [Chapter 9: Real-Time and Online Serving](09_real_time_online_serving/index.qmd) |
+| Building ML Models | [Chapter 10: Preprocessing](10_preprocessing/index.qmd) |
+| Migrating from another Feature Store platform | [Chapter 14: Migration Guidance](14_migration_guide/index.qmd) |
 
 ## Code Examples {.unnumbered}
 

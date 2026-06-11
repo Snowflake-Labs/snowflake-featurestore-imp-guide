@@ -244,7 +244,7 @@ If any step fails, consult the failure modes table below.
 | View FV returns empty from `generate_training_set()` | View has no row history — ASOF join finds no matching timestamp | Expected for View FVs; use a DT-backed FV for PIT-correct retrieval |
 
 ::: {.callout-tip title="CI gate for SQL-only and dbt workflows"}
-Include the round-trip validation as a **post-deploy CI step** in your GitHub Actions or dbt post-hook. A simple pytest that runs steps 1-3 above catches TAG misconfigurations before they affect downstream training pipelines. See [Chapter 12: Testing strategies](../../12_advanced_patterns/index.qmd) for additional test patterns.
+Include the round-trip validation as a **post-deploy CI step** in your GitHub Actions or dbt post-hook. A simple pytest that runs steps 1-3 above catches TAG misconfigurations before they affect downstream training pipelines. See [Chapter 13: Testing strategies](../../13_advanced_patterns/index.qmd) for additional test patterns.
 :::
 
 ## When to Use SQL-Only Registration
@@ -260,12 +260,12 @@ Include the round-trip validation as a **post-deploy CI step** in your GitHub Ac
 ::: {.callout-important}
 ## TAGs are required for Snowsight visibility
 
-Objects created via SQL without the Feature Store TAGs described in this appendix will **not appear** in the Snowsight Feature Store UI (**AI & ML → Features**) or in `fs.list_feature_views()` results. Applying the correct TAGs is what makes a Dynamic Table or View discoverable as a Feature View. See [Chapter 11: Snowsight Feature Store UI](../../11_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough showing how tagged objects appear in the UI, including the TAG values displayed on the underlying Dynamic Table.
+Objects created via SQL without the Feature Store TAGs described in this appendix will **not appear** in the Snowsight Feature Store UI (**AI & ML → Features**) or in `fs.list_feature_views()` results. Applying the correct TAGs is what makes a Dynamic Table or View discoverable as a Feature View. See [Chapter 12: Snowsight Feature Store UI](../../12_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough showing how tagged objects appear in the UI, including the TAG values displayed on the underlying Dynamic Table.
 :::
 
 ## Cross-References
 
 - [Chapter 4: Feature Views](../../04_feature_views/index.qmd) -- versioning, naming convention (`<NAME>$<VERSION>`), schema evolution
 - [Chapter 4: External Scheduling](../../04_feature_views/index.qmd#sec-external-scheduling) -- suspend/resume/refresh via SQL
-- [Chapter 11: Operations](../../11_operations/index.qmd) -- TAG_REFERENCES queries, metadata discovery
-- [Chapter 12: CI/CD](../../12_advanced_patterns/index.qmd) -- config-driven deployment where SQL-only may be preferred
+- [Chapter 12: Operations](../../12_operations/index.qmd) -- TAG_REFERENCES queries, metadata discovery
+- [Chapter 13: CI/CD](../../13_advanced_patterns/index.qmd) -- config-driven deployment where SQL-only may be preferred

@@ -37,13 +37,14 @@ book:
     - part: "Production"
       chapters:
         - 08_online_features/index.qmd
-        - 09_preprocessing/index.qmd
-        - 10_training_inference/index.qmd
+        - 09_real_time_online_serving/index.qmd
+        - 10_preprocessing/index.qmd
+        - 11_training_inference/index.qmd
     - part: "Operations & Advanced"
       chapters:
-        - 11_operations/index.qmd
-        - 12_advanced_patterns/index.qmd
-        - 13_migration_guide/index.qmd
+        - 12_operations/index.qmd
+        - 13_advanced_patterns/index.qmd
+        - 14_migration_guide/index.qmd
   
   appendices:
     - appendices/A_sample_data/index.qmd

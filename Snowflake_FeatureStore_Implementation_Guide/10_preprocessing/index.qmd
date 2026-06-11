@@ -21,7 +21,7 @@ After completing this chapter, you will be able to:
 - Apply sampling strategies (SQL push-down, spine sampling, indicator columns, stratified) to manage large Feature Store datasets
 - Log a fitted estimator or full sklearn pipeline with `Registry.log_model()` so training and serving stay aligned
 
-> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/09_preprocessing/_code)
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/10_preprocessing/_code)
 
 ---
 
@@ -206,7 +206,7 @@ OBJECT_CONSTRUCT(
 ) AS EVENT_TYPE_OHE
 ```
 
-The result is an OBJECT containing only the active key (e.g., `{"click": 1}`). Reconstitute in the expansion View or Python with `COALESCE(..., 0)`. For wider strategies (100+ feature columns), see [Chapter 12: Advanced Patterns -- Wide & Sparse Data](../12_advanced_patterns/index.qmd#sec-wide-sparse).
+The result is an OBJECT containing only the active key (e.g., `{"click": 1}`). Reconstitute in the expansion View or Python with `COALESCE(..., 0)`. For wider strategies (100+ feature columns), see [Chapter 13: Advanced Patterns -- Wide & Sparse Data](../13_advanced_patterns/index.qmd#sec-wide-sparse).
 
 ---
 
@@ -627,4 +627,4 @@ Tree-based models (XGBoost, Random Forest, LightGBM) do not require scaling. Lin
 
 ## Next Steps
 
-Continue to [Chapter 10: Training & Inference](../10_training_inference/index.qmd) to learn about generating training datasets and inference workflows.
+Continue to [Chapter 11: Training & Inference](../11_training_inference/index.qmd) to learn about generating training datasets and inference workflows.

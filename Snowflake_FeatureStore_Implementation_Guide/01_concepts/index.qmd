@@ -531,7 +531,7 @@ The Feature Store joins each spine row to the appropriate Feature Views, ensurin
 
 ::: {.callout-note}
 ## 📖 Deep Dive
-See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for spine design patterns and best practices.
+See [Chapter 11: Training & Inference](../11_training_inference/index.qmd) for spine design patterns and best practices.
 :::
 
 ---

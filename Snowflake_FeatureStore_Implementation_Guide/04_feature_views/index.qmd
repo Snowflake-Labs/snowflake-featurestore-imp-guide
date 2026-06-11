@@ -107,7 +107,7 @@ fv = FeatureView(
 )
 ```
 
-This writes feature data as Parquet files in Iceberg format on external cloud storage, making it directly readable by any Iceberg-compatible ML framework (Ray, Spark, PyTorch) without requiring a Snowflake connector. All standard Feature Store APIs work unchanged. See [Chapter 10: Iceberg-Backed Feature Views](../10_training_inference/index.qmd#sec-iceberg-fv) for full details.
+This writes feature data as Parquet files in Iceberg format on external cloud storage, making it directly readable by any Iceberg-compatible ML framework (Ray, Spark, PyTorch) without requiring a Snowflake connector. All standard Feature Store APIs work unchanged. See [Chapter 11: Iceberg-Backed Feature Views](../11_training_inference/index.qmd#sec-iceberg-fv) for full details.
 :::
 
 ### View-based Feature View (`refresh_freq = None`)
@@ -502,7 +502,7 @@ The SQL approach is often simpler for external schedulers (Airflow, Dagster, dbt
 | **Orchestration** | Optional external prep of sources | Native lag refresh | Native Task schedule | External (Airflow, Dagster, etc.) |
 
 ::: {.callout-tip title="Wide Feature Views (100+ columns)"}
-Feature tables with hundreds or thousands of columns (sensor data, one-hot encodings, time-windowed aggregations) introduce SQL compilation overhead, micro-partition bloat, and can hit Snowflake's ~2,000-column practical limit. If your Feature View exceeds ~100 columns, consider **hybrid storage** -- entity keys and timestamp as native columns, remaining features packed into a single `OBJECT` column using `OBJECT_CONSTRUCT`. This reduces storage overhead, eliminates column-limit concerns, and improves compile time. An expansion View on top can reconstitute the wide schema for consumers that need it. See [Chapter 12: Advanced Patterns -- Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for detailed architecture, column count thresholds, and the two-tier Feature View pattern.
+Feature tables with hundreds or thousands of columns (sensor data, one-hot encodings, time-windowed aggregations) introduce SQL compilation overhead, micro-partition bloat, and can hit Snowflake's ~2,000-column practical limit. If your Feature View exceeds ~100 columns, consider **hybrid storage** -- entity keys and timestamp as native columns, remaining features packed into a single `OBJECT` column using `OBJECT_CONSTRUCT`. This reduces storage overhead, eliminates column-limit concerns, and improves compile time. An expansion View on top can reconstitute the wide schema for consumers that need it. See [Chapter 13: Advanced Patterns -- Wide & Sparse Feature Data](../13_advanced_patterns/index.qmd#sec-wide-sparse) for detailed architecture, column count thresholds, and the two-tier Feature View pattern.
 :::
 
 ::: {.callout-tip title="Data-Driven Feature Definitions"}
@@ -571,7 +571,7 @@ This naming convention means:
 | **Adding new features** | Create and register a **new version** (e.g. **V02**) that includes the new columns; keep **V01** until consumers opt in. **Exception:** if the DT uses `SELECT *` from a base table and the source team adds a column there, the DT picks it up automatically — see [Incremental Column Pickup with SELECT *](#sec-select-star-evolution). |
 | **Deprecating features** | Leave the old version **registered** and documented as deprecated; remove columns only in a **new** version so existing training and serving jobs keep working. |
 | **Breaking changes** (rename column, change type or meaning, change entity keys, change `timestamp_col` semantics) | Always ship a **new version** (or new Feature View name). Never overwrite **V01** with incompatible definitions. |
-| **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. Use [lineage](../11_operations/index.qmd#sec-lineage) to identify dependencies and usage. |
+| **Consumers** | Point new pipelines to **V02**; migrate models and batch jobs on your timeline; retire **V01** only after usage drops to zero. Use [lineage](../12_operations/index.qmd#sec-lineage) to identify dependencies and usage. |
 
 Workflow summary:
 
@@ -678,7 +678,7 @@ After the refresh, immutable rows have `NULL` for `ORDER_TOTAL_AMT_AVG` while mu
 ::: {.callout-tip}
 ## OBJECT columns make this seamless
 
-With OBJECT-based Feature Views (see [Chapter 12: Wide & Sparse Data](../12_advanced_patterns/index.qmd#sec-wide-sparse)), heterogeneous key sets across the immutable/mutable boundary are handled naturally. Immutable rows simply lack the new key in the OBJECT; `COALESCE(features:"NEW_KEY"::NUMBER, 0)` fills the default at read time. In scalar DTs, the same pattern produces a visible `NULL` column in historical rows.
+With OBJECT-based Feature Views (see [Chapter 13: Wide & Sparse Data](../13_advanced_patterns/index.qmd#sec-wide-sparse)), heterogeneous key sets across the immutable/mutable boundary are handled naturally. Immutable rows simply lack the new key in the OBJECT; `COALESCE(features:"NEW_KEY"::NUMBER, 0)` fills the default at read time. In scalar DTs, the same pattern produces a visible `NULL` column in historical rows.
 :::
 
 ::: {.callout-note}
@@ -784,7 +784,7 @@ In a **shared or multi-team environment** where you do not own the base table, p
 OBJECT-bundled approach with a VIEW intermediary.  The VIEW acts as a gate: upstream
 schema changes are inert until you deliberately replace the VIEW, giving you control over
 timing, scope, and cost.  See
-[Chapter 12: Choosing between approaches](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)
+[Chapter 13: Choosing between approaches](../13_advanced_patterns/index.qmd#sec-select-star-vs-object)
 for the full trade-off analysis.
 :::
 
@@ -805,7 +805,7 @@ with explicit column lists are unaffected until their query is updated.
 
 For more complex cases — computed feature expressions, wide feature sets (100+
 columns), sparse data, or when historical rows must not be NULLed — the
-BACKFILL + IMMUTABLE WHERE workflow and the [OBJECT-bundled pattern](../12_advanced_patterns/index.qmd#sec-object-immutable)
+BACKFILL + IMMUTABLE WHERE workflow and the [OBJECT-bundled pattern](../13_advanced_patterns/index.qmd#sec-object-immutable)
 remain the recommended approaches.
 
 ::: {.callout-tip title="OBJECT_CONSTRUCT(*) inline in DT body — confirmed for pass-through bundles"}
@@ -830,7 +830,7 @@ up by the `OBJECT(*)` DT **incrementally** (`REFRESH_ACTION = INCREMENTAL`,
 not `REINITIALIZE`), giving you the same additive column pickup behaviour with
 the additional benefit of a controlled gate — the DT is completely unaffected
 by upstream schema changes until you deliberately replace the VIEW.  See
-[Chapter 12: Choosing between approaches](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)
+[Chapter 13: Choosing between approaches](../13_advanced_patterns/index.qmd#sec-select-star-vs-object)
 for the full comparison.
 :::
 
@@ -1051,7 +1051,7 @@ LIMIT 20;
 
 :::
 
-Only delete a version when both the API lineage check and the SQL dependency/access-history checks confirm zero remaining usage. See [Chapter 11: Operations](../11_operations/index.qmd) for more on lineage tracking.
+Only delete a version when both the API lineage check and the SQL dependency/access-history checks confirm zero remaining usage. See [Chapter 12: Operations](../12_operations/index.qmd) for more on lineage tracking.
 
 ### Getting the Latest Version and Creating the Next
 
@@ -1256,7 +1256,7 @@ ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE."USER_ORDER_FV$V01"
 
 For Feature Stores with many Feature Views, you can script this across an entire schema using the stored procedure examples in the [documentation](https://docs.snowflake.com/en/user-guide/sql-cortex-descriptions#examples). Generated descriptions significantly improve feature discoverability -- consumers searching the catalog can find features by what they represent, not just by column name.
 
-These approaches are complementary. A common pattern is to use **Contacts** for ownership and stewardship visible in Snowsight, **Tags** for lightweight governance queries and cost attribution, **Cortex descriptions** for human-readable feature documentation, a **metadata table** for operational dashboards and alerting, and a **YAML manifest** in Git for CI/CD-driven deployments. See [Chapter 11: Operations](../11_operations/index.qmd) for monitoring SLA compliance and auditing metadata at scale.
+These approaches are complementary. A common pattern is to use **Contacts** for ownership and stewardship visible in Snowsight, **Tags** for lightweight governance queries and cost attribution, **Cortex descriptions** for human-readable feature documentation, a **metadata table** for operational dashboards and alerting, and a **YAML manifest** in Git for CI/CD-driven deployments. See [Chapter 12: Operations](../12_operations/index.qmd) for monitoring SLA compliance and auditing metadata at scale.
 
 ---
 
@@ -1327,9 +1327,9 @@ When `generate_training_set` or `generate_dataset` joins Feature Views at **diff
 If denormalization is undesirable (e.g., the model expects one row per order), either:
 
 - Use a **spine at the parent grain** and only include parent-level Feature Views, or
-- Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children. For unbounded child sets, use `OBJECT_AGG`, `ARRAY_AGG`, or `LISTAGG` to pack child data into a single column, then process it at retrieval time in Python (e.g., extract the last-N values or compute further aggregations over the array). See [Chapter 12: Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for the OBJECT packing pattern.
+- Create a **pivot Feature View** that widens child data into columns (e.g., `LINE_1_PRICE`, `LINE_2_PRICE`) -- though this is only practical with a bounded number of children. For unbounded child sets, use `OBJECT_AGG`, `ARRAY_AGG`, or `LISTAGG` to pack child data into a single column, then process it at retrieval time in Python (e.g., extract the last-N values or compute further aggregations over the array). See [Chapter 13: Wide & Sparse Feature Data](../13_advanced_patterns/index.qmd#sec-wide-sparse) for the OBJECT packing pattern.
 
-See [Chapter 3: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design.
+See [Chapter 3: Modeling at a Different Grain](../03_entities_hierarchies/index.qmd#sec-cross-grain) for entity design considerations and [Chapter 11: Training & Inference](../11_training_inference/index.qmd) for multi-entity spine design.
 
 ---
 
@@ -1352,7 +1352,7 @@ When many Feature Views share the same entity (common in large deployments -- 50
 - **Use short `.with_name()` prefixes** per domain (e.g., `"ord"`, `"sess"`, `"eng"`) for more concise column names.
 - **Embed the domain prefix in the `.alias()` call** on each `Feature` definition (e.g., `Feature.count("ORDER_ID", "7d").alias("ORD_ORDER_ID_CNT_7D")`).
 
-The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardizing before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 10: Feature Column Prefixing](../10_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
+The choice affects downstream model code, feature importance reporting, and monitoring dashboards -- so it is worth standardizing before the Feature View count grows large. See [Chapter 7: Prefixing](../07_aggregations_api/index.qmd#sec-prefixing) and [Chapter 11: Feature Column Prefixing](../11_training_inference/index.qmd#sec-training-prefixing) for detailed patterns.
 :::
 
 ### 2. Consolidate Feature Views from the Same Source {.unnumbered}

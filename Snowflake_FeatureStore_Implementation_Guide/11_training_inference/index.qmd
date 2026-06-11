@@ -15,12 +15,12 @@ After completing this chapter, you will be able to:
 
 - Design effective spines for training and inference
 - Choose between `generate_dataset()` and `generate_training_set()` for your workload
-- Generate training data with point-in-time correctness
+- Generate training data with point-in-time correctness, including Real-Time Feature Views via `generate_training_set()`
 - Apply feature column prefixing for disambiguation
 - Integrate with Snowflake Model Registry using open-source or Snowflake ML estimators
 - Implement batch inference workflows, including Dynamic Table (DT)-based continuous scoring
 
-> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/10_training_inference/_code)
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/11_training_inference/_code)
 
 ---
 
@@ -175,6 +175,102 @@ If the spine is **coarser** than the Feature View (e.g., spine at order level, F
 
 ---
 
+## Real-Time Feature Views in training datasets {#sec-rtfv-training}
+
+Real-Time Feature Views (RTFVs) have **no offline materialized table**. When you include an RTFV in `generate_training_set()` or `generate_dataset()`, the Feature Store:
+
+1. Joins each **upstream** Feature View from its **offline table** using the same ASOF semantics as batch features (`spine_timestamp_col`)
+2. Projects **RequestSource** columns from the training spine
+3. Evaluates the registered **`compute_fn`** in the warehouse (`map_in_pandas`)
+4. Merges RTFV output columns back onto the spine by a synthetic row id (so duplicate entity keys with different request context remain distinct)
+
+This is the training/serving parity mechanism: **one `compute_fn` definition**, validated at registration, rehydrated at both dataset generation and online read. See [Chapter 9: RTFV training and serving parity](../09_real_time_online_serving/index.qmd#sec-rtfv-training-parity).
+
+### Spine contract for RTFVs
+
+The spine must include:
+
+| Required on spine | Purpose |
+|-------------------|---------|
+| Entity join keys declared on the RTFV | Upstream joins and output alignment |
+| Every `RequestSource` column | Inputs to `compute_fn` (for example `DATE_OF_BIRTH`, `REFERENCE_TS`, `amount`) |
+| `spine_timestamp_col` | ASOF joins to upstream offline Feature Views (when they have `timestamp_col`) |
+
+```python
+from snowflake.ml.feature_store import FeatureView, OnlineConfig, OnlineStoreType
+from snowflake.ml.feature_store.realtime_config import RealtimeConfig
+from snowflake.ml.feature_store.request_source import RequestSource
+from snowflake.snowpark.types import (
+    StructType, StructField, StringType, DoubleType, TimestampType, TimestampTimeZone,
+)
+import pandas as pd
+
+def customer_age(request_df: pd.DataFrame, profile_df: pd.DataFrame) -> pd.DataFrame:
+    ref = pd.to_datetime(request_df["REFERENCE_TS"])
+    dob = pd.to_datetime(request_df["DATE_OF_BIRTH"])
+    return pd.DataFrame({"CUSTOMER_AGE": (ref - dob).dt.days / 365.25})
+
+request_source = RequestSource(
+    schema=StructType([
+        StructField("USER_ID", StringType()),
+        StructField("DATE_OF_BIRTH", StringType()),
+        StructField("REFERENCE_TS", TimestampType(TimestampTimeZone.NTZ)),
+    ]),
+)
+
+age_rtfv = FeatureView(
+    name="USER_CUSTOMER_AGE",
+    entities=[user_entity],
+    realtime_config=RealtimeConfig(
+        compute_fn=customer_age,
+        sources=[request_source, user_profile_fv],
+        output_schema=StructType([StructField("CUSTOMER_AGE", DoubleType())]),
+    ),
+    online_config=OnlineConfig(enable=True, store_type=OnlineStoreType.POSTGRES),
+)
+fs.register_feature_view(age_rtfv, version="V01")
+
+training_spine = session.sql("""
+    SELECT
+        USER_ID,
+        DATE_OF_BIRTH,
+        EVENT_TS AS REFERENCE_TS,
+        EVENT_TS,
+        IS_CONVERTED AS LABEL
+    FROM FEATURE_STORE_DEMO.CLICKSTREAM_DATA.LABELS
+""")
+
+training_df = fs.generate_training_set(
+    spine_df=training_spine,
+    features=[user_order_fv, age_rtfv],
+    spine_timestamp_col="EVENT_TS",
+)
+```
+
+At inference, pass the same RequestSource fields with serving-appropriate values (for example `REFERENCE_TS` = request time).
+
+### Label timestamp vs ASOF-matched timestamps
+
+`spine_timestamp_col` is the **ASOF cutoff** for upstream batch and stream Feature Views. It is not automatically passed into `compute_fn` unless you copy it (or another time column) onto RequestSource.
+
+| Derivation needs | Pattern |
+|------------------|---------|
+| Feature value **as of the label event** (age at conversion, score using label-time request amount) | Put the label/event time on RequestSource (for example `REFERENCE_TS = EVENT_TS`) |
+| Gap between label time and **when an upstream feature was last valid** (days since last order) | `include_feature_view_timestamp_col=True` for batch/stream FVs, or include the upstream timestamp column in an RTFV upstream slice |
+| Tiled windowed aggregates ending at label time | `spine_timestamp_col` drives tile reassembly; optional `include_feature_view_timestamp_col` for freshness QA ([Chapter 6](../06_temporal_features/index.qmd), [Chapter 7](../07_aggregations_api/index.qmd)) |
+
+RTFV `compute_fn` only sees RequestSource columns plus upstream **feature columns** you declare in `RealtimeConfig.sources`. If the derivation needs an upstream's ASOF-matched timestamp, add that column to the upstream slice.
+
+### Mixing RTFVs with batch and stream Feature Views
+
+`generate_training_set()` partitions the `features` list into direct (batch/stream) refs and RTFV refs, processes each RTFV's `compute_fn` path, and merges all columns onto the final frame. Upstream Feature Views referenced inside an RTFV must already be **registered** with Postgres online serving, even though training reads their **offline** tables.
+
+::: {.callout-warning title="No offline RTFV history"}
+Stream Feature Views historize transformed events to Snowflake for training. RTFVs do not. Logical train/serve parity comes from the shared `compute_fn`. For production **as-served** audit trails, log inference outputs separately ([Chapter 8](../08_online_features/index.qmd#sec-historization)).
+:::
+
+---
+
 ## Feature Column Prefixing {#sec-training-prefixing}
 
 When joining multiple Feature Views, column name collisions can occur.
@@ -224,7 +320,7 @@ training_df = fs.generate_training_set(
 
 ## Model Registry integration
 
-Use **open-source libraries** (scikit-learn, XGBoost, LightGBM, etc.) when your training data fits in memory, or **`snowflake.ml.modeling`** estimators when you need distributed fitting inside the warehouse. Both produce a trained object you can log with **`Registry.log_model()`**. See [Chapter 9: Preprocessing -- Pipeline Classes](../09_preprocessing/index.qmd#pipeline-classes-scikit-learn-vs-snowflake-ml) for guidance on choosing between the two.
+Use **open-source libraries** (scikit-learn, XGBoost, LightGBM, etc.) when your training data fits in memory, or **`snowflake.ml.modeling`** estimators when you need distributed fitting inside the warehouse. Both produce a trained object you can log with **`Registry.log_model()`**. See [Chapter 10: Preprocessing -- Pipeline Classes](../10_preprocessing/index.qmd#pipeline-classes-scikit-learn-vs-snowflake-ml) for guidance on choosing between the two.
 
 > 📁 **Full code:** [`_code/model_registry.py`](_code/model_registry.py)
 
@@ -736,7 +832,7 @@ When ASOF join support lands in Dynamic Tables (stretch goal), the combination w
 4. A downstream scoring DT (using Model Registry's `MODEL()!PREDICT()`) incrementally scores new entities
 5. The entire retrain → evaluate → promote → score pipeline operates continuously with no manual orchestration
 
-This is one of the most compelling future-state patterns for Feature Store. See [Chapter 12: Advanced Patterns](../12_advanced_patterns/index.qmd) for discussion of Iceberg table integration patterns.
+This is one of the most compelling future-state patterns for Feature Store. See [Chapter 13: Advanced Patterns](../13_advanced_patterns/index.qmd) for discussion of Iceberg table integration patterns.
 :::
 
 ---
@@ -850,4 +946,4 @@ assert training_df.count() > 1000
 
 ## Next steps
 
-Continue to [Chapter 11: Operations](../11_operations/index.qmd) to learn about monitoring, data quality, and operational management.
+Continue to [Chapter 12: Operations](../12_operations/index.qmd) to learn about monitoring, data quality, and operational management.

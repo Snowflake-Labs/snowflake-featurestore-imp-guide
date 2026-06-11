@@ -32,12 +32,13 @@ The Snowflake Feature Store is a managed data management layer that helps ML tea
 | [**05**](../05_feature_pipelines/index.qmd) | Feature Pipelines | dbt, Dynamic Tables, Temporal API pipelines |
 | [**06**](../06_temporal_features/index.qmd) | Temporal Features | Point-in-time correctness, tiling, aggregations |
 | [**07**](../07_aggregations_api/index.qmd) | Aggregations API | `Feature` class, windows, rollups |
-| [**08**](../08_online_features/index.qmd) | Online Features | Online Feature Tables, serving patterns |
-| [**09**](../09_preprocessing/index.qmd) | Preprocessing | Encoding, scaling, model-dependent transforms |
-| [**10**](../10_training_inference/index.qmd) | Training & Inference | Spine design, dataset generation |
-| [**11**](../11_operations/index.qmd) | Operations | Monitoring, DMFs, lineage, drift detection |
-| [**12**](../12_advanced_patterns/index.qmd) | Advanced Patterns | Streaming Feature Views, multi-FS operations |
-| [**13**](../13_migration_guide/index.qmd) | Migration Guide | Tecton, SageMaker, Vertex AI migration paths |
+| [**08**](../08_online_features/index.qmd) | Online Features | Online feature model; Hybrid Table backend (GA); batch sync |
+| [**09**](../09_real_time_online_serving/index.qmd) | Real-Time & Online Serving | Postgres backend; batch sync, Stream FVs, RTFVs, Feature Groups |
+| [**10**](../10_preprocessing/index.qmd) | Preprocessing | Encoding, scaling, model-dependent transforms |
+| [**11**](../11_training_inference/index.qmd) | Training & Inference | Spine design, dataset generation |
+| [**12**](../12_operations/index.qmd) | Operations | Monitoring, DMFs, lineage, drift detection |
+| [**13**](../13_advanced_patterns/index.qmd) | Advanced Patterns | CI/CD, streaming workarounds, multi-FS operations |
+| [**14**](../14_migration_guide/index.qmd) | Migration Guide | Tecton, SageMaker, Vertex AI migration paths |
 
 ## Prerequisites
 
@@ -338,6 +339,9 @@ Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from config
 |--------------|---------|
 | **DT** | Dynamic Table |
 | **FV** | Feature View |
+| **GA** | Generally Available (production-ready; no preview enrollment required) |
+| **PubPr** | Public Preview (preview enrollment may be required; APIs and performance may change) |
+| **PrivPr** | Private Preview (limited availability; account enablement required) |
 | **OFT** | Online Feature Table |
 | **PIT** | Point-in-Time |
 | **MIT** | Model-Independent Transformation |
@@ -346,7 +350,7 @@ Values such as `SOURCE_DATABASE` and `FS_NAME` are typically sourced from config
 | **SCD** | Slowly Changing Dimension |
 | **RBAC** | Role-Based Access Control |
 
-Each abbreviation is expanded on first use in every chapter. After that, the short form is used for readability.
+Each abbreviation is expanded on first use in every chapter. After that, the short form is used for readability. Release-status labels (**GA**, **PubPr**, **PrivPr**) appear frequently in platform capability tables and online-serving chapters.
 
 ### Feature Naming Conventions {#sec-naming-conventions}
 

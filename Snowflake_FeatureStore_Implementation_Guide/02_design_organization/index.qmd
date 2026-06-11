@@ -180,7 +180,7 @@ flowchart TD
 ::: {.callout-tip}
 ## Cross-store discovery via Snowsight
 
-Even with multiple Feature Stores, the Snowsight Feature Store UI (**AI & ML → Features**) lets users switch between any tagged Feature Store schema via the dropdown and browse Feature Views, Entities, and lineage without writing code. This assists with the "cross-domain discovery" issue — teams can explore what exists across stores before creating new features. See [Chapter 11: Snowsight Feature Store UI](../11_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough.
+Even with multiple Feature Stores, the Snowsight Feature Store UI (**AI & ML → Features**) lets users switch between any tagged Feature Store schema via the dropdown and browse Feature Views, Entities, and lineage without writing code. This assists with the "cross-domain discovery" issue — teams can explore what exists across stores before creating new features. See [Chapter 12: Snowsight Feature Store UI](../12_operations/index.qmd#sec-snowsight-ui) for a visual walkthrough.
 :::
 
 ### Hybrid: Shared + Domain-Specific
@@ -475,7 +475,7 @@ GRANT SELECT ON DYNAMIC TABLE {{ env }}_FEATURE_STORE.FEATURE_STORE.USER_PURCHAS
 Deploy with environment-specific parameters: `USING (env => 'PROD', source_schema => 'CLICKSTREAM_DATA', target_lag => '1 hour')`. The same definition file produces identical objects across DEV, TEST, and PROD — only the parameterised values change.
 
 ::: {.callout-important title="Two-layer management: physical + logical"}
-DCM manages the **physical layer** — Dynamic Tables, Views, Tags, grants, warehouses. The **logical layer** — Entities as named constructs, Feature View metadata (descriptions, version labels, entity associations) — still requires the Feature Store Python SDK or manual TAG application via SQL (see [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd)). In practice this means a DCM project handles object creation and promotion, while a lightweight deployment script (or CI step) calls `fs.register_feature_view()` or applies the TAG JSON to complete the logical registration. See [Chapter 12: Reconciling Desired vs Actual State](../12_advanced_patterns/index.qmd#sec-reconciliation) for patterns that bridge this gap.
+DCM manages the **physical layer** — Dynamic Tables, Views, Tags, grants, warehouses. The **logical layer** — Entities as named constructs, Feature View metadata (descriptions, version labels, entity associations) — still requires the Feature Store Python SDK or manual TAG application via SQL (see [Appendix D: Tag Convention](../appendices/D_tag_convention/index.qmd)). In practice this means a DCM project handles object creation and promotion, while a lightweight deployment script (or CI step) calls `fs.register_feature_view()` or applies the TAG JSON to complete the logical registration. See [Chapter 13: Reconciling Desired vs Actual State](../13_advanced_patterns/index.qmd#sec-reconciliation) for patterns that bridge this gap.
 :::
 
 ::: {.callout-note}
@@ -555,7 +555,7 @@ This is not yet exposed through the Feature Store Python API's `FeatureView` con
 
 **Problem**: Multiple teams create similar features independently.
 
-**Solution**: Implement a shared Feature Store for common entities. Require feature review before creation. Use [feature discovery tools](../11_operations/index.qmd) to search existing features before creating new ones.
+**Solution**: Implement a shared Feature Store for common entities. Require feature review before creation. Use [feature discovery tools](../12_operations/index.qmd) to search existing features before creating new ones.
 
 ### ❌ Pitfall 3: No Promotion Process
 

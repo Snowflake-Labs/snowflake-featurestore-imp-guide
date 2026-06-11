@@ -14,7 +14,7 @@ The `Feature` class and tiled aggregation API require **`snowflake-ml-python >= 
 
 Official API documentation on the Snowflake docs portal may be limited at time of reading. For the authoritative parameter reference, use `help(Feature)` in a Python session or inspect the SDK source. API names and signatures may evolve in future releases.
 
-See also the [platform capabilities and preview status table](../12_advanced_patterns/index.qmd#platform-capabilities-and-preview-status-march-2026) in Chapter 12.
+See also the [platform capabilities and preview status table](../13_advanced_patterns/index.qmd#platform-capabilities-and-preview-status-march-2026) in Chapter 12.
 :::
 
 ## Learning Objectives
@@ -1094,7 +1094,7 @@ This is particularly valuable when the factory generates dozens of columns — c
 - **Feature exploration** — `OBJECT_KEYS(all_features)` lists what was generated
 - **Selective retrieval** — extract specific features with `all_features:"AUTOMATED_ORDER_ID_COUNT_7D"` path syntax
 
-**Two-tier Feature View pattern:** Combine this with a lightweight View-based Feature View that repackages the flat columns from a tiled DT-backed Feature View into structured OBJECTs. The tiled FV handles efficient incremental computation; the View FV provides the structured consumption interface. See [Chapter 12: Wide & Sparse Feature Data](../12_advanced_patterns/index.qmd#sec-wide-sparse) for the full two-tier architecture.
+**Two-tier Feature View pattern:** Combine this with a lightweight View-based Feature View that repackages the flat columns from a tiled DT-backed Feature View into structured OBJECTs. The tiled FV handles efficient incremental computation; the View FV provides the structured consumption interface. See [Chapter 13: Wide & Sparse Feature Data](../13_advanced_patterns/index.qmd#sec-wide-sparse) for the full two-tier architecture.
 
 ::: {.callout-note}
 `OBJECT_CONSTRUCT` operates at the **consumption layer** — downstream queries and serving. The `Feature` class still requires flat scalar columns as inputs during definition. The naming convention from the factory is what bridges the two: structured names at definition time enable wildcard grouping at consumption time.
@@ -1316,8 +1316,8 @@ For short-to-medium windows (e.g., 7–30 days), the scoped data volume is small
 The **recommended pattern** is to use both: the Aggregations API for offline computation (efficient tiled storage) and the `online_fv_from_tiled()` helper for online serving (scoped, bounded FULL refresh). If your widest feature window exceeds 90 days, benchmark the DT refresh time and cost before committing to a 1-minute `refresh_freq` — a longer refresh cycle (e.g., 5–15 minutes) may be more appropriate for wide windows.
 :::
 
-::: {.callout-tip title="Postgres Online Store (Private Preview)"}
-The upcoming **Postgres-backed online store** (`OnlineStoreType.POSTGRES`) is designed to handle tiled Feature Views natively. It performs **query-time tile reassembly** to return correct window-aggregated values directly. Once this backend reaches General Availability, it will eliminate the need for the materialized workaround. See [Chapter 8: Online Features](../08_online_features/index.qmd) for online store configuration details.
+::: {.callout-tip title="Postgres Online Store (PubPr)"}
+The **Postgres-backed online store** (`OnlineStoreType.POSTGRES`) handles tiled Feature Views with **query-time tile reassembly**. See [Chapter 9: Real-Time and Online Serving](../09_real_time_online_serving/index.qmd#sec-batch-postgres).
 :::
 
 ---

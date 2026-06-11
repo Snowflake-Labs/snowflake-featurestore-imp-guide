@@ -48,11 +48,11 @@ This guide provides practical guidance for implementing Snowflake Feature Store 
 | [06](./06_temporal_features/) | Temporal Features | Point-in-time correctness, late data, backfill |
 | [07](./07_aggregations_api/) | Aggregations API | Feature class, tiled aggregations, rollups |
 | [08](./08_online_features/) | Online Features | Online Feature Tables, low-latency serving |
-| [09](./09_preprocessing/) | Preprocessing | Transformations, encoding, scaling |
-| [10](./10_training_inference/) | Training & Inference | Dataset generation, Model Registry integration |
-| [11](./11_operations/) | Operations & Monitoring | DMFs, refresh monitoring, cost management |
-| [12](./12_advanced_patterns/) | Advanced Patterns | CI/CD, testing, streaming, multi-region |
-| [13](./13_migration_guide/) | Migration Guide | Migrating from Tecton, SageMaker, Vertex AI |
+| [09](./10_preprocessing/) | Preprocessing | Transformations, encoding, scaling |
+| [10](./11_training_inference/) | Training & Inference | Dataset generation, Model Registry integration |
+| [11](./12_operations/) | Operations & Monitoring | DMFs, refresh monitoring, cost management |
+| [12](./13_advanced_patterns/) | Advanced Patterns | CI/CD, testing, streaming, multi-region |
+| [13](./14_migration_guide/) | Migration Guide | Migrating from Tecton, SageMaker, Vertex AI |
 
 ### Appendices
 

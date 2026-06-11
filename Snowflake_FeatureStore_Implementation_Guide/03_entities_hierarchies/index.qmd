@@ -395,7 +395,7 @@ order_lineitem_agg_fv = FeatureView(
 )
 ```
 
-When the spine carries keys from **multiple levels** of the hierarchy (e.g., `ORDER_ID`, `CUSTOMER_ID`, `NATION_ID`), `generate_training_set` performs LEFT JOINs against each Feature View on its entity keys. Higher-level features are **denormalized** (repeated) onto every child row. See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for multi-entity spine design patterns.
+When the spine carries keys from **multiple levels** of the hierarchy (e.g., `ORDER_ID`, `CUSTOMER_ID`, `NATION_ID`), `generate_training_set` performs LEFT JOINs against each Feature View on its entity keys. Higher-level features are **denormalized** (repeated) onto every child row. See [Chapter 11: Training & Inference](../11_training_inference/index.qmd) for multi-entity spine design patterns.
 
 ---
 
@@ -514,7 +514,7 @@ forecast_spine = session.sql("""
 """)
 ```
 
-See [Chapter 10: Training & Inference](../10_training_inference/index.qmd) for spine design patterns, including multi-horizon forecasting spines.
+See [Chapter 11: Training & Inference](../11_training_inference/index.qmd) for spine design patterns, including multi-horizon forecasting spines.
 
 ---
 

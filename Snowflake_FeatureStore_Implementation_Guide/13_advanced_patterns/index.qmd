@@ -21,21 +21,23 @@ After completing this chapter, you will be able to:
 - Apply hybrid storage, two-tier Feature View architecture, and Dynamic Table (DT) cascades to manage wide and sparse feature data at scale
 - Use `OBJECT_CONSTRUCT` and semi-structured types for embeddings, JSON features, and column-count reduction
 
-> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/12_advanced_patterns/_code)
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/13_advanced_patterns/_code)
 
 ---
 
 ## Platform capabilities and preview status (April 2026)
 
-Several Feature Store capabilities are at different stages of the release lifecycle. Always confirm in [Snowflake release notes](https://docs.snowflake.com/en/release-notes/new-features) and your account’s feature bundle before planning production work.
+Several Feature Store capabilities are at different stages of the release lifecycle. Status abbreviations **GA**, **PubPr**, and **PrivPr** are defined in [Abbreviations](../00_introduction/index.qmd#sec-abbreviations). Always confirm in [Snowflake release notes](https://docs.snowflake.com/en/release-notes/new-features) and your account’s feature bundle before planning production work.
 
 | Capability | Status | Notes |
 |------------|--------|-------|
 | **RollupConfig** (hierarchical aggregations) | Verify availability | API names may evolve. |
 | **Time-windowed Aggregation** (`Feature` class, tiling) | Available via `snowflake-ml-python >= 1.24.0` | Client-side SDK feature — no account enablement needed. Generates standard SQL under the hood. Official docs may be limited; use `help(Feature)`. See [Chapter 7](../07_aggregations_api/index.qmd). |
-| **Streaming Feature Views** | Private Preview (`snowflake-ml-python >= 1.36`) | Postgres-backed online store, dual-write kappa path, 2–3s E2E freshness. Account enablement required. See internal chapter for details. |
-| **Postgres Online Store** (batch FVs) | Private Preview (`snowflake-ml-python >= 1.36`) | Drop-in replacement for Hybrid Table OFT with <20ms p50 reads. Account enablement required. |
-| **REST Ingest / Query API** | Private Preview | HTTP endpoints for streaming ingestion and online feature retrieval. Bundled with Postgres online store. |
+| **Postgres Online Store** (batch FVs) | PubPr (`snowflake-ml-python >= 1.36`) | Drop-in replacement for Hybrid Table OFT; ~10ms p50 reads. See [Chapter 9](../09_real_time_online_serving/index.qmd). |
+| **Streaming Feature Views** | PubPr (`snowflake-ml-python >= 1.36`) | Postgres-backed online store, dual-write kappa path, <2s E2E freshness. See [Chapter 9](../09_real_time_online_serving/index.qmd). |
+| **Real-Time Feature Views** | PubPr (`snowflake-ml-python >= 1.36`) | `RealtimeConfig` + `RequestSource` + `compute_fn` at read time. See [Chapter 9](../09_real_time_online_serving/index.qmd). |
+| **REST Ingest / Query API** | PubPr | HTTP endpoints for streaming ingestion and online feature retrieval. Bundled with Postgres online store. |
+| **SnowCLI Feature Store plan/apply** | PrivPr | Declarative `snow fs plan` / `snow fs apply` for Feature Store objects. See [CI/CD](#sec-reconciliation) below. |
 
 ::: {.callout-note}
 These callouts are **not** removed when features graduate—timelines shift. Re-check Snowflake documentation before committing architecture.
@@ -43,13 +45,17 @@ These callouts are **not** removed when features graduate—timelines shift. Re-
 
 ---
 
-## Streaming Feature Views (roadmap and workarounds)
+## Streaming Feature Views (workarounds and fallbacks)
 
 > 📁 **Full code:** [`_code/streaming_patterns.py`](_code/streaming_patterns.py)
 
-### Current state
+::: {.callout-note}
+**Native streaming is documented in [Chapter 9](../09_real_time_online_serving/index.qmd).** Stream Feature Views, Postgres batch online serving, and Real-Time Feature Views are in PubPr. This section retains **pre-preview workarounds** for accounts that have not enrolled or need patterns outside preview scope.
+:::
 
-Many ML use cases (fraud scoring, session personalization, real-time recommendations) need features computed over data that is **seconds or minutes old**, not hours. Native Streaming Feature Views are the platform's long-term answer, but may not yet be enabled in every account and region.
+### When to use workarounds
+
+Many ML use cases (fraud scoring, session personalization, real-time recommendations) need features computed over data that is **seconds or minutes old**, not hours. Prefer native Stream Feature Views when preview is available; use the patterns below when it is not.
 
 Until your account is explicitly enabled, plan on **workarounds** that approximate low latency:
 
@@ -279,7 +285,7 @@ Each deployment creates its own DTs and materialises data independently — suit
 | Secure Data Sharing | 0 (provider refreshes) | 0 (no copy) | Always current | Cross-account, read-only |
 
 ::: {.callout-tip title="Discovery and RBAC for shared features"}
-Consumers need `USAGE` on the provider's database and schema plus `SELECT` on the shared objects. Use the [Feature Catalog View](../11_operations/index.qmd#sec-feature-catalog) or `TAG_REFERENCES_ALL_COLUMNS` to discover features across schemas. See [Chapter 2: RBAC](../02_design_organization/index.qmd#sec-rbac) for the recommended role hierarchy that supports cross-schema grants.
+Consumers need `USAGE` on the provider's database and schema plus `SELECT` on the shared objects. Use the [Feature Catalog View](../12_operations/index.qmd#sec-feature-catalog) or `TAG_REFERENCES_ALL_COLUMNS` to discover features across schemas. See [Chapter 2: RBAC](../02_design_organization/index.qmd#sec-rbac) for the recommended role hierarchy that supports cross-schema grants.
 :::
 
 ---
@@ -355,7 +361,7 @@ fs.register_feature_view(feature_view=iceberg_output_fv, version="V01")
 | **Iceberg as source** | View (no `refresh_freq`) | External tools write features to Iceberg; Feature Store wraps them for retrieval |
 | **Iceberg as output** | Dynamic Iceberg Table (`refresh_freq` required) | Feature Store computes features; external tools read them from Iceberg |
 
-The Iceberg-as-output pattern is particularly valuable for teams that train models outside Snowflake (Databricks, SageMaker, custom Kubernetes jobs) -- they can read feature data via standard Iceberg catalog integration without the Snowflake SDK. For a full discussion of Iceberg-backed Feature Views in training workflows, including limitations and the future automated training pipeline vision, see [Chapter 10: Iceberg-Backed Feature Views](../10_training_inference/index.qmd#sec-iceberg-fv).
+The Iceberg-as-output pattern is particularly valuable for teams that train models outside Snowflake (Databricks, SageMaker, custom Kubernetes jobs) -- they can read feature data via standard Iceberg catalog integration without the Snowflake SDK. For a full discussion of Iceberg-backed Feature Views in training workflows, including limitations and the future automated training pipeline vision, see [Chapter 11: Iceberg-Backed Feature Views](../11_training_inference/index.qmd#sec-iceberg-fv).
 
 ---
 
@@ -478,7 +484,15 @@ Run this before every deployment to catch drift early. In CI, a non-empty `missi
 | **Hybrid** | Append-only in PROD; full-redeploy in DEV/TEST | Most teams — balances safety with iteration speed |
 
 ::: {.callout-note title="Emerging tooling"}
-The Snowflake ecosystem is actively evolving in this space. **Snowflake CLI** (`snow object create`, `snow object describe`) provides imperative object management. The **Snowflake Terraform provider** can declare DTs and TAGs. **DCM Projects** handle plan/deploy for supported objects. None of these currently understand Feature Store Entities or Feature Views as first-class constructs — but the TAG-based registration approach (see [Appendix D](../appendices/D_tag_convention/index.qmd)) means any tool that can create a DT and apply TAGs can produce a valid Feature View. Watch for future SDK enhancements that may add a native `fs.plan()` / `fs.apply()` workflow.
+The Snowflake ecosystem is actively evolving in this space. **Snowflake CLI** (`snow object create`, `snow object describe`) provides imperative object management. The **Snowflake Terraform provider** can declare DTs and TAGs. **DCM Projects** handle plan/deploy for supported objects. None of these currently understand Feature Store Entities or Feature Views as first-class constructs — but the TAG-based registration approach (see [Appendix D](../appendices/D_tag_convention/index.qmd)) means any tool that can create a DT and apply TAGs can produce a valid Feature View.
+:::
+
+::: {.callout-important title="SnowCLI Feature Store plan/apply (PrivPr)"}
+**Snowflake CLI** is adding declarative Feature Store workflows: `snow fs plan` compares desired state (YAML or project definitions) against live Feature Store metadata and surfaces a diff; `snow fs apply` deploys the planned changes. This is the closest native equivalent to `fs.plan()` / `fs.apply()` at the **logical** Feature Store layer — complementing DCM for physical objects.
+
+- Enroll through your account team; API names and object coverage may change during PrivPr
+- Use alongside the reconciliation script in this section until plan/apply supports your full object set (Entities, batch/stream/RT FVs, Feature Groups, online service)
+- Stream and Real-Time Feature View deployment patterns are covered in [Chapter 9](../09_real_time_online_serving/index.qmd); **CI/CD automation** belongs here and in [Chapter 12: Operations](../12_operations/index.qmd), not in the serving chapter
 :::
 
 ### Recommended Repository Layout {#sec-repo-layout}
@@ -561,7 +575,7 @@ Extend this pattern with **spot checks** on known entities and times (golden spi
 ### 3. Schema validation {.unnumbered}
 Before or after `register_feature_view`, assert that outputs match an **expected schema**: column set, types, and (where your contracts require it) order. Options include:
 
-- `DESCRIBE TABLE` or `DESCRIBE VIEW` on the underlying object (see [Chapter 11](../11_operations/index.qmd) for how to identify the object type), compared to a checked-in manifest
+- `DESCRIBE TABLE` or `DESCRIBE VIEW` on the underlying object (see [Chapter 11](../12_operations/index.qmd) for how to identify the object type), compared to a checked-in manifest
 - Queries against `INFORMATION_SCHEMA.COLUMNS` for `FEATURE_STORE_DEMO.FEATURE_STORE`
 - API metadata from `fs.get_feature_view(name="USER_ORDER_FV", version="V01")` where available
 
@@ -1342,7 +1356,7 @@ This "expand at the last moment" principle minimises transfer costs and memory u
 | **Ignoring sparsity when values are zeros** | Standard wide tables store zeros explicitly; at 90% sparsity, 90% of storage is wasted | Use `NULLIF(col, 0)` before `OBJECT_CONSTRUCT` to convert zeros to NULLs; reconstitute via `COALESCE(..., 0)` in the expansion View |
 
 ::: {.callout-note title="Further reading"}
-See also [Chapter 9: Preprocessing -- Pre-Encoding Categoricals](../09_preprocessing/index.qmd) for OBJECT-column strategies specific to one-hot encoded features, and [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation Layer Model which complements the two-tier approach.
+See also [Chapter 10: Preprocessing -- Pre-Encoding Categoricals](../10_preprocessing/index.qmd) for OBJECT-column strategies specific to one-hot encoded features, and [Chapter 4: Feature Views](../04_feature_views/index.qmd#sec-base-presentation) for the Base + Presentation Layer Model which complements the two-tier approach.
 :::
 
 ---
@@ -1353,7 +1367,7 @@ At large scale (50+ Feature Views, billions of spine rows, thousands of features
 
 ### Batched Joins
 
-SDK version 1.32+ automatically batches Feature View joins into groups of ~10, producing intermediate results before a final merge. This resolved OOM failures seen at 75+ Feature Views and ~2 billion spine rows. See [Chapter 10: Dataset Generation at Scale](../10_training_inference/index.qmd#sec-scale) for manual batching code when upgrading the SDK is not immediately possible.
+SDK version 1.32+ automatically batches Feature View joins into groups of ~10, producing intermediate results before a final merge. This resolved OOM failures seen at 75+ Feature Views and ~2 billion spine rows. See [Chapter 11: Dataset Generation at Scale](../11_training_inference/index.qmd#sec-scale) for manual batching code when upgrading the SDK is not immediately possible.
 
 ### Warehouse Selection: Standard vs Snowpark Optimized
 
@@ -1385,9 +1399,9 @@ At extreme scale (100+ Feature Views, 2,000+ features), Snowflake's query compil
 
 When batched joins alone are insufficient, two architectural patterns can help:
 
-1. **VARIANT column encoding** -- encapsulate each Feature View's features into a single OBJECT column, reducing the SQL expression count to one per Feature View rather than one per feature. This reduces a 2,000-feature compilation from ~25 minutes to ~4 seconds in benchmarks. See [Chapter 10: The Wide Resultset Problem](../10_training_inference/index.qmd#sec-wide-resultset) for trade-offs.
+1. **VARIANT column encoding** -- encapsulate each Feature View's features into a single OBJECT column, reducing the SQL expression count to one per Feature View rather than one per feature. This reduces a 2,000-feature compilation from ~25 minutes to ~4 seconds in benchmarks. See [Chapter 11: The Wide Resultset Problem](../11_training_inference/index.qmd#sec-wide-resultset) for trade-offs.
 
-2. **Parquet/Iceberg output** -- bypass `to_pandas()` entirely by writing training data to Parquet files on a stage or to a Snowflake-managed Iceberg table. At 4XL warehouse scale, 1B rows writes in ~4 minutes and 12B rows in ~35 minutes. The output is natively readable by Ray, Spark, and PyTorch DataLoader. See [Chapter 10: Parquet and Iceberg Output](../10_training_inference/index.qmd#sec-parquet-output).
+2. **Parquet/Iceberg output** -- bypass `to_pandas()` entirely by writing training data to Parquet files on a stage or to a Snowflake-managed Iceberg table. At 4XL warehouse scale, 1B rows writes in ~4 minutes and 12B rows in ~35 minutes. The output is natively readable by Ray, Spark, and PyTorch DataLoader. See [Chapter 11: Parquet and Iceberg Output](../11_training_inference/index.qmd#sec-parquet-output).
 
 ::: {.callout-note}
 These patterns are most relevant for customers with 500+ features. For most deployments, the SDK batched join strategy and standard Gen2 warehouse sizing are sufficient.
@@ -1422,7 +1436,7 @@ features:
       - ltv_model
 ```
 
-Combine this with the `FeatureView.lineage()` API and SQL lineage queries described in [Chapter 11: Operations](../11_operations/index.qmd).
+Combine this with the `FeatureView.lineage()` API and SQL lineage queries described in [Chapter 12: Operations](../12_operations/index.qmd).
 
 ### 3. Automate testing in CI {.unnumbered}
 Run **pytest** (unit + PIT + schema contracts) on every change to feature definitions; gate deploys on green builds. See the **Testing strategies** section above for the minimum test categories.
@@ -1453,7 +1467,7 @@ Run **pytest** (unit + PIT + schema contracts) on every change to feature defini
 
 **Problem**: A Dynamic Table Feature View that should be refreshing incrementally is instead performing **full refresh** every cycle, causing unexpectedly high compute costs. This often goes unnoticed until the bill arrives.
 
-**Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 4](../04_feature_views/index.qmd), [Chapter 5](../05_feature_pipelines/index.qmd), and [Chapter 11](../11_operations/index.qmd) for detailed guidance and workarounds.
+**Solution**: After registering any DT-backed Feature View, check `REFRESH_MODE` in `INFORMATION_SCHEMA.DYNAMIC_TABLES()`. The most common cause of unexpected full refresh is **aggregations on `FLOAT`-typed columns combined with a JOIN** in the same query block. The DT engine cannot guarantee incremental correctness for floating-point aggregate diffs across joins. Cast to fixed-point (`NUMBER(38, 6)`) before aggregating, or split into a base DT + View layer. See [Chapter 4](../04_feature_views/index.qmd), [Chapter 5](../05_feature_pipelines/index.qmd), and [Chapter 11](../12_operations/index.qmd) for detailed guidance and workarounds.
 
 Even when a DT cannot avoid full refresh, **downstream DTs can still process incrementally** if the full-refresh DT has a system-derived unique key (e.g., from `GROUP BY` or `QUALIFY ROW_NUMBER() = 1`). Set `REFRESH_MODE = INCREMENTAL` on the downstream DT via SQL. Similarly, source tables refreshed via INSERT OVERWRITE can enable incremental downstream processing by declaring a `RELY` primary key. These are SQL-level capabilities not yet in the Feature Store Python API -- see [Chapter 5](../05_feature_pipelines/index.qmd) for the full pattern and [Understanding primary keys in dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/input-data-optimization).
 
@@ -1479,4 +1493,4 @@ Even when a DT cannot avoid full refresh, **downstream DTs can still process inc
 
 ## Next steps
 
-Continue to [Chapter 13: Migration Guide](../13_migration_guide/index.qmd) for guidance on migrating from other Feature Store platforms.
+Continue to [Chapter 14: Migration Guide](../14_migration_guide/index.qmd) for guidance on migrating from other Feature Store platforms.

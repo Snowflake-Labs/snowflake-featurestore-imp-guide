@@ -225,7 +225,7 @@ LIMIT 10;
 Not all feature logic can be expressed in pure SQL. Python UDFs, UDTFs, and UDAFs let you embed custom Python (including Pandas, NumPy, or scikit-learn) directly in a Feature View's `feature_df`, with the transform running inside the Dynamic Table refresh.
 
 ::: {.callout-tip title="Model-generic vs model-specific transforms"}
-Feature Views should contain **model-generic** transforms — logic that is useful across multiple models and consumers (e.g. text normalisation, geo-hashing, z-scoring within a partition). **Model-specific** preprocessing (scaling, encoding, target transformations) belongs in the model pipeline so that each model can apply its own scheme. See [Chapter 9: Preprocessing](../09_preprocessing/index.qmd) for model-dependent patterns using sklearn and Snowflake ML pipelines.
+Feature Views should contain **model-generic** transforms — logic that is useful across multiple models and consumers (e.g. text normalisation, geo-hashing, z-scoring within a partition). **Model-specific** preprocessing (scaling, encoding, target transformations) belongs in the model pipeline so that each model can apply its own scheme. See [Chapter 10: Preprocessing](../10_preprocessing/index.qmd) for model-dependent patterns using sklearn and Snowflake ML pipelines.
 :::
 
 **Options at a glance:**
@@ -1017,7 +1017,7 @@ CREATE ALERT feature_staleness_alert
     CALL SYSTEM$SEND_EMAIL('ml-alerts@company.com', 'Stale Features', 'Alert');
 ```
 
-See [Chapter 11: Operations](../11_operations/index.qmd) for comprehensive monitoring patterns including refresh history dashboards, data quality checks, and Streamlit-based observability.
+See [Chapter 12: Operations](../12_operations/index.qmd) for comprehensive monitoring patterns including refresh history dashboards, data quality checks, and Streamlit-based observability.
 
 ---
 
@@ -1217,7 +1217,7 @@ See also: [Chapter 6: Data Leakage from Partial Intervals](../06_temporal_featur
 **Solution**: Use `SELECT *` DTs for pass-through Feature Views only when column additions are coordinated across source and consumer teams, and consumers are written to tolerate dynamic schemas. If you need an explicit gate before new columns reach consumers:
 
 - Use an explicit column list in the DT query (`SELECT USER_ID, COL_A, COL_B FROM base_table`) — new base-table columns will not appear until you update the DT definition.
-- Or use the OBJECT-bundled approach ([Chapter 12: `#sec-select-star-vs-object`](../12_advanced_patterns/index.qmd#sec-select-star-vs-object)), where the upstream VIEW definition controls exactly which features enter the bundle.
+- Or use the OBJECT-bundled approach ([Chapter 13: `#sec-select-star-vs-object`](../13_advanced_patterns/index.qmd#sec-select-star-vs-object)), where the upstream VIEW definition controls exactly which features enter the bundle.
 
 Pre-existing rows in the DT will be **fully recomputed** from source for the new column (not NULL-filled), as the INCREMENTAL refresh action triggers a full row-level delete + re-insert. The compute cost is equivalent to a full refresh. Use `IMMUTABLE WHERE` if you need to protect historical rows from this recompute, in which case those protected rows will receive `NULL` for the new column. See [Chapter 4: Incremental Column Pickup with SELECT *](../04_feature_views/index.qmd#sec-select-star-evolution) for full details.
 

@@ -1,11 +1,28 @@
 ---
 title: "Online Features"
-subtitle: "Online Feature Tables for real-time serving"
+subtitle: "Hybrid Table online serving and the online feature model"
 ---
 
 ## Overview
 
-Online Feature Tables (OFTs) enable low-latency feature serving for real-time ML inference. Snowflake treats an OFT as a **first-class object**: internally, it combines a **Hybrid Table** for key-value lookups with **incremental refresh** driven by a **Stream** on the offline Feature View source and a **Task** that runs **MERGE** SQL into the Hybrid Table on a schedule controlled by **TARGET_LAG**.
+**Online Feature Tables (OFTs)** are first-class Feature Store objects that expose the **latest feature values** per entity for low-latency inference. Every OFT has a logical contract (`online_config`, entity keys, feature columns) and a **physical online backend** where values are stored and read.
+
+Snowflake supports **two online backends**:
+
+| Backend | `OnlineStoreType` | Status | This chapter |
+|---------|-------------------|--------|--------------|
+| **Hybrid Table** | `HYBRID_TABLE` (default) | GA | **Primary focus** — architecture, tuning, pitfalls |
+| **Managed Postgres** | `POSTGRES` | PubPr | [Chapter 9](../09_real_time_online_serving/index.qmd) — provisioning, Stream/RT FVs, Feature Groups |
+
+**This chapter** covers the **GA Hybrid Table** backend. When you register a Feature View with `online_config` (default `store_type=HYBRID_TABLE`), the Feature Store API creates a single **Online Feature Table** Snowflake object. Snowflake **encapsulates and manages** the underlying infrastructure — the Hybrid Table for point lookups, the Stream on the offline Feature View, and the Task that MERGEs on `target_lag`. You do not create or wire those objects yourself.
+
+At a logical level the data flow is: offline Dynamic Table or View → Snowflake Stream (change capture) → Task (MERGE on `target_lag`) → Hybrid Table. Physically, that pipeline is **owned by the OFT object** — lifecycle, grants, and drop semantics are tied to the OFT, not to separately managed Stream/Task DDL.
+
+The **Postgres backend** ([Chapter 9](../09_real_time_online_serving/index.qmd)) uses the same `CREATE ONLINE FEATURE TABLE` catalog object for batch sync, but provisioning, physical storage, and reads work differently — see [Postgres vs Hybrid managed object model](../09_real_time_online_serving/index.qmd#sec-postgres-object-model).
+
+::: {.callout-warning title="Terminology: two different “streams”"}
+A **Snowflake Stream** on the offline Feature View drives Hybrid/Postgres **batch sync** (this chapter). A **Stream Feature View** is a separate object that ingests live events via `stream_ingest()` into the Postgres store ([Chapter 9](../09_real_time_online_serving/index.qmd)). The names are similar; the write paths are not.
+:::
 
 This chapter uses the **clickstream** sample model: database `FEATURE_STORE_DEMO`, source schema `CLICKSTREAM_DATA` (for example `ORDERS`, `USERS`, `SESSIONS`), Feature Store schema `FEATURE_STORE`, warehouse `FS_DEV_WH`. Feature View registrations use version strings in **`V01` format** (for example `version="V01"`).
 
@@ -15,7 +32,9 @@ Official references: [CREATE ONLINE FEATURE TABLE](https://docs.snowflake.com/en
 
 After completing this chapter, you will be able to:
 
-- Explain how Stream, Task, Hybrid Table, and TARGET_LAG fit together in the OFT architecture
+- Distinguish Hybrid vs Postgres online backends and which write paths each supports
+- Explain that a Hybrid OFT encapsulates Stream, Task, and Hybrid Table — the API creates and manages them as one object
+- Explain how Stream, Task, Hybrid Table, and TARGET_LAG fit together in the batch sync architecture
 - Enable online serving with `online_config` on a Feature View
 - Tune `target_lag` and reason about storage and compute costs
 - Handle multi-Feature-View online reads via pre-joined Feature Views or parallel retrieval
@@ -28,9 +47,37 @@ After completing this chapter, you will be able to:
 
 ---
 
-## What is an Online Feature Table?
+## Online backends and write paths {#sec-serving-paths}
 
-An Online Feature Table is a managed object that exposes the **current (latest) values** per entity for low-latency retrieval. Physically, online serving uses a **Hybrid Table** keyed by your entity columns. Freshness from the **offline** Feature View (Dynamic Table or View) is maintained by:
+Use this matrix as the canonical map. **Batch → online sync** works on **both** backends. **Stream Feature Views**, **Real-Time Feature Views**, and **Feature Groups** require the **Postgres** backend and `create_online_service()` ([Chapter 9](../09_real_time_online_serving/index.qmd)).
+
+| Write path | Hybrid Table | Postgres | Notes |
+|------------|:------------:|:--------:|-------|
+| **Batch offline → online sync** | ✅ GA | ✅ PubPr | Same Snowflake-side sync *concept*; Hybrid stores in Hybrid Table, Postgres stores in managed Postgres via online service |
+| **Stream ingest** (`stream_ingest` / REST) | ❌ | ✅ PubPr | Stream Feature Views only; online-first, async offline historization |
+| **Request-time compute** (`compute_fn`) | ❌ | ✅ PubPr | Real-Time Feature Views only; no offline materialization |
+| **Feature Groups** (multi-FV online bundle) | ❌ | ✅ PubPr | Postgres online table with compound primary key |
+
+**When to stay on Hybrid (this chapter):** GA production, no preview enrollment, minute-level freshness is acceptable, existing OFT operations and warehouse-based reads.
+
+**When to use Postgres ([Chapter 9](../09_real_time_online_serving/index.qmd)):** sub-~20 ms reads, tiled FVs without `online_fv_from_tiled()` workaround, Stream or Real-Time Feature Views, Feature Groups, or REST ingest/query from outside Snowflake warehouses.
+
+---
+
+## What is a Hybrid Table Online Feature Table? {#sec-hybrid-oft-model}
+
+A Hybrid Table OFT is a **first-class Snowflake database object** (`CREATE ONLINE FEATURE TABLE`). From your perspective you register a Feature View with `online_config`; the Feature Store issues the OFT DDL, applies Feature Store tags for lineage, and Snowflake provisions the backing components **as a managed unit**:
+
+| Component | Role | You manage directly? |
+|-----------|------|----------------------|
+| **Online Feature Table** (catalog object) | Logical online serving object; Feature Store metadata anchor | No — created via `register_feature_view` |
+| **Hybrid Table** | Row store for latest feature values per entity key | No — created and altered by the OFT |
+| **Stream** on offline FV | Captures inserts/updates/deletes from the offline Dynamic Table or View | No — created and associated by the OFT |
+| **Task** | Runs MERGE on schedule derived from `target_lag` | No — created and scheduled by the OFT |
+
+You tune behavior through **`OnlineConfig`** (`target_lag`, enable/disable online serving) and Feature View lifecycle (`register_feature_view`, version bumps, delete). You do **not** hand-author Stream, Task, or Hybrid Table DDL for standard Hybrid OFTs, and you should not drop those underlying objects independently — drop or replace the OFT through the Feature Store API so dependencies stay consistent.
+
+The OFT exposes **current (latest) values** per entity for low-latency retrieval. Freshness from the **offline** Feature View is maintained by:
 
 1. A **Stream** on that offline object, capturing new and changed rows.
 2. A **Task** that runs on an interval derived from **TARGET_LAG** (minimum **10 seconds**, maximum **8 days**).
@@ -133,7 +180,7 @@ fv = FeatureView(
 fv = fs.register_feature_view(feature_view=fv, version="V01")
 ```
 
-Snowflake creates and wires the OFT infrastructure (Hybrid Table, Stream, Task) as part of serving enablement; **TARGET_LAG** in SQL corresponds to **`OnlineConfig.target_lag`** in Python.
+Snowflake creates and wires the OFT infrastructure (Hybrid Table, Stream, Task) as part of serving enablement — **one API call, one managed object**; **TARGET_LAG** in SQL corresponds to **`OnlineConfig.target_lag`** in Python.
 
 ::: {.callout-note}
 **Initial OFT population**: When online serving is first enabled the OFT must be **fully populated** -- one row per entity key present in the source table. This initial load may take noticeably longer than subsequent refreshes, especially for large entity cardinalities. Once the initial population completes, incremental refreshes process only changed rows and should be fast, though throughput still depends on the update frequency and rate of feature-value changes in the source.
@@ -440,7 +487,7 @@ The features a model receives at inference time are subject to **cumulative lag*
 
 If the source data pipeline itself has variable execution times (e.g., an ETL that sometimes finishes at 2 AM and sometimes at 6 AM), the effective staleness is even less predictable. A model trained on **point-in-time-perfect** features -- where the ASOF join retrieves the exact feature values available at each event -- may never have seen feature values with this degree of staleness during training. At inference time, the model receives features that are minutes to hours behind reality, creating a **training-serving skew** (a distribution shift) that can degrade prediction accuracy.
 
-This applies equally to **batch inference**. A DT-based scoring pipeline (see [Chapter 10: Continuous Batch Inference](../10_training_inference/index.qmd#sec-continuous-batch)) reads from upstream Feature Views that have their own refresh lag, compounded by the scoring DT's own `target_lag`. A Stream/Task/Stored Procedure pattern has the same issue: the Task schedule determines how often scoring runs, but the features it reads may already be stale by the time the Task fires.
+This applies equally to **batch inference**. A DT-based scoring pipeline (see [Chapter 11: Continuous Batch Inference](../11_training_inference/index.qmd#sec-continuous-batch)) reads from upstream Feature Views that have their own refresh lag, compounded by the scoring DT's own `target_lag`. A Stream/Task/Stored Procedure pattern has the same issue: the Task schedule determines how often scoring runs, but the features it reads may already be stale by the time the Task fires.
 
 ::: {.callout-important}
 ## Account for realistic lag during training
@@ -480,7 +527,7 @@ If OFT read latency is **volatile** (e.g., 100-400 ms swings) after warm-up, inv
 | **Warehouse type** | Snowpark-optimized warehouses can show higher variance for point lookups. Switch to a **Standard** warehouse. |
 | **Warehouse suspension** | If the warehouse auto-suspends between requests, the next query incurs resume latency. Set `AUTO_SUSPEND` high enough (or disable suspension) for latency-sensitive serving. |
 | **Connection pooling** | Creating a new Snowflake session per request adds significant overhead. Reuse sessions / connection pools in your serving application. |
-| **Row width** | Very wide rows (hundreds of columns) increase per-read data transfer. Use `feature_names` to request only the columns needed, or consider the bundled OBJECT pattern ([Ch12](../12_advanced_patterns/index.qmd)). |
+| **Row width** | Very wide rows (hundreds of columns) increase per-read data transfer. Use `feature_names` to request only the columns needed, or consider the bundled OBJECT pattern ([Ch13](../13_advanced_patterns/index.qmd)). |
 | **Network jitter** | Cross-region or on-premises clients see variable network latency. Co-locate clients with the Snowflake account region. |
 
 ### Performance Checklist
@@ -551,7 +598,25 @@ For features like "count of transactions in the last N seconds," this pipeline i
 
 ### External serving store pattern {#sec-external-serving}
 
-Some use cases have **sub-20 ms read latency** or **sub-second feature freshness** requirements that exceed what Hybrid Table-backed OFTs deliver. When native OFT performance does not meet the SLA, teams sometimes replicate features to an **external key-value store** (e.g., Redis, SingleStore, DynamoDB, Aerospike) for serving.
+Some use cases have **sub-20 ms read latency** or **sub-second feature freshness** requirements that exceed what **Hybrid Table** OFTs deliver today.
+
+::: {.callout-important title="Try native Postgres before an external store"}
+**Default escalation path:** Hybrid (this chapter) → **Postgres online** ([Chapter 9](../09_real_time_online_serving/index.qmd)) → external store only if a native path still cannot meet the SLA.
+
+Postgres online is in **active development**. Read latency and ingest freshness targets quoted in PubPr (for example ~10 ms p50 reads, sub-2s stream ingest) reflect **current** service performance — not a fixed ceiling. Snowflake is continuing to enhance the managed Postgres online stack (serving path, scale, and Stream/RT Feature View capabilities). Benchmark in your account, but avoid committing to a multi-year external-store architecture based solely on today's preview numbers.
+
+**What Postgres gives you without self-managed infra:**
+
+- **Batch + Postgres** — same offline→online sync model as Hybrid; lower read latency on existing batch pipelines
+- **Stream Feature Views** — sub-second ingest freshness with built-in offline historization
+- **Real-Time Feature Views** — request-time `compute_fn` with training parity via `generate_training_set()`
+
+**When external stores still make sense:** a mandated KV engine (Redis/Dynamo at the edge), multi-cloud serving outside Snowflake's network, or requirements Postgres online does not yet support in your region/account.
+:::
+
+An **external key-value store** (Redis, SingleStore, DynamoDB, Aerospike, etc.) can beat native read latency in some deployments — but **you own the full operational burden**: CDC or sync pipelines, schema evolution, monitoring, incident response, capacity planning, security patching, and historization back to Snowflake for training. That trade is often underestimated when Hybrid latency is the only gap; Postgres online may close the gap without that overhead.
+
+When native Snowflake serving (Hybrid **or** Postgres) still does not meet the SLA after evaluation, teams replicate features to an external store for serving.
 
 **Pattern**: Keep the Feature Store as the **system of record** for feature definitions, lineage, and offline retrieval. Use a CDC (change data capture) or scheduled sync tool to replicate the OFT or offline Feature View to the external store:
 
@@ -567,22 +632,24 @@ flowchart TD
 
 **Trade-offs:**
 
-| Factor | OFT (native) | External store |
-|--------|-------------|---------------|
-| **Read latency** | 10–100 ms (warm, standard WH) | 1–20 ms (depending on store) |
-| **Feature freshness** | DT refresh + OFT sync (seconds to minutes) | As fast as the write pipeline (sub-second possible) |
-| **Operational overhead** | Fully managed by Snowflake | CDC pipeline to maintain: column/type mapping, schema evolution, monitoring |
-| **Data consistency** | Single source of truth | Eventual consistency with sync delay |
-| **Cost** | Warehouse credits (serving + refresh) | External store infrastructure + sync tool licensing |
-| **Schema changes** | Handled via FV versioning | Require manual pipeline updates; breaking changes risk sync failures |
+| Factor | Hybrid OFT (GA) | Postgres online (PubPr) | External store |
+|--------|-----------------|----------------------|----------------|
+| **Read latency (today)** | 10–100 ms warm | ~10 ms p50 (preview targets; improving) | Often 1–20 ms (you tune and operate the stack) |
+| **Feature freshness** | DT refresh + `target_lag` (seconds–minutes) | Batch: same; Stream FV: sub-second ingest | As fast as your write pipeline (sub-second possible) |
+| **Operational overhead** | Fully managed by Snowflake | Fully managed by Snowflake (+ PAT, network policy) | **You manage** CDC, sync jobs, schema mapping, HA, monitoring, upgrades |
+| **Feature Store integration** | Native OFT, lineage, training APIs | SFV/RTFV/Feature Groups + training APIs | Definitions in FS; serving values duplicated — historization is on you |
+| **Performance trajectory** | Mature GA path | **Actively enhanced** — preview latency is not the end state | Fixed by your infra choices; no Snowflake roadmap benefit |
+| **Schema changes** | FV versioning | FV versioning | Manual pipeline updates; breaking changes risk sync failures |
 
 ### Hybrid architecture for sub-second features {#sec-hybrid-architecture}
 
-When a subset of features genuinely needs sub-second freshness (fraud signals, real-time engagement scores) while others are slow-changing (demographics, 7d/30d aggregates), a **hybrid architecture** avoids over-engineering the entire pipeline:
+When a subset of features genuinely needs sub-second freshness (fraud signals, real-time engagement scores) while others are slow-changing (demographics, 7d/30d aggregates), a **split serving architecture** avoids over-engineering the entire pipeline:
 
-- **Snowflake Feature Store** for batch / slow-changing features (the majority of the feature vector)
-- **External real-time layer** (SingleStore, Redis, Kafka Streams, Flink state store, or the Streaming Feature Views described in the next chapter) for the sub-second features
-- **Inference service** assembles features from both sources at prediction time
+- **Snowflake Feature Store (Hybrid or Postgres batch)** for slow-changing features — the majority of the feature vector
+- **Native Postgres stream path first** — [Stream Feature Views](../09_real_time_online_serving/index.qmd) for sub-second features with offline historization and Feature Store lineage
+- **External real-time layer only if needed** — SingleStore, Redis, Kafka/Flink state, etc., when native Postgres stream serving still misses the SLA *and* you accept the self-managed cost
+
+The inference service assembles features from both sources at prediction time. Prefer two native Snowflake backends (Hybrid batch + Postgres stream) over Snowflake + external unless operations capacity and long-term maintenance are explicitly budgeted.
 
 ```{mermaid}
 %%| fig-cap: "Hybrid serving: batch features from Snowflake, real-time features from external store"
@@ -615,7 +682,7 @@ If a customer uses an external online store for sub-second features, they must c
 | **Accept approximate PIT** for sub-second features | No additional infrastructure | Training data may not perfectly match serving behavior; acceptable when sub-second features have limited historical sensitivity |
 
 ::: {.callout-tip}
-Snowflake is actively developing **Streaming Feature Views** with a Postgres-backed online store that provides 2–3 second end-to-end freshness with built-in offline historization. This native capability addresses much of the motivation for external stores. Before committing to a complex hybrid architecture, evaluate whether Streaming Feature Views (Private Preview) meet your freshness requirements. See the [Streaming Feature Views chapter](../08a_streaming_feature_views/index.qmd) for details (internal / NDA-only).
+Snowflake **Stream Feature Views** (PubPr) provide a Postgres-backed online store with sub-2 second end-to-end freshness and built-in offline historization. Before committing to a complex external-store architecture, evaluate whether native streaming or batch + Postgres serving in [Chapter 9](../09_real_time_online_serving/index.qmd) meets your freshness requirements.
 :::
 ---
 
@@ -686,7 +753,7 @@ The SDK does not validate this in advance.
 
 2. **Manual non-tiled FV**: Write your own `GROUP BY` query with `CASE WHEN` per-feature window filters if you need to customise beyond what the helper generates.
 
-3. **Postgres online store** (Private Preview): The upcoming `OnlineStoreType.POSTGRES` backend performs query-time tile reassembly natively, eliminating the need for workarounds.
+3. **Postgres online store** (PubPr): `OnlineStoreType.POSTGRES` performs query-time tile reassembly natively. See [Chapter 9](../09_real_time_online_serving/index.qmd).
 
 ```{python}
 #| eval: false
@@ -709,7 +776,8 @@ See [Chapter 7: Tiled Feature Views and Online Serving](../07_aggregations_api/i
 
 | Concept | Description |
 |---------|-------------|
-| **Online Feature Table** | First-class object: Hybrid Table + Stream on offline FV + Task (MERGE), driven by **TARGET_LAG** |
+| **Online Feature Table (Hybrid)** | First-class Snowflake object encapsulating Hybrid Table + Stream + Task + **TARGET_LAG**; API creates and manages underlying objects |
+| **Postgres backend** | Shared online service + per-FV `FROM SPECIFICATION` OFTs; serving in managed Postgres — see [Chapter 9](../09_real_time_online_serving/index.qmd#sec-postgres-object-model) |
 | **`OnlineConfig.target_lag`** | Python knob for maximum lag of online table behind source (10s–8d); Task frequency |
 | **`refresh_freq`** (Feature View) | Offline Dynamic Table refresh; independent of `target_lag` |
 | **`read_feature_view(..., StoreType.ONLINE)`** | Low-latency retrieval of latest values; currently single-FV per call |
@@ -727,4 +795,4 @@ See [Chapter 7: Tiled Feature Views and Online Serving](../07_aggregations_api/i
 
 ## Next Steps
 
-Continue to [Chapter 9: Preprocessing](../09_preprocessing/index.qmd) to learn about model-dependent transformations and preprocessing patterns.
+Continue to [Chapter 9: Real-Time and Online Serving](../09_real_time_online_serving/index.qmd) for the **Postgres online backend** (batch + Postgres, Stream FVs, RTFVs, Feature Groups). Shared concepts in this chapter — `target_lag`, freshness vs latency, multi-FV reads — apply to both backends where the write path is batch sync.

@@ -197,7 +197,7 @@ flowchart LR
 
 ---
 
-## Derived features and point-in-time correctness
+## Derived features and point-in-time correctness {#sec-derived-features}
 
 `timestamp_col` is used for the **ASOF join** to pick the correct historical row. It is **not** automatically available inside `feature_df` as the spine’s prediction time. If you need values such as “tenure as of the spine date” or “age as of `EVENT_TS`”, you cannot, in general, compute them only from columns in the Feature View definition using the spine timestamp—there is no placeholder for the spine time in `feature_df`.
 

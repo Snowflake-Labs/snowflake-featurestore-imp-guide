@@ -20,7 +20,7 @@ After completing this chapter, you will be able to:
 - Discover and search existing features to avoid duplication
 - Troubleshoot common issues
 
-> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/11_operations/_code)
+> 📂 **Chapter code:** [Browse companion scripts on GitHub](https://github.com/Snowflake-Labs/snowflake-featurestore-imp-guide/tree/main/Snowflake_FeatureStore_Implementation_Guide/12_operations/_code)
 
 ```{python}
 #| output: false
@@ -556,7 +556,7 @@ WHERE DATA_TYPE = 'NUMBER' AND OBJECT_TYPE = 'FEATURE_VIEW';
 ```
 
 ::: {.callout-tip title="Cross-schema catalog for multi-FS setups"}
-For organisations with multiple Feature Store schemas, create a union view that spans schemas. Either generate it dynamically with a Stored Procedure that iterates over `TAG_REFERENCES_ALL_COLUMNS` per schema, or maintain a static `UNION ALL` across known schemas. See [Chapter 12: Multi-Feature Store operations](../12_advanced_patterns/index.qmd#sec-sharing-patterns) for cross-FS discovery patterns.
+For organisations with multiple Feature Store schemas, create a union view that spans schemas. Either generate it dynamically with a Stored Procedure that iterates over `TAG_REFERENCES_ALL_COLUMNS` per schema, or maintain a static `UNION ALL` across known schemas. See [Chapter 13: Multi-Feature Store operations](../13_advanced_patterns/index.qmd#sec-sharing-patterns) for cross-FS discovery patterns.
 :::
 
 ::: {.callout-note title="Product feedback opportunity"}
@@ -902,7 +902,7 @@ snowflake-ml-python==1.34.0  # pin to exact version
 snowflake-snowpark-python==1.48.1
 ```
 
-See [Chapter 12: CI/CD for Feature Store](../12_advanced_patterns/index.qmd) for deployment pipeline patterns that enforce version consistency.
+See [Chapter 13: CI/CD for Feature Store](../13_advanced_patterns/index.qmd) for deployment pipeline patterns that enforce version consistency.
 
 ---
 
@@ -955,4 +955,4 @@ See [Chapter 12: CI/CD for Feature Store](../12_advanced_patterns/index.qmd) for
 
 ## Next Steps
 
-Continue to [Chapter 12: Advanced Patterns](../12_advanced_patterns/index.qmd) to learn about streaming, multi-Feature Store, and CI/CD patterns.
+Continue to [Chapter 13: Advanced Patterns](../13_advanced_patterns/index.qmd) to learn about streaming, multi-Feature Store, and CI/CD patterns.

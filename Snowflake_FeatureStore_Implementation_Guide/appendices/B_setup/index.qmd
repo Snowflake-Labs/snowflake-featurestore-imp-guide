@@ -352,7 +352,7 @@ Using Snowflake CLI with `CREATE OR ALTER`:
 snow sql -q "CREATE OR ALTER DYNAMIC TABLE FEATURE_STORE_DEMO.FEATURE_STORE.USER_FEATURES ..."
 ```
 
-See [Chapter 12: Advanced Patterns](../../12_advanced_patterns/index.qmd) for detailed CI/CD patterns.
+See [Chapter 13: Advanced Patterns](../../13_advanced_patterns/index.qmd) for detailed CI/CD patterns.
 
 ## Troubleshooting
 

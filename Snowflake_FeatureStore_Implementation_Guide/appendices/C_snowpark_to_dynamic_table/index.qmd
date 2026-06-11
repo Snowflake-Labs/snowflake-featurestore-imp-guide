@@ -110,7 +110,7 @@ This is often preferable when teams already have well-tested SQL transformations
 > **Key takeaway:** Python is a development-time convenience. At runtime, the Dynamic Table refreshes by re-executing the generated SQL with no Python involvement. Whether you author with Snowpark DataFrames or raw SQL via `session.sql()`, the end result is the same.
 
 ::: {.callout-tip title="Dynamic Iceberg Tables (SDK 1.26+)"}
-When a Feature View includes a `StorageConfig` with `StorageFormat.ICEBERG`, the registration creates a **Dynamic Iceberg Table** instead of a standard Dynamic Table. The translation path above is identical -- the only difference is that the materialized output is written as Parquet files in Iceberg format on external cloud storage rather than in Snowflake's internal format. All optimization strategies and limitations described in this appendix apply equally to Dynamic Iceberg Tables. See [Chapter 10: Iceberg-Backed Feature Views](../../10_training_inference/index.qmd#sec-iceberg-fv) for details.
+When a Feature View includes a `StorageConfig` with `StorageFormat.ICEBERG`, the registration creates a **Dynamic Iceberg Table** instead of a standard Dynamic Table. The translation path above is identical -- the only difference is that the materialized output is written as Parquet files in Iceberg format on external cloud storage rather than in Snowflake's internal format. All optimization strategies and limitations described in this appendix apply equally to Dynamic Iceberg Tables. See [Chapter 11: Iceberg-Backed Feature Views](../../11_training_inference/index.qmd#sec-iceberg-fv) for details.
 :::
 
 ---
@@ -190,7 +190,7 @@ According to the Snowflake documentation, both UDFs and UDTFs **are supported fo
 **UDF caveats:**
 
 - The UDF must be declared **`IMMUTABLE`** (not `VOLATILE`). `VOLATILE` UDFs are not supported for incremental refresh.
-- **Replacing** an `IMMUTABLE` UDF via `CREATE OR REPLACE FUNCTION` while it is in use by an incremental-refresh DT will cause refresh failures. The DT must be recreated after replacing the UDF. **This does not apply to Model Registry** -- `MODEL(name)!PREDICT()` handles version rotation gracefully (the DT triggers a `REINITIALIZE` and resumes incremental mode). See [Chapter 10: UDF Immutability](../../10_training_inference/index.qmd#sec-udf-immutability) for the full comparison.
+- **Replacing** an `IMMUTABLE` UDF via `CREATE OR REPLACE FUNCTION` while it is in use by an incremental-refresh DT will cause refresh failures. The DT must be recreated after replacing the UDF. **This does not apply to Model Registry** -- `MODEL(name)!PREDICT()` handles version rotation gracefully (the DT triggers a `REINITIALIZE` and resumes incremental mode). See [Chapter 11: UDF Immutability](../../11_training_inference/index.qmd#sec-udf-immutability) for the full comparison.
 - UDFs that **import from an external stage** are not supported.
 - SQL UDFs that **contain subqueries** are not supported for incremental refresh.
 - **Vectorized UDFs** (processing Pandas DataFrames in batches) perform significantly better than scalar UDFs for large datasets.
@@ -267,7 +267,7 @@ churn_score_fv = FeatureView(
 This pattern is well-suited to use cases like propensity scoring, risk rating, or recommendation ranking where predictions need to stay fresh as features update, but a full re-score of the entire population each cycle would be wasteful.
 
 ::: {.callout-tip title="Scoring Feature Views — multi-FV and PIT-correct variants"}
-The example above covers single-FV scoring. For models that consume features from **multiple Feature Views**, or that require **point-in-time correct** inference, see [Chapter 10: Scoring Feature Views](../../10_training_inference/index.qmd#sec-scoring-fv) which covers the multi-FV pre-join pattern and orchestrated Task/Sproc alternative.
+The example above covers single-FV scoring. For models that consume features from **multiple Feature Views**, or that require **point-in-time correct** inference, see [Chapter 11: Scoring Feature Views](../../11_training_inference/index.qmd#sec-scoring-fv) which covers the multi-FV pre-join pattern and orchestrated Task/Sproc alternative.
 :::
 
 ### Constructs That Prevent Incremental Refresh Entirely
@@ -527,7 +527,7 @@ You can check whether a row is immutable via the `METADATA$IS_IMMUTABLE` pseudo-
 SELECT *, METADATA$IS_IMMUTABLE FROM USER_EVENT_FEATURES LIMIT 10;
 ```
 
-> **Note:** `IMMUTABLE WHERE` and `BACKFILL FROM` are Dynamic Table SQL features and are not currently exposed through the Feature Store Python API. Other SQL-only DT features -- `INITIALIZATION_WAREHOUSE`, `ROW_TIMESTAMP`, `DATA_RETENTION_TIME_IN_DAYS`, and `MAX_DATA_EXTENSION_TIME_IN_DAYS` -- are also valuable for Feature Store pipelines; see [Chapter 11: Dynamic Table SQL Features Beyond the API](../../11_operations/index.qmd#sec-dt-sql-features) for details. To use any of these with Feature Store, create the DT via SQL and wrap it as a view-based Feature View, or use `ALTER DYNAMIC TABLE` after the API creates the DT. Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store) for future API integration.
+> **Note:** `IMMUTABLE WHERE` and `BACKFILL FROM` are Dynamic Table SQL features and are not currently exposed through the Feature Store Python API. Other SQL-only DT features -- `INITIALIZATION_WAREHOUSE`, `ROW_TIMESTAMP`, `DATA_RETENTION_TIME_IN_DAYS`, and `MAX_DATA_EXTENSION_TIME_IN_DAYS` -- are also valuable for Feature Store pipelines; see [Chapter 12: Dynamic Table SQL Features Beyond the API](../../12_operations/index.qmd#sec-dt-sql-features) for details. To use any of these with Feature Store, create the DT via SQL and wrap it as a view-based Feature View, or use `ALTER DYNAMIC TABLE` after the API creates the DT. Check the [Feature Store release notes](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store) for future API integration.
 
 > **Reference:** [Use immutability constraints](https://docs.snowflake.com/en/user-guide/dynamic-tables-performance-optimize-immutability) | [Introducing Immutability for Dynamic Tables (engineering blog)](https://www.snowflake.com/en/engineering-blog/dynamic-tables-immutability/)
 
